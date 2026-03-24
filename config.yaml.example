@@ -1,0 +1,24 @@
+server:
+  port: 8080
+  mode: release  # debug | release
+
+database:
+  driver: sqlite  # sqlite | postgres
+  dsn: xray-pilot.db
+  # PostgreSQL 示例:
+  # driver: postgres
+  # dsn: "host=localhost user=postgres password=changeme dbname=xray_pilot port=5432 sslmode=disable"
+
+jwt:
+  secret: "change-me-use-a-long-random-string"  # 生产环境必须修改
+  expire: 24  # JWT 有效期（小时）
+
+crypto:
+  # AES-GCM 主密钥，用于加密节点 PrivateKey。
+  # 留空则首次启动时自动生成并打印到日志，建议将其复制回此处后重启。
+  # 也可通过环境变量覆盖：XRAY_PILOT_MASTER_KEY=<base64-key>
+  master_key: ""
+
+scheduler:
+  drift_check_interval: 300   # 漂移检测间隔（秒），0 表示禁用
+  health_check_interval: 120  # 健康检测间隔（秒），0 表示禁用

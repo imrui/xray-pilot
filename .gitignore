@@ -1,0 +1,50 @@
+# Binaries
+xray-pilot
+xray-pilot.exe
+*.exe
+*.out
+
+# Build cache
+/tmp/
+
+# Go build artifacts
+/vendor/
+
+# Test output
+*.test
+*.prof
+coverage.out
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Config (contains secrets)
+config.yaml
+*.env
+.env.*
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Claude Code local memory
+.claude/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
