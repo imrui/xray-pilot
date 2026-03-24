@@ -17,7 +17,7 @@ Self-hosted Xray proxy management for small teams. Push configs via SSH, auto-de
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Go 1.22+, Gin, GORM, Zap |
+| Backend | Go 1.26.1+, Gin, GORM, Zap |
 | Database | SQLite (default) / PostgreSQL |
 | Auth | JWT (Bearer token) + bcrypt |
 | Crypto | AES-GCM (private key at rest), SHA256 (config hash) |
@@ -26,7 +26,7 @@ Self-hosted Xray proxy management for small teams. Push configs via SSH, auto-de
 
 ## Quick Start
 
-**Prerequisites:** Go 1.22+, Node.js 20+
+**Prerequisites:** Go 1.26.1+, Node.js 24+
 
 ```bash
 # Clone
