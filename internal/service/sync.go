@@ -207,6 +207,11 @@ func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 
 func (s *SyncService) failNode(node *entity.Node, errMsg string, elapsedMs int64) {
 	_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusFailed, "")
+	zap.L().Error("节点同步失败",
+		zap.String("node", node.Name),
+		zap.Uint("id", node.ID),
+		zap.String("error", errMsg),
+	)
 	s.logRepo.Record(
 		"sync",
 		fmt.Sprintf("node:%s(%d)", node.Name, node.ID),

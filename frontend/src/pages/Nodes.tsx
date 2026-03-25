@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Wifi, ChevronDown, ChevronUp } from 'lucide-react'
 import { nodeApi } from '@/lib/api'
@@ -39,7 +39,18 @@ export default function Nodes() {
   const [modal, setModal] = useState<{ open: boolean; node?: Node }>({ open: false })
   const [form, setForm] = useState<FormState>(emptyForm())
   const [err, setErr] = useState('')
+  const [syncErr, setSyncErr] = useState('')
+  const [syncOk, setSyncOk] = useState('')
+  const syncOkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
+
+  // 成功提示 3 秒后自动消失
+  useEffect(() => {
+    if (!syncOk) return
+    if (syncOkTimer.current) clearTimeout(syncOkTimer.current)
+    syncOkTimer.current = setTimeout(() => setSyncOk(''), 3000)
+    return () => { if (syncOkTimer.current) clearTimeout(syncOkTimer.current) }
+  }, [syncOk])
 
   const { data, isLoading } = useQuery({
     queryKey: ['nodes', page],
@@ -63,10 +74,26 @@ export default function Nodes() {
   })
 
   const toggle = useMutation({ mutationFn: (id: number) => nodeApi.toggle(id), onSuccess: invalidate })
-  const remove = useMutation({ mutationFn: (id: number) => nodeApi.remove(id), onSuccess: invalidate })
-  const sync = useMutation({ mutationFn: (id: number) => nodeApi.sync(id), onSuccess: invalidate })
+  const remove = useMutation({
+    mutationFn: (id: number) => nodeApi.remove(id),
+    onSuccess: invalidate,
+    onError: (e: Error) => setSyncErr(e.message),
+  })
+  const sync = useMutation({
+    mutationFn: (id: number) => nodeApi.sync(id),
+    onSuccess: (res) => {
+      setSyncErr('')
+      setSyncOk(res.data.data?.message ?? '同步成功')
+      invalidate()
+    },
+    onError: (e: Error) => setSyncErr(e.message),
+  })
   const syncDrifted = useMutation({ mutationFn: () => nodeApi.syncDrifted(), onSuccess: invalidate })
-  const testSSH = useMutation({ mutationFn: (id: number) => nodeApi.testSSH(id), onSuccess: invalidate })
+  const testSSH = useMutation({
+    mutationFn: (id: number) => nodeApi.testSSH(id),
+    onSuccess: invalidate,
+    onError: (e: Error) => setSyncErr(e.message),
+  })
 
   const openCreate = () => { setForm(emptyForm()); setErr(''); setModal({ open: true }) }
   const openEdit = (n: Node) => {
@@ -122,15 +149,17 @@ export default function Nodes() {
           <button onClick={() => openEdit(n)} className="text-xs text-slate-500 hover:text-slate-900">编辑</button>
           <button
             onClick={() => sync.mutate(n.id)}
-            className="text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5"
+            disabled={sync.isPending && sync.variables === n.id}
+            className="text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-0.5 disabled:opacity-50"
           >
-            <RefreshCw className="h-3 w-3" />同步
+            <RefreshCw className={`h-3 w-3${sync.isPending && sync.variables === n.id ? ' animate-spin' : ''}`} />同步
           </button>
           <button
             onClick={() => testSSH.mutate(n.id)}
-            className="text-xs text-cyan-500 hover:text-cyan-700 flex items-center gap-0.5"
+            disabled={testSSH.isPending && testSSH.variables === n.id}
+            className="text-xs text-cyan-500 hover:text-cyan-700 flex items-center gap-0.5 disabled:opacity-50"
           >
-            <Wifi className="h-3 w-3" />SSH
+            <Wifi className={`h-3 w-3${testSSH.isPending && testSSH.variables === n.id ? ' animate-pulse' : ''}`} />SSH
           </button>
           <button
             onClick={() => toggle.mutate(n.id)}
@@ -167,6 +196,19 @@ export default function Nodes() {
           <Btn onClick={openCreate}>新增节点</Btn>
         </div>
       </div>
+
+      {syncOk && (
+        <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-2 rounded-lg flex items-center justify-between">
+          <span>{syncOk}</span>
+          <button onClick={() => setSyncOk('')} className="ml-3 text-green-400 hover:text-green-600 text-base leading-none">✕</button>
+        </div>
+      )}
+      {syncErr && (
+        <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-2 rounded-lg flex items-center justify-between">
+          <span>{syncErr}</span>
+          <button onClick={() => setSyncErr('')} className="ml-3 text-red-400 hover:text-red-600 text-base leading-none">✕</button>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">

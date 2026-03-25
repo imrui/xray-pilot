@@ -53,7 +53,7 @@ func main() {
 	// 5. 初始化路由
 	gin.SetMode(config.Global.Server.Mode)
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(gin.Logger(), gin.Recovery())
 	handler.RegisterRoutes(r)
 
 	// 6. 挂载前端静态文件（embed）

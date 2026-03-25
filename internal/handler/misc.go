@@ -51,6 +51,11 @@ func (h *SubscribeHandler) Subscribe(c *gin.Context) {
 		c.String(http.StatusNotFound, err.Error())
 		return
 	}
+	if content == "" {
+		// 订阅内容为空：用户未分组或分组内无可用节点/协议配置
+		c.String(http.StatusOK, "# xray-pilot: no active nodes in subscription")
+		return
+	}
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("Profile-Title", "xray-pilot")
 	c.String(http.StatusOK, content)
