@@ -1,25 +1,23 @@
 package handler
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/curve25519"
 
+	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/service"
-	xssh "github.com/imrui/xray-pilot/pkg/ssh"
+	"github.com/imrui/xray-pilot/internal/xray"
 	"github.com/imrui/xray-pilot/pkg/response"
 )
 
 type NodeHandler struct {
-	svc     *service.NodeService
-	syncSvc *service.SyncService
+	svc      *service.NodeService
+	syncSvc  *service.SyncService
 	nodeRepo *repository.NodeRepository
 }
 
@@ -56,6 +54,20 @@ func (h *NodeHandler) List(c *gin.Context) {
 	response.PageSuccess(c, total, nodes)
 }
 
+func (h *NodeHandler) Get(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的节点ID")
+		return
+	}
+	node, err := h.svc.GetByID(uint(id))
+	if err != nil {
+		response.Fail(c, 404, err.Error())
+		return
+	}
+	response.Success(c, node)
+}
+
 func (h *NodeHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -67,7 +79,7 @@ func (h *NodeHandler) Update(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	node, err := h.svc.UpdateNodeIP(uint(id), &req)
+	node, err := h.svc.Update(uint(id), &req)
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return
@@ -154,9 +166,9 @@ func (h *NodeHandler) SyncDrifted(c *gin.Context) {
 	})
 }
 
-// Keygen 生成 x25519 Reality 密钥对（纯 Go 实现，无需依赖 xray binary）
+// Keygen 生成 x25519 Reality 密钥对
 func (h *NodeHandler) Keygen(c *gin.Context) {
-	privateKey, publicKey, err := generateX25519KeyPair()
+	privateKey, publicKey, err := xray.GenerateX25519KeyPair()
 	if err != nil {
 		response.Fail(c, 500, fmt.Sprintf("生成密钥失败: %v", err))
 		return
@@ -179,44 +191,42 @@ func (h *NodeHandler) TestSSH(c *gin.Context) {
 		response.Fail(c, 404, "节点不存在")
 		return
 	}
+
 	sshPort := node.SSHPort
 	if sshPort == 0 {
-		sshPort = 22
+		sshPort = config.Global.SSH.DefaultPort
+		if sshPort == 0 {
+			sshPort = 22
+		}
 	}
 	sshUser := node.SSHUser
 	if sshUser == "" {
-		sshUser = "root"
+		sshUser = config.Global.SSH.DefaultUser
+		if sshUser == "" {
+			sshUser = "root"
+		}
 	}
-	latencyMs, err := xssh.TestConnectivity(xssh.Config{
+	keyPath := node.SSHKeyPath
+	if keyPath == "" {
+		keyPath = config.Global.SSH.DefaultKeyPath
+	}
+
+	latencyMs, ok, err := xray.CheckNodeHealth(xray.SSHParams{
 		Host:    node.IP,
 		Port:    sshPort,
 		User:    sshUser,
-		KeyPath: node.SSHKeyPath,
+		KeyPath: keyPath,
 	})
-	if err != nil {
-		response.Success(c, gin.H{"ok": false, "error": err.Error(), "latency_ms": 0})
+	if err != nil || !ok {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		response.Success(c, gin.H{"ok": false, "error": errMsg, "latency_ms": 0})
 		return
 	}
-	// 更新健康检测结果
+
 	_ = h.nodeRepo.UpdateLastCheck(node.ID, true, latencyMs)
 	response.Success(c, gin.H{"ok": true, "latency_ms": latencyMs})
 }
 
-// generateX25519KeyPair 生成 Xray Reality 使用的 x25519 密钥对（Base64 URL 编码）
-func generateX25519KeyPair() (privateKeyB64, publicKeyB64 string, err error) {
-	var privateKey [32]byte
-	if _, err = rand.Read(privateKey[:]); err != nil {
-		return
-	}
-	// x25519 密钥规范化（RFC 7748）
-	privateKey[0] &= 248
-	privateKey[31] &= 127
-	privateKey[31] |= 64
-
-	var publicKey [32]byte
-	curve25519.ScalarBaseMult(&publicKey, &privateKey)
-
-	privateKeyB64 = base64.RawURLEncoding.EncodeToString(privateKey[:])
-	publicKeyB64 = base64.RawURLEncoding.EncodeToString(publicKey[:])
-	return
-}

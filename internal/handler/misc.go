@@ -48,10 +48,9 @@ func (h *SubscribeHandler) Subscribe(c *gin.Context) {
 	token := c.Param("token")
 	content, err := h.svc.GenerateSubscription(token)
 	if err != nil {
-		c.String(http.StatusForbidden, err.Error())
+		c.String(http.StatusNotFound, err.Error())
 		return
 	}
-	// 标准订阅响应头，兼容 Clash / v2rayN / sing-box 等客户端
 	c.Header("Content-Type", "text/plain; charset=utf-8")
 	c.Header("Profile-Title", "xray-pilot")
 	c.String(http.StatusOK, content)
@@ -81,51 +80,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	response.Success(c, resp)
 }
 
-// ---- 首次初始化 ----
-
-type SetupHandler struct {
-	userSvc  *service.UserService
-	userRepo *repository.UserRepository
-}
-
-func NewSetupHandler() *SetupHandler {
-	return &SetupHandler{
-		userSvc:  service.NewUserService(),
-		userRepo: repository.NewUserRepository(),
-	}
-}
-
-// Setup 首次运行时创建管理员账号（仅当用户数为 0 时可用）
-func (h *SetupHandler) Setup(c *gin.Context) {
-	count, err := h.userRepo.Count()
-	if err != nil {
-		response.Fail(c, 500, "查询用户数失败: "+err.Error())
-		return
-	}
-	if count > 0 {
-		response.Fail(c, 403, "系统已初始化，禁止重复创建管理员")
-		return
-	}
-
-	var req dto.CreateUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, err.Error())
-		return
-	}
-
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	baseURL := scheme + "://" + c.Request.Host
-
-	user, err := h.userSvc.Create(&req, baseURL)
-	if err != nil {
-		response.Fail(c, 500, err.Error())
-		return
-	}
-	response.Success(c, user)
-}
+// ---- 系统配置 ----
 
 type SystemHandler struct{}
 

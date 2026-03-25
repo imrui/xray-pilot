@@ -9,14 +9,11 @@ func RegisterRoutes(r *gin.Engine) {
 	userH := NewUserHandler()
 	groupH := NewGroupHandler()
 	nodeH := NewNodeHandler()
+	profileH := NewProfileHandler()
 	logH := NewLogHandler()
 	authH := NewAuthHandler()
 	systemH := NewSystemHandler()
 	subH := NewSubscribeHandler()
-	setupH := NewSetupHandler()
-
-	// 首次初始化（无需鉴权，有用户后自动关闭）
-	r.POST("/api/setup", setupH.Setup)
 
 	// 订阅（无需鉴权）
 	r.GET("/sub/:token", subH.Subscribe)
@@ -33,6 +30,8 @@ func RegisterRoutes(r *gin.Engine) {
 		api.PUT("/users/:id", userH.Update)
 		api.DELETE("/users/:id", userH.Delete)
 		api.PATCH("/users/:id/toggle", userH.Toggle)
+		api.POST("/users/:id/reset-uuid", userH.ResetUUID)
+		api.POST("/users/:id/reset-token", userH.ResetToken)
 
 		// 分组管理
 		api.GET("/groups", groupH.List)
@@ -43,15 +42,27 @@ func RegisterRoutes(r *gin.Engine) {
 		// 节点管理
 		api.GET("/nodes", nodeH.List)
 		api.POST("/nodes", nodeH.Create)
-		// 固定路径路由必须在 :id 之前注册，避免路由冲突
+		// 固定路径路由必须在 :id 之前注册
 		api.POST("/nodes/sync-all", nodeH.SyncAll)
 		api.POST("/nodes/sync-drifted", nodeH.SyncDrifted)
 		api.POST("/nodes/keygen", nodeH.Keygen)
+		api.GET("/nodes/:id", nodeH.Get)
 		api.PUT("/nodes/:id", nodeH.Update)
 		api.DELETE("/nodes/:id", nodeH.Delete)
 		api.PATCH("/nodes/:id/toggle", nodeH.Toggle)
 		api.POST("/nodes/:id/sync", nodeH.Sync)
 		api.POST("/nodes/:id/test-ssh", nodeH.TestSSH)
+		// 节点协议密钥管理（静态路径 keygen 必须在动态 :profile_id 之前）
+		api.GET("/nodes/:id/keys", profileH.GetNodeKeys)
+		api.POST("/nodes/:id/keys/:profile_id/keygen", profileH.KeygenNodeKey)
+		api.PUT("/nodes/:id/keys/:profile_id", profileH.UpsertNodeKey)
+		api.DELETE("/nodes/:id/keys/:profile_id", profileH.DeleteNodeKey)
+
+		// 协议接入配置（InboundProfile）
+		api.GET("/profiles", profileH.List)
+		api.POST("/profiles", profileH.Create)
+		api.PUT("/profiles/:id", profileH.Update)
+		api.DELETE("/profiles/:id", profileH.Delete)
 
 		// 操作日志
 		api.GET("/logs", logH.List)
