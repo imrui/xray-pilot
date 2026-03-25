@@ -131,8 +131,8 @@ func buildVlessRealityURI(user *entity.User, node *entity.Node, profile *entity.
 	if publicKey != "" {
 		params.Set("pbk", publicKey)
 	}
-	if km.ShortID != "" {
-		params.Set("sid", km.ShortID)
+	if len(km.ShortIds) > 0 && km.ShortIds[0] != "" {
+		params.Set("sid", km.ShortIds[0])
 	}
 
 	remark := buildRemark(node)

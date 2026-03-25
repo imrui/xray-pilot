@@ -51,19 +51,53 @@ func (r *InboundProfileRepository) FindKeysForNode(nodeID uint) ([]entity.NodePr
 }
 
 // FindActiveKeysForNode 查询节点关联的所有激活 InboundProfile 的 NodeProfileKey
+// （已废弃：仅返回有 NodeProfileKey 记录的协议，使用 FindActiveProfilesWithKeys 代替）
 func (r *InboundProfileRepository) FindActiveKeysForNode(nodeID uint) ([]entity.NodeProfileKey, error) {
-	var keys []entity.NodeProfileKey
-	err := DB.Preload("Profile").
-		Where("node_id = ?", nodeID).
-		Find(&keys).Error
-	if err != nil {
+	return r.FindActiveProfilesWithKeys(nodeID)
+}
+
+// FindActiveProfilesWithKeys 返回所有激活协议及其节点密钥（LEFT JOIN 语义）
+// 若节点尚未为某协议配置密钥，则返回 Settings="" 的空占位记录，由上层 fallback 到协议默认值
+func (r *InboundProfileRepository) FindActiveProfilesWithKeys(nodeID uint) ([]entity.NodeProfileKey, error) {
+	// 1. 取所有激活协议
+	var profiles []entity.InboundProfile
+	if err := DB.Where("active = ?", true).Order("id asc").Find(&profiles).Error; err != nil {
 		return nil, err
 	}
-	// 过滤掉未激活的 Profile
-	result := make([]entity.NodeProfileKey, 0, len(keys))
-	for _, k := range keys {
-		if k.Profile != nil && k.Profile.Active {
+	if len(profiles) == 0 {
+		return nil, nil
+	}
+
+	// 2. 取该节点已有的密钥记录
+	profileIDs := make([]uint, len(profiles))
+	for i, p := range profiles {
+		profileIDs[i] = p.ID
+	}
+	var nodeKeys []entity.NodeProfileKey
+	if err := DB.Where("node_id = ? AND profile_id IN ?", nodeID, profileIDs).Find(&nodeKeys).Error; err != nil {
+		return nil, err
+	}
+
+	// 3. 构建 profileID → nodeKey 映射
+	keyMap := make(map[uint]entity.NodeProfileKey, len(nodeKeys))
+	for _, k := range nodeKeys {
+		keyMap[k.ProfileID] = k
+	}
+
+	// 4. 合并：每个激活协议对应一条记录，无节点密钥时 Settings 为空（由 buildConfig 使用协议默认值）
+	result := make([]entity.NodeProfileKey, 0, len(profiles))
+	for i := range profiles {
+		p := profiles[i]
+		if k, ok := keyMap[p.ID]; ok {
+			k.Profile = &p
 			result = append(result, k)
+		} else {
+			result = append(result, entity.NodeProfileKey{
+				NodeID:    nodeID,
+				ProfileID: p.ID,
+				Profile:   &p,
+				Settings:  "",
+			})
 		}
 	}
 	return result, nil

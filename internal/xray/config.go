@@ -188,6 +188,7 @@ func buildInbound(node *entity.Node, profile *entity.InboundProfile, key *entity
 }
 
 func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodeProfileKey, users []entity.User) (Inbound, error) {
+	// 解析协议共享参数（SNI、指纹、可选默认密钥）
 	var ps types.VlessRealitySettings
 	if profile.Settings != "" {
 		if err := json.Unmarshal([]byte(profile.Settings), &ps); err != nil {
@@ -195,16 +196,34 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 		}
 	}
 
+	// 解析节点密钥材料（覆盖协议默认值）
 	var km types.RealityKeyMaterial
-	if key.Settings != "" {
+	if key != nil && key.Settings != "" {
 		if err := json.Unmarshal([]byte(key.Settings), &km); err != nil {
 			return Inbound{}, fmt.Errorf("解析密钥材料失败: %w", err)
 		}
 	}
 
-	privateKey, err := decryptKey(km.PrivateKey)
+	// 优先使用节点密钥，回退到协议级默认值
+	privateKeyEnc := km.PrivateKey
+	if privateKeyEnc == "" {
+		privateKeyEnc = ps.PrivateKey
+	}
+	if privateKeyEnc == "" {
+		return Inbound{}, fmt.Errorf("vless-reality 缺少私钥（请在节点密钥或协议配置中提供 private_key）")
+	}
+
+	privateKey, err := decryptKey(privateKeyEnc)
 	if err != nil {
 		return Inbound{}, fmt.Errorf("解密私钥失败: %w", err)
+	}
+
+	shortIds := km.ShortIds
+	if len(shortIds) == 0 {
+		shortIds = ps.ShortIds
+	}
+	if len(shortIds) == 0 {
+		shortIds = []string{""} // xray 要求至少一个元素
 	}
 
 	sni := ps.SNI
@@ -232,7 +251,7 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 				Xver:        0,
 				ServerNames: []string{sni},
 				PrivateKey:  privateKey,
-				ShortIds:    []string{km.ShortID},
+				ShortIds:    shortIds,
 			},
 		},
 		Sniffing: &Sniffing{

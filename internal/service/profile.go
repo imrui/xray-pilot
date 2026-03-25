@@ -165,7 +165,7 @@ func (s *ProfileService) KeygenForNode(nodeID, profileID uint) (*dto.NodeKeyResp
 	km := types.RealityKeyMaterial{
 		PrivateKey: encPrivKey,
 		PublicKey:  pubKey,
-		ShortID:    shortID,
+		ShortIds:   []string{shortID},
 	}
 	settingsJSON, err := json.Marshal(km)
 	if err != nil {

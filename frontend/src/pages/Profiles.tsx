@@ -24,8 +24,15 @@ const protocolBadge: Record<Protocol, string> = {
 }
 
 // 不同协议的默认 settings JSON
+// vless-reality 含可选默认密钥字段；各节点可通过「配置密钥」→「一键生成」覆盖
 const defaultSettings: Record<Protocol, string> = {
-  'vless-reality': JSON.stringify({ sni: 'www.microsoft.com', fingerprint: 'chrome' }, null, 2),
+  'vless-reality': JSON.stringify({
+    sni: 'www.microsoft.com',
+    fingerprint: 'chrome',
+    private_key: '',
+    public_key: '',
+    short_ids: [],
+  }, null, 2),
   'vless-ws-tls':  JSON.stringify({ host: 'cdn.example.com', path: '/ws' }, null, 2),
   'trojan':        JSON.stringify({ sni: 'example.com' }, null, 2),
   'hysteria2':     JSON.stringify({ sni: 'example.com', up_mbps: 100, down_mbps: 100 }, null, 2),
