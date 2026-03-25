@@ -150,16 +150,27 @@ func (c *Client) ReloadXray() error {
 	return err
 }
 
-// TestConnectivity 测试 SSH 连通性，返回往返延迟
-func TestConnectivity(cfg Config) (latencyMs int, err error) {
+// TestConnectivity 测试 SSH 连通性，返回往返延迟、是否成功和错误
+func TestConnectivity(cfg Config) (latencyMs int, ok bool, err error) {
 	start := time.Now()
-	client, err := Connect(cfg)
-	if err != nil {
-		return 0, err
+	client, connErr := Connect(cfg)
+	if connErr != nil {
+		return 0, false, connErr
 	}
 	defer client.Close()
-	_, err = client.Run("echo ok")
-	return int(time.Since(start).Milliseconds()), err
+	if _, runErr := client.Run("echo ok"); runErr != nil {
+		return int(time.Since(start).Milliseconds()), false, runErr
+	}
+	return int(time.Since(start).Milliseconds()), true, nil
+}
+
+// GetXrayVersion 读取远端节点 Xray 版本号
+func (c *Client) GetXrayVersion() (string, error) {
+	out, err := c.Run("xray version 2>/dev/null | head -1 | awk '{print $2}'")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // buildAuthMethods 从密钥文件路径构建认证方式

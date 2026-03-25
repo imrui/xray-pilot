@@ -2,31 +2,29 @@ package service
 
 import (
 	"fmt"
-	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
-	xssh "github.com/imrui/xray-pilot/pkg/ssh"
+	"github.com/imrui/xray-pilot/internal/xray"
 )
-
-const xrayConfigPath = "/usr/local/etc/xray/config.json"
 
 // SyncService 节点配置同步与漂移检测服务
 type SyncService struct {
-	nodeRepo      *repository.NodeRepository
-	userRepo      *repository.UserRepository
-	logRepo       *repository.LogRepository
-	xrayCfgSvc    *XrayConfigService
+	nodeRepo    *repository.NodeRepository
+	userRepo    *repository.UserRepository
+	logRepo     *repository.LogRepository
+	profileRepo *repository.InboundProfileRepository
 }
 
 func NewSyncService() *SyncService {
 	return &SyncService{
-		nodeRepo:   repository.NewNodeRepository(),
-		userRepo:   repository.NewUserRepository(),
-		logRepo:    repository.NewLogRepository(),
-		xrayCfgSvc: NewXrayConfigService(),
+		nodeRepo:    repository.NewNodeRepository(),
+		userRepo:    repository.NewUserRepository(),
+		logRepo:     repository.NewLogRepository(),
+		profileRepo: repository.NewInboundProfileRepository(),
 	}
 }
 
@@ -38,9 +36,8 @@ type SyncResult struct {
 	Error   string
 }
 
-// SyncNode 同步单个节点：生成配置 → 上传 → 重载 xray → 更新状态
+// SyncNode 同步单个节点：生成多协议配置 → 推送 → 重载 xray → 更新状态
 func (s *SyncService) SyncNode(nodeID uint) *SyncResult {
-	start := time.Now()
 	node, err := s.nodeRepo.FindByID(nodeID)
 	if err != nil {
 		return &SyncResult{NodeID: nodeID, Error: "节点不存在"}
@@ -51,23 +48,31 @@ func (s *SyncService) SyncNode(nodeID uint) *SyncResult {
 	configContent, err := s.buildConfig(node)
 	if err != nil {
 		result.Error = fmt.Sprintf("生成配置失败: %v", err)
-		s.failNode(node, result.Error, time.Since(start).Milliseconds())
+		s.failNode(node, result.Error, 0)
 		return result
 	}
 
-	if err := s.pushConfig(node, configContent); err != nil {
-		result.Error = fmt.Sprintf("推送配置失败: %v", err)
-		s.failNode(node, result.Error, time.Since(start).Milliseconds())
+	params := s.sshParams(node)
+	syncResult := xray.SyncWithFallback(params, configContent)
+
+	if !syncResult.Success {
+		result.Error = syncResult.Error
+		s.failNode(node, result.Error, syncResult.ElapsedMs)
 		return result
 	}
 
-	newHash := ConfigHash(configContent)
-	elapsed := time.Since(start).Milliseconds()
+	newHash := xray.ConfigHash(configContent)
 
 	if err := s.nodeRepo.UpdateLastSync(nodeID, entity.SyncStatusSynced, newHash); err != nil {
 		zap.L().Warn("更新同步状态失败", zap.Uint("nodeID", nodeID), zap.Error(err))
 	}
-	s.logRepo.Record("sync", fmt.Sprintf("node:%s(%d)", node.Name, nodeID), true, "同步成功", elapsed)
+
+	// 同步时顺带更新 XrayVersion
+	if syncResult.XrayVersion != "" {
+		_ = s.nodeRepo.UpdateXrayStatus(nodeID, true, syncResult.XrayVersion)
+	}
+
+	s.logRepo.Record("sync", fmt.Sprintf("node:%s(%d)", node.Name, nodeID), true, "同步成功", syncResult.ElapsedMs)
 
 	result.Success = true
 	return result
@@ -102,29 +107,22 @@ func (s *SyncService) SyncDrifted() []SyncResult {
 }
 
 // CheckDrift 拉取远端配置并与本地 ConfigHash 比对
-// 若哈希不一致，将节点置为 drifted
 func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 	node, err := s.nodeRepo.FindByID(nodeID)
 	if err != nil {
 		return false, fmt.Errorf("节点不存在")
 	}
 	if node.ConfigHash == "" {
-		// 从未同步过，视为 pending，跳过漂移检测
 		return false, nil
 	}
 
-	client, err := s.sshConnect(node)
-	if err != nil {
-		return false, fmt.Errorf("SSH 连接失败: %w", err)
-	}
-	defer client.Close()
-
-	remoteContent, err := client.ReadRemoteFile(xrayConfigPath)
+	params := s.sshParams(node)
+	remoteContent, err := xray.ReadRemoteConfig(params)
 	if err != nil {
 		return false, fmt.Errorf("读取远端配置失败: %w", err)
 	}
 
-	remoteHash := ConfigHash(remoteContent)
+	remoteHash := xray.ConfigHash(remoteContent)
 	if remoteHash != node.ConfigHash {
 		_ = s.nodeRepo.UpdateSyncStatus(nodeID, entity.SyncStatusDrifted, "")
 		s.logRepo.Record(
@@ -148,7 +146,7 @@ func (s *SyncService) CheckDriftAll() (driftCount int, errs []string) {
 	for _, node := range nodes {
 		node := node
 		if node.ConfigHash == "" {
-			continue // 从未同步，跳过
+			continue
 		}
 		drifted, err := s.CheckDrift(node.ID)
 		if err != nil {
@@ -164,51 +162,49 @@ func (s *SyncService) CheckDriftAll() (driftCount int, errs []string) {
 
 // ---- 内部工具方法 ----
 
-// buildConfig 生成节点 Xray 配置内容
 func (s *SyncService) buildConfig(node *entity.Node) (string, error) {
+	// 查询节点关联的所有激活协议密钥
+	profileKeys, err := s.profileRepo.FindActiveKeysForNode(node.ID)
+	if err != nil {
+		return "", fmt.Errorf("查询节点协议配置失败: %w", err)
+	}
+
+	// 查询节点对应分组内的激活用户
 	users, err := s.userRepo.FindActiveUsersByNodeID(node.ID)
 	if err != nil {
 		return "", fmt.Errorf("查询节点用户失败: %w", err)
 	}
-	return s.xrayCfgSvc.GenerateConfig(node, users)
+
+	return xray.GenerateConfig(node, profileKeys, users)
 }
 
-// pushConfig 上传配置到节点并重载 xray
-func (s *SyncService) pushConfig(node *entity.Node, content string) error {
-	client, err := s.sshConnect(node)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	if err := client.UploadContent(content, xrayConfigPath); err != nil {
-		return fmt.Errorf("上传配置失败: %w", err)
-	}
-	if err := client.ReloadXray(); err != nil {
-		return fmt.Errorf("重载 xray 失败: %w", err)
-	}
-	return nil
-}
-
-// sshConnect 根据节点配置建立 SSH 连接
-func (s *SyncService) sshConnect(node *entity.Node) (*xssh.Client, error) {
+func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 	sshPort := node.SSHPort
 	if sshPort == 0 {
-		sshPort = 22
+		sshPort = config.Global.SSH.DefaultPort
+		if sshPort == 0 {
+			sshPort = 22
+		}
 	}
 	sshUser := node.SSHUser
 	if sshUser == "" {
-		sshUser = "root"
+		sshUser = config.Global.SSH.DefaultUser
+		if sshUser == "" {
+			sshUser = "root"
+		}
 	}
-	return xssh.Connect(xssh.Config{
+	keyPath := node.SSHKeyPath
+	if keyPath == "" {
+		keyPath = config.Global.SSH.DefaultKeyPath
+	}
+	return xray.SSHParams{
 		Host:    node.IP,
 		Port:    sshPort,
 		User:    sshUser,
-		KeyPath: node.SSHKeyPath,
-	})
+		KeyPath: keyPath,
+	}
 }
 
-// failNode 将节点标记为同步失败并记录日志
 func (s *SyncService) failNode(node *entity.Node, errMsg string, elapsedMs int64) {
 	_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusFailed, "")
 	s.logRepo.Record(

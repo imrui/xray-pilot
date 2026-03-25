@@ -95,3 +95,33 @@ func (h *UserHandler) Toggle(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, dto.Response{Code: 0, Message: "ok"})
 }
+
+// ResetUUID 重置用户 UUID（导致所有节点下该用户连接失效，触发全量同步）
+func (h *UserHandler) ResetUUID(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的用户ID")
+		return
+	}
+	user, err := h.svc.ResetUUID(uint(id), h.baseURL(c))
+	if err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.Success(c, user)
+}
+
+// ResetToken 重置用户订阅 Token（使旧订阅链接失效）
+func (h *UserHandler) ResetToken(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的用户ID")
+		return
+	}
+	user, err := h.svc.ResetToken(uint(id), h.baseURL(c))
+	if err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.Success(c, user)
+}

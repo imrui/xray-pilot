@@ -5,6 +5,7 @@ import Login from '@/pages/Login'
 import Users from '@/pages/Users'
 import Groups from '@/pages/Groups'
 import Nodes from '@/pages/Nodes'
+import Profiles from '@/pages/Profiles'
 import Logs from '@/pages/Logs'
 import Settings from '@/pages/Settings'
 import { useAuthStore } from '@/store/auth'
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="users" element={<Users />} />
             <Route path="groups" element={<Groups />} />
             <Route path="nodes" element={<Nodes />} />
+            <Route path="profiles" element={<Profiles />} />
             <Route path="logs" element={<Logs />} />
             <Route path="settings" element={<Settings />} />
           </Route>

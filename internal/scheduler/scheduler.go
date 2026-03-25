@@ -94,7 +94,11 @@ func (s *Scheduler) runHealthCheck() {
 	okCount, failCount := 0, 0
 	for _, node := range nodes {
 		node := node
-		ok, latencyMs := tcpProbe(node.IP, node.Port)
+		sshPort := node.SSHPort
+		if sshPort == 0 {
+			sshPort = 22
+		}
+		ok, latencyMs := tcpProbe(node.IP, sshPort)
 		if err := s.nodeRepo.UpdateLastCheck(node.ID, ok, latencyMs); err != nil {
 			s.log.Warn("健康检测：更新状态失败",
 				zap.Uint("nodeID", node.ID),

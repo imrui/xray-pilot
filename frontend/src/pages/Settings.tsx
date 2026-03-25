@@ -28,34 +28,34 @@ export default function Settings() {
     onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2000) },
   })
 
-  if (isLoading) return <div className="p-6 text-gray-400">加载中...</div>
+  if (isLoading) return <div className="p-6 text-slate-400">加载中…</div>
 
   return (
-    <div className="p-6 max-w-xl">
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900">系统设置</h2>
-        <p className="text-sm text-gray-500 mt-0.5">查看系统配置，调整定时任务间隔</p>
+    <div className="p-6 space-y-6 max-w-xl">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">系统设置</h1>
+        <p className="text-sm text-slate-500 mt-0.5">查看系统配置，调整定时任务间隔</p>
       </div>
 
       {/* 只读信息 */}
-      <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 mb-6 space-y-2 text-sm">
+      <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-2 text-sm">
         <div className="flex justify-between">
-          <span className="text-gray-500">服务端口</span>
-          <span className="font-mono">{data?.server.port}</span>
+          <span className="text-slate-500">服务端口</span>
+          <span className="font-mono text-slate-900">{data?.server.port}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-500">运行模式</span>
-          <span className="font-mono">{data?.server.mode}</span>
+          <span className="text-slate-500">运行模式</span>
+          <span className="font-mono text-slate-900">{data?.server.mode}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-500">数据库</span>
-          <span className="font-mono">{data?.database.driver}</span>
+          <span className="text-slate-500">数据库</span>
+          <span className="font-mono text-slate-900">{data?.database.driver}</span>
         </div>
       </div>
 
       {/* 可调整配置 */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
-        <h3 className="text-sm font-medium text-gray-900">定时任务</h3>
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
+        <h3 className="text-sm font-semibold text-slate-900">定时任务</h3>
         <Field
           label="漂移检测间隔（秒，0 禁用）"
           type="number"
@@ -68,7 +68,7 @@ export default function Settings() {
           value={health}
           onChange={e => setHealth(e.target.value)}
         />
-        <p className="text-xs text-gray-400">注意：修改后重启服务生效</p>
+        <p className="text-xs text-slate-400">注意：修改后重启服务生效</p>
         <div className="flex items-center gap-3">
           <Btn loading={update.isPending} onClick={() => update.mutate()}>保存配置</Btn>
           {saved && <span className="text-sm text-green-600">已保存</span>}

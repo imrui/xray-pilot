@@ -53,33 +53,35 @@ export default function Groups() {
 
   const columns = [
     { key: 'id', label: 'ID' },
-    { key: 'name', label: '分组名', render: (g: Group) => <span className="font-medium">{g.name}</span> },
-    { key: 'description', label: '描述', render: (g: Group) => g.description || <span className="text-gray-400">—</span> },
+    { key: 'name', label: '分组名', render: (g: Group) => <span className="font-medium text-slate-900">{g.name}</span> },
+    { key: 'description', label: '描述', render: (g: Group) => g.description || <span className="text-slate-300">—</span> },
     { key: 'node_count', label: '节点数', render: (g: Group) => <Badge label={String(g.node_count)} variant="blue" /> },
     { key: 'active', label: '状态', render: (g: Group) => <Badge label={g.active ? '启用' : '禁用'} variant={g.active ? 'green' : 'gray'} /> },
     {
       key: 'actions', label: '操作',
       render: (g: Group) => (
         <div className="flex gap-2">
-          <button onClick={() => openEdit(g)} className="text-xs text-gray-600 hover:text-gray-900">编辑</button>
-          <button onClick={() => { if (confirm(`确认删除分组「${g.name}」？`)) remove.mutate(g.id) }}
-            className="text-xs text-red-500 hover:text-red-700">删除</button>
+          <button onClick={() => openEdit(g)} className="text-xs text-slate-500 hover:text-slate-900">编辑</button>
+          <button
+            onClick={() => { if (confirm(`确认删除分组「${g.name}」？`)) remove.mutate(g.id) }}
+            className="text-xs text-red-500 hover:text-red-700"
+          >删除</button>
         </div>
       ),
     },
   ]
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">分组管理</h2>
-          <p className="text-sm text-gray-500 mt-0.5">管理用户分组和关联节点 · 共 {data?.total ?? 0} 个</p>
+          <h1 className="text-2xl font-bold text-slate-900">分组管理</h1>
+          <p className="text-sm text-slate-500 mt-0.5">管理用户分组和关联节点 · 共 {data?.total ?? 0} 个</p>
         </div>
         <Btn onClick={openCreate}>新增分组</Btn>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <Table columns={columns} data={data?.list ?? []} loading={isLoading} />
         <Pagination page={page} pageSize={PAGE_SIZE} total={data?.total ?? 0} onChange={setPage} />
       </div>

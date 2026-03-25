@@ -5,11 +5,7 @@ type CreateNodeRequest struct {
 	Name       string `json:"name" binding:"required"`
 	Region     string `json:"region"`
 	IP         string `json:"ip" binding:"required"`
-	Port       int    `json:"port"`
-	PrivateKey string `json:"private_key"` // 明文传入，服务层 AES 加密存储
-	PublicKey  string `json:"public_key"`
-	ShortID    string `json:"short_id"`
-	SNI        string `json:"sni"`
+	Domain     string `json:"domain"`    // 可选：客户端连接域名（CDN/中转）
 	SSHPort    int    `json:"ssh_port"`
 	SSHUser    string `json:"ssh_user"`
 	SSHKeyPath string `json:"ssh_key_path"`
@@ -21,31 +17,26 @@ type UpdateNodeRequest struct {
 	Name       string `json:"name"`
 	Region     string `json:"region"`
 	IP         string `json:"ip"`
-	Port       int    `json:"port"`
-	PrivateKey string `json:"private_key"` // 非空时更新，AES 加密存储
-	PublicKey  string `json:"public_key"`
-	ShortID    string `json:"short_id"`
-	SNI        string `json:"sni"`
+	Domain     string `json:"domain"`
 	SSHPort    int    `json:"ssh_port"`
 	SSHUser    string `json:"ssh_user"`
 	SSHKeyPath string `json:"ssh_key_path"`
 	Remark     string `json:"remark"`
 }
 
-// NodeResponse 节点响应（包含同步状态）
+// NodeResponse 节点响应（含同步状态，不含私钥）
 type NodeResponse struct {
 	ID            uint   `json:"id"`
 	Name          string `json:"name"`
 	Region        string `json:"region"`
 	IP            string `json:"ip"`
-	Port          int    `json:"port"`
-	PublicKey     string `json:"public_key"`
-	ShortID       string `json:"short_id"`
-	SNI           string `json:"sni"`
+	Domain        string `json:"domain"`
 	SSHPort       int    `json:"ssh_port"`
 	SSHUser       string `json:"ssh_user"`
 	SSHKeyPath    string `json:"ssh_key_path"`
 	Active        bool   `json:"active"`
+	XrayActive    bool   `json:"xray_active"`
+	XrayVersion   string `json:"xray_version"`
 	SyncStatus    string `json:"sync_status"`
 	LastCheckOK   bool   `json:"last_check_ok"`
 	LastLatencyMs int    `json:"last_latency_ms"`

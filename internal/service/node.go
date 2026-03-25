@@ -8,7 +8,6 @@ import (
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
-	"github.com/imrui/xray-pilot/pkg/crypto"
 )
 
 type NodeService struct {
@@ -24,28 +23,17 @@ func NewNodeService() *NodeService {
 }
 
 func (s *NodeService) Create(req *dto.CreateNodeRequest) (*dto.NodeResponse, error) {
-	encKey, err := encryptKey(req.PrivateKey)
-	if err != nil {
-		return nil, fmt.Errorf("加密私钥失败: %w", err)
-	}
 	node := &entity.Node{
 		Name:       req.Name,
 		Region:     req.Region,
 		IP:         req.IP,
-		Port:       req.Port,
-		PrivateKey: encKey,
-		PublicKey:  req.PublicKey,
-		ShortID:    req.ShortID,
-		SNI:        req.SNI,
+		Domain:     req.Domain,
 		SSHPort:    req.SSHPort,
 		SSHUser:    req.SSHUser,
 		SSHKeyPath: req.SSHKeyPath,
 		Remark:     req.Remark,
 		Active:     true,
 		SyncStatus: entity.SyncStatusPending,
-	}
-	if node.Port == 0 {
-		node.Port = 443
 	}
 	if node.SSHPort == 0 {
 		node.SSHPort = 22
@@ -59,9 +47,7 @@ func (s *NodeService) Create(req *dto.CreateNodeRequest) (*dto.NodeResponse, err
 	return toNodeResponse(node), nil
 }
 
-// UpdateNodeIP 更新节点（含 IP 变更处理）
-// 注意：IP 变更后立即将该节点 SyncStatus 置为 drifted，触发单节点同步
-func (s *NodeService) UpdateNodeIP(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResponse, error) {
+func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResponse, error) {
 	node, err := s.nodeRepo.FindByID(id)
 	if err != nil {
 		return nil, errors.New("节点不存在")
@@ -78,24 +64,8 @@ func (s *NodeService) UpdateNodeIP(id uint, req *dto.UpdateNodeRequest) (*dto.No
 	if req.IP != "" {
 		node.IP = req.IP
 	}
-	if req.Port != 0 {
-		node.Port = req.Port
-	}
-	if req.PrivateKey != "" {
-		encKey, err := encryptKey(req.PrivateKey)
-		if err != nil {
-			return nil, fmt.Errorf("加密私钥失败: %w", err)
-		}
-		node.PrivateKey = encKey
-	}
-	if req.PublicKey != "" {
-		node.PublicKey = req.PublicKey
-	}
-	if req.ShortID != "" {
-		node.ShortID = req.ShortID
-	}
-	if req.SNI != "" {
-		node.SNI = req.SNI
+	if req.Domain != "" {
+		node.Domain = req.Domain
 	}
 	if req.SSHPort != 0 {
 		node.SSHPort = req.SSHPort
@@ -110,6 +80,7 @@ func (s *NodeService) UpdateNodeIP(id uint, req *dto.UpdateNodeRequest) (*dto.No
 		node.Remark = req.Remark
 	}
 
+	// IP 变更后标记漂移，触发重新同步
 	if ipChanged {
 		node.SyncStatus = entity.SyncStatusDrifted
 	}
@@ -164,28 +135,19 @@ func (s *NodeService) GetDriftedNodes() ([]dto.NodeResponse, error) {
 	return result, nil
 }
 
-// encryptKey 加密 Reality 私钥；空字符串直接返回空
-func encryptKey(plainKey string) (string, error) {
-	if plainKey == "" {
-		return "", nil
-	}
-	return crypto.Encrypt(plainKey)
-}
-
 func toNodeResponse(n *entity.Node) *dto.NodeResponse {
 	resp := &dto.NodeResponse{
 		ID:            n.ID,
 		Name:          n.Name,
 		Region:        n.Region,
 		IP:            n.IP,
-		Port:          n.Port,
-		PublicKey:     n.PublicKey,
-		ShortID:       n.ShortID,
-		SNI:           n.SNI,
+		Domain:        n.Domain,
 		SSHPort:       n.SSHPort,
 		SSHUser:       n.SSHUser,
 		SSHKeyPath:    n.SSHKeyPath,
 		Active:        n.Active,
+		XrayActive:    n.XrayActive,
+		XrayVersion:   n.XrayVersion,
 		SyncStatus:    string(n.SyncStatus),
 		LastCheckOK:   n.LastCheckOK,
 		LastLatencyMs: n.LastLatencyMs,

@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/imrui/xray-pilot/internal/entity"
 )
 
@@ -17,12 +19,6 @@ func (r *UserRepository) Create(user *entity.User) error {
 func (r *UserRepository) FindByID(id uint) (*entity.User, error) {
 	var user entity.User
 	err := DB.Preload("Group").First(&user, id).Error
-	return &user, err
-}
-
-func (r *UserRepository) FindByUsername(username string) (*entity.User, error) {
-	var user entity.User
-	err := DB.Where("username = ?", username).First(&user).Error
 	return &user, err
 }
 
@@ -61,14 +57,24 @@ func (r *UserRepository) FindActiveByGroupID(groupID uint) ([]entity.User, error
 	return users, err
 }
 
-// FindActiveUsersByNodeID 查询某节点所在分组的所有激活用户
+// FindActiveUsersByNodeID 查询某节点所在分组的所有激活用户（未过期）
 func (r *UserRepository) FindActiveUsersByNodeID(nodeID uint) ([]entity.User, error) {
 	var users []entity.User
+	now := time.Now()
 	err := DB.Where(
-		"active = ? AND group_id IN (?)",
+		"active = ? AND (expires_at IS NULL OR expires_at > ?) AND group_id IN (?)",
 		true,
+		now,
 		DB.Table("group_nodes").Select("group_id").Where("node_id = ?", nodeID),
 	).Find(&users).Error
+	return users, err
+}
+
+// GetExpiredUsers 查询已过期的用户
+func (r *UserRepository) GetExpiredUsers() ([]entity.User, error) {
+	var users []entity.User
+	now := time.Now()
+	err := DB.Where("active = ? AND expires_at IS NOT NULL AND expires_at <= ?", true, now).Find(&users).Error
 	return users, err
 }
 
@@ -76,4 +82,14 @@ func (r *UserRepository) FindActiveUsersByNodeID(nodeID uint) ([]entity.User, er
 func (r *UserRepository) Count() (int64, error) {
 	var total int64
 	return total, DB.Model(&entity.User{}).Count(&total).Error
+}
+
+// UpdateUUID 更新用户 UUID（重置订阅身份）
+func (r *UserRepository) UpdateUUID(id uint, newUUID string) error {
+	return DB.Model(&entity.User{}).Where("id = ?", id).Update("uuid", newUUID).Error
+}
+
+// UpdateToken 更新用户订阅 Token
+func (r *UserRepository) UpdateToken(id uint, newToken string) error {
+	return DB.Model(&entity.User{}).Where("id = ?", id).Update("token", newToken).Error
 }

@@ -81,7 +81,7 @@ func (r *NodeRepository) FindByIDs(ids []uint) ([]entity.Node, error) {
 func (r *NodeRepository) UpdateLastSync(id uint, status entity.SyncStatus, hash string) error {
 	now := time.Now()
 	updates := map[string]any{
-		"sync_status": status,
+		"sync_status":  status,
 		"last_sync_at": &now,
 	}
 	if hash != "" {
@@ -97,6 +97,14 @@ func (r *NodeRepository) UpdateLastCheck(id uint, ok bool, latencyMs int) error 
 		"last_check_at":   &now,
 		"last_check_ok":   ok,
 		"last_latency_ms": latencyMs,
+	}).Error
+}
+
+// UpdateXrayStatus 更新节点 Xray 运行状态和版本
+func (r *NodeRepository) UpdateXrayStatus(id uint, active bool, version string) error {
+	return DB.Model(&entity.Node{}).Where("id = ?", id).Updates(map[string]any{
+		"xray_active":  active,
+		"xray_version": version,
 	}).Error
 }
 

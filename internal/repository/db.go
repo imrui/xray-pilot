@@ -44,5 +44,7 @@ func autoMigrate(db *gorm.DB) error {
 		&entity.Group{},
 		&entity.Node{},
 		&entity.SyncLog{},
+		&entity.InboundProfile{},
+		&entity.NodeProfileKey{},
 	)
 }
