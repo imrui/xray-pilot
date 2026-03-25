@@ -18,6 +18,7 @@ export interface Group {
   description: string
   active: boolean
   node_count: number
+  node_ids: number[]
   created_at: string
   updated_at: string
 }

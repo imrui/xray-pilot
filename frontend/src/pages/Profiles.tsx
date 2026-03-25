@@ -52,6 +52,7 @@ function NodeKeyModal({
   const [nodeId, setNodeId] = useState('')
   const [settings, setSettings] = useState('')
   const [msg, setMsg] = useState('')
+  const [msgType, setMsgType] = useState<'ok' | 'err'>('ok')
   const qc = useQueryClient()
 
   const { data: nodes } = useQuery({
@@ -59,13 +60,49 @@ function NodeKeyModal({
     queryFn: () => nodeApi.list({ page: 1, page_size: 100 }).then(r => r.data.data?.list ?? []),
   })
 
-  const save = useMutation({
-    mutationFn: () => nodeApi.upsertKey(Number(nodeId), profile.id, settings),
-    onSuccess: () => { setMsg('已保存'); qc.invalidateQueries({ queryKey: ['nodes'] }) },
-    onError: (e: Error) => setMsg('保存失败: ' + e.message),
+  // 切换节点时自动加载该节点已有密钥
+  const { isFetching: loadingKey } = useQuery({
+    queryKey: ['nodeKey', nodeId, profile.id],
+    queryFn: async () => {
+      const res = await nodeApi.getKeys(Number(nodeId))
+      const keys = res.data.data ?? []
+      const key = keys.find(k => k.profile_id === profile.id)
+      if (key) {
+        setSettings(JSON.stringify(
+          typeof key.settings === 'string' ? JSON.parse(key.settings) : key.settings,
+          null, 2
+        ))
+      } else {
+        setSettings('')
+      }
+      return key ?? null
+    },
+    enabled: !!nodeId,
   })
 
-  // 根据协议填充默认密钥模板
+  const save = useMutation({
+    mutationFn: () => nodeApi.upsertKey(Number(nodeId), profile.id, settings),
+    onSuccess: () => { setMsg('已保存'); setMsgType('ok'); qc.invalidateQueries({ queryKey: ['nodes'] }) },
+    onError: (e: Error) => { setMsg('保存失败: ' + e.message); setMsgType('err') },
+  })
+
+  const keygen = useMutation({
+    mutationFn: () => nodeApi.keygenForNode(Number(nodeId), profile.id),
+    onSuccess: (res) => {
+      const key = res.data.data
+      if (key) {
+        setSettings(JSON.stringify(
+          typeof key.settings === 'string' ? JSON.parse(key.settings) : key.settings,
+          null, 2
+        ))
+      }
+      setMsg('密钥已生成'); setMsgType('ok')
+      qc.invalidateQueries({ queryKey: ['nodeKey', nodeId, profile.id] })
+    },
+    onError: (e: Error) => { setMsg('生成失败: ' + e.message); setMsgType('err') },
+  })
+
+  // 填充空模板（手动输入用）
   const fillTemplate = () => {
     if (profile.protocol === 'vless-reality') {
       setSettings(JSON.stringify({ private_key: '', public_key: '', short_id: '' }, null, 2))
@@ -91,8 +128,23 @@ function NodeKeyModal({
           />
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-gray-700">密钥 JSON</label>
-              <button onClick={fillTemplate} className="text-xs text-indigo-500 hover:text-indigo-700">填充模板</button>
+              <label className="block text-sm font-medium text-gray-700">
+                密钥 JSON
+                {loadingKey && <span className="ml-2 text-xs text-slate-400">加载中…</span>}
+              </label>
+              <div className="flex gap-2">
+                {profile.protocol === 'vless-reality' && (
+                  <Btn
+                    variant="secondary"
+                    loading={keygen.isPending}
+                    onClick={() => keygen.mutate()}
+                    disabled={!nodeId}
+                  >
+                    一键生成
+                  </Btn>
+                )}
+                <button onClick={fillTemplate} className="text-xs text-indigo-500 hover:text-indigo-700">填充模板</button>
+              </div>
             </div>
             <textarea
               value={settings}
@@ -102,7 +154,9 @@ function NodeKeyModal({
               placeholder='{"private_key": "...", "public_key": "...", "short_id": ""}'
             />
           </div>
-          {msg && <p className="text-sm text-green-600">{msg}</p>}
+          {msg && (
+            <p className={`text-sm ${msgType === 'ok' ? 'text-green-600' : 'text-red-500'}`}>{msg}</p>
+          )}
           <div className="flex gap-2 justify-end">
             <Btn variant="secondary" onClick={onClose}>关闭</Btn>
             <Btn loading={save.isPending} onClick={() => save.mutate()} disabled={!nodeId || !settings}>保存密钥</Btn>

@@ -116,6 +116,9 @@ export const nodeApi = {
 
   deleteKey: (nodeId: number, profileId: number) =>
     request.delete<ApiResponse<null>>(`/nodes/${nodeId}/keys/${profileId}`),
+
+  keygenForNode: (nodeId: number, profileId: number) =>
+    request.post<ApiResponse<NodeKey>>(`/nodes/${nodeId}/keys/${profileId}/keygen`),
 }
 
 // ---- 协议配置 API ----

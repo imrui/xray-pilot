@@ -126,9 +126,9 @@ func (c *Client) UploadContent(content, remotePath string) error {
 	return nil
 }
 
-// ReadRemoteFile 读取远端文件内容
+// ReadRemoteFile 读取远端文件内容（stderr 重定向至 /dev/null，防止错误信息污染文件内容 hash）
 func (c *Client) ReadRemoteFile(remotePath string) (string, error) {
-	out, err := c.Run(fmt.Sprintf("cat %s", remotePath))
+	out, err := c.Run(fmt.Sprintf("cat %s 2>/dev/null", remotePath))
 	if err != nil {
 		return "", fmt.Errorf("读取远端文件失败 (%s): %w", remotePath, err)
 	}

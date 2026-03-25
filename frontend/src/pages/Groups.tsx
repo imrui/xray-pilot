@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { groupApi } from '@/lib/api'
+import { groupApi, nodeApi } from '@/lib/api'
 import type { Group } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
 import { Modal } from '@/components/ui/Modal'
@@ -12,9 +12,10 @@ const PAGE_SIZE = 20
 interface FormState {
   name: string
   description: string
+  node_ids: number[]
 }
 
-const emptyForm = (): FormState => ({ name: '', description: '' })
+const emptyForm = (): FormState => ({ name: '', description: '', node_ids: [] })
 
 export default function Groups() {
   const qc = useQueryClient()
@@ -26,6 +27,12 @@ export default function Groups() {
   const { data, isLoading } = useQuery({
     queryKey: ['groups', page],
     queryFn: () => groupApi.list({ page, page_size: PAGE_SIZE }).then(r => r.data.data!),
+  })
+
+  // 所有节点列表（用于关联复选框）
+  const { data: allNodes } = useQuery({
+    queryKey: ['nodes-all'],
+    queryFn: () => nodeApi.list({ page: 1, page_size: 200 }).then(r => r.data.data?.list ?? []),
   })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['groups'] })
@@ -45,11 +52,23 @@ export default function Groups() {
   })
 
   const openCreate = () => { setForm(emptyForm()); setErr(''); setModal({ open: true }) }
-  const openEdit = (g: Group) => { setForm({ name: g.name, description: g.description }); setErr(''); setModal({ open: true, group: g }) }
+  const openEdit = (g: Group) => {
+    setForm({ name: g.name, description: g.description, node_ids: g.node_ids ?? [] })
+    setErr('')
+    setModal({ open: true, group: g })
+  }
   const closeModal = () => setModal({ open: false })
 
-  const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const f = (k: 'name' | 'description') => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }))
+
+  const toggleNode = (nodeId: number) =>
+    setForm(prev => ({
+      ...prev,
+      node_ids: prev.node_ids.includes(nodeId)
+        ? prev.node_ids.filter(id => id !== nodeId)
+        : [...prev.node_ids, nodeId],
+    }))
 
   const columns = [
     { key: 'id', label: 'ID' },
@@ -101,6 +120,31 @@ export default function Groups() {
         <div className="space-y-3">
           <Field label="分组名 *" value={form.name} onChange={f('name')} placeholder="如：高速节点" />
           <Field label="描述" value={form.description} onChange={f('description')} />
+          {/* 关联节点 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              关联节点 <span className="text-slate-400 font-normal">（已选 {form.node_ids.length} 个）</span>
+            </label>
+            {(allNodes ?? []).length === 0 ? (
+              <p className="text-xs text-slate-400 px-1">暂无节点，请先添加节点</p>
+            ) : (
+              <div className="border border-slate-200 rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100">
+                {(allNodes ?? []).map(n => (
+                  <label key={n.id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.node_ids.includes(n.id)}
+                      onChange={() => toggleNode(n.id)}
+                      className="h-4 w-4 text-indigo-600 rounded border-slate-300"
+                    />
+                    <span className="text-sm text-slate-700">{n.name}</span>
+                    {n.region && <span className="text-xs text-slate-400">{n.region}</span>}
+                    <span className="ml-auto text-xs text-slate-400">{n.ip}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           {err && <p className="text-sm text-red-500">{err}</p>}
         </div>
       </Modal>

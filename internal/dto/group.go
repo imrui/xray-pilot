@@ -21,6 +21,7 @@ type GroupResponse struct {
 	Description string         `json:"description"`
 	Active      bool           `json:"active"`
 	NodeCount   int            `json:"node_count"`
+	NodeIDs     []uint         `json:"node_ids"`
 	Nodes       []NodeResponse `json:"nodes,omitempty"`
 	CreatedAt   string         `json:"created_at"`
 	UpdatedAt   string         `json:"updated_at"`

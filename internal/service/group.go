@@ -93,12 +93,17 @@ func (s *GroupService) List(page, pageSize int) ([]dto.GroupResponse, int64, err
 }
 
 func (s *GroupService) toResponse(g *entity.Group) *dto.GroupResponse {
+	nodeIDs := make([]uint, 0, len(g.Nodes))
+	for _, n := range g.Nodes {
+		nodeIDs = append(nodeIDs, n.ID)
+	}
 	resp := &dto.GroupResponse{
 		ID:          g.ID,
 		Name:        g.Name,
 		Description: g.Description,
 		Active:      g.Active,
 		NodeCount:   len(g.Nodes),
+		NodeIDs:     nodeIDs,
 		CreatedAt:   g.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   g.UpdatedAt.Format(time.RFC3339),
 	}

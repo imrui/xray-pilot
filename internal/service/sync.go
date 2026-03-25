@@ -106,14 +106,21 @@ func (s *SyncService) SyncDrifted() []SyncResult {
 	return results
 }
 
-// CheckDrift 拉取远端配置并与本地 ConfigHash 比对
+// CheckDrift 重新生成期望配置，与远端文件比对；若不一致则标记漂移
+// 使用"生成对比"而非"存储 hash 对比"，避免 xray 规范化 JSON 或 SSH stderr 混入导致假阳性
 func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 	node, err := s.nodeRepo.FindByID(nodeID)
 	if err != nil {
 		return false, fmt.Errorf("节点不存在")
 	}
-	if node.ConfigHash == "" {
+	// 尚未同步过的节点跳过漂移检测
+	if node.SyncStatus == entity.SyncStatusPending {
 		return false, nil
+	}
+
+	expectedContent, err := s.buildConfig(node)
+	if err != nil {
+		return false, fmt.Errorf("生成期望配置失败: %w", err)
 	}
 
 	params := s.sshParams(node)
@@ -122,14 +129,15 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 		return false, fmt.Errorf("读取远端配置失败: %w", err)
 	}
 
+	expectedHash := xray.ConfigHash(expectedContent)
 	remoteHash := xray.ConfigHash(remoteContent)
-	if remoteHash != node.ConfigHash {
+	if expectedHash != remoteHash {
 		_ = s.nodeRepo.UpdateSyncStatus(nodeID, entity.SyncStatusDrifted, "")
 		s.logRepo.Record(
 			"drift_check",
 			fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
 			false,
-			fmt.Sprintf("配置漂移: local=%s remote=%s", node.ConfigHash[:8], remoteHash[:8]),
+			fmt.Sprintf("配置漂移: expected=%s remote=%s", expectedHash[:8], remoteHash[:8]),
 			0,
 		)
 		return true, nil
