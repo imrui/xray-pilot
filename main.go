@@ -61,14 +61,18 @@ func main() {
 	if err != nil {
 		log.Warn("前端资源加载失败（开发模式可忽略）", zap.Error(err))
 	} else {
-		r.StaticFS("/assets", http.FS(distFS))
-		r.GET("/", func(c *gin.Context) {
-			c.FileFromFS("index.html", http.FS(distFS))
-		})
-		// SPA fallback
-		r.NoRoute(func(c *gin.Context) {
-			c.FileFromFS("index.html", http.FS(distFS))
-		})
+		// /assets/* → frontend/dist/assets/
+		assetsFS, _ := fs.Sub(distFS, "assets")
+		r.StaticFS("/assets", http.FS(assetsFS))
+
+		// 直接读取 index.html 字节，避免 http.FileServer 产生 301 重定向
+		indexHTML, _ := fs.ReadFile(distFS, "index.html")
+		serveSPA := func(c *gin.Context) {
+			c.Data(http.StatusOK, "text/html; charset=utf-8", indexHTML)
+		}
+		r.GET("/", serveSPA)
+		// SPA fallback：所有未匹配路由返回 index.html，由前端路由处理
+		r.NoRoute(serveSPA)
 	}
 
 	// 7. 启动 HTTP 服务器
