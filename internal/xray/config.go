@@ -31,10 +31,13 @@ type API struct {
 }
 
 type Routing struct {
-	Rules []RoutingRule `json:"rules"`
+	DomainStrategy string        `json:"domainStrategy,omitempty"`
+	Rules          []RoutingRule `json:"rules"`
 }
 
 type RoutingRule struct {
+	Type        string   `json:"type,omitempty"`
+	IP          []string `json:"ip,omitempty"`
 	InboundTag  []string `json:"inboundTag,omitempty"`
 	OutboundTag string   `json:"outboundTag"`
 }
@@ -85,6 +88,7 @@ type realitySettings struct {
 	ServerNames []string `json:"serverNames"`
 	PrivateKey  string   `json:"privateKey"`
 	ShortIds    []string `json:"shortIds"`
+	Fingerprint string   `json:"fingerprint,omitempty"`
 }
 
 // WebSocket+TLS 流配置
@@ -127,9 +131,16 @@ type dokodemoSettings struct {
 
 // ---- 配置生成 ----
 
+// LogConfig xray 日志配置（由 SettingService 提供）
+type LogConfig struct {
+	Access string // 访问日志路径，"none" 表示关闭
+	Error  string // 错误日志路径，空表示 stderr
+	Level  string // 日志级别：warning/info/debug
+}
+
 // GenerateConfig 根据节点、关联协议密钥和用户列表生成 Xray JSON 配置
 // 返回 (configJSON, inboundWarnings, error)：单个协议生成失败不中断整体，通过 warnings 上报
-func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, users []entity.User) (string, []string, error) {
+func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, users []entity.User, logCfg LogConfig) (string, []string, error) {
 	var inbounds []Inbound
 	var warnings []string
 
@@ -148,18 +159,25 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 	// gRPC API 入站（供远端管理，监听本地 10085）
 	inbounds = append(inbounds, buildAPIInbound())
 
+	level := logCfg.Level
+	if level == "" {
+		level = "warning"
+	}
 	cfg := Config{
 		Log: Log{
-			Loglevel: "warning",
-			Access:   "none",
+			Loglevel: level,
+			Access:   logCfg.Access,
+			Error:    logCfg.Error,
 		},
 		API: &API{
 			Tag:      "api",
 			Services: []string{"HandlerService", "LoggerService", "StatsService"},
 		},
 		Routing: &Routing{
+			DomainStrategy: "IPIfNonMatch",
 			Rules: []RoutingRule{
 				{InboundTag: []string{"api-inbound"}, OutboundTag: "api"},
+				{Type: "field", IP: []string{"geoip:private"}, OutboundTag: "block"},
 			},
 		},
 		Inbounds: inbounds,
@@ -231,6 +249,11 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 		sni = "www.microsoft.com"
 	}
 
+	fingerprint := ps.Fingerprint
+	if fingerprint == "" {
+		fingerprint = "chrome"
+	}
+
 	clients := buildVlessClients(users, "xtls-rprx-vision")
 
 	return Inbound{
@@ -252,6 +275,7 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 				ServerNames: []string{sni},
 				PrivateKey:  privateKey,
 				ShortIds:    shortIds,
+				Fingerprint: fingerprint,
 			},
 		},
 		Sniffing: &Sniffing{
