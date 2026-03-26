@@ -189,12 +189,20 @@ export default function Profiles() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['profiles'] })
 
+  // settings 文本框内容是字符串，发送时解析为 JSON object，避免后端二次编码问题
+  const parseSettings = (s: string) => {
+    try { return JSON.parse(s) } catch { return s }
+  }
+
   const save = useMutation({
     mutationFn: () => {
       const payload = {
-        ...form,
+        name: form.name,
+        protocol: form.protocol,
         port: Number(form.port) || 443,
+        settings: parseSettings(form.settings),
         active: form.active,
+        remark: form.remark,
       }
       return modal.profile
         ? profileApi.update(modal.profile.id, payload)

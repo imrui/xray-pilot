@@ -192,16 +192,14 @@ func buildInbound(node *entity.Node, profile *entity.InboundProfile, key *entity
 func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodeProfileKey, users []entity.User) (Inbound, error) {
 	// 解析协议共享参数（SNI、指纹、可选默认密钥）
 	var ps types.VlessRealitySettings
-	if profile.Settings != "" {
-		if err := json.Unmarshal([]byte(profile.Settings), &ps); err != nil {
-			return Inbound{}, fmt.Errorf("解析协议配置失败: %w", err)
-		}
+	if err := parseSettings(profile.Settings, &ps); err != nil {
+		return Inbound{}, fmt.Errorf("解析协议配置失败: %w", err)
 	}
 
 	// 解析节点密钥材料（覆盖协议默认值）
 	var km types.RealityKeyMaterial
-	if key != nil && key.Settings != "" {
-		if err := json.Unmarshal([]byte(key.Settings), &km); err != nil {
+	if key != nil {
+		if err := parseSettings(key.Settings, &km); err != nil {
 			return Inbound{}, fmt.Errorf("解析密钥材料失败: %w", err)
 		}
 	}
@@ -265,13 +263,11 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 
 func buildVlessWSTLSInbound(profile *entity.InboundProfile, key *entity.NodeProfileKey, users []entity.User) (Inbound, error) {
 	var ps types.VlessWSTLSSettings
-	if profile.Settings != "" {
-		_ = json.Unmarshal([]byte(profile.Settings), &ps)
-	}
+	_ = parseSettings(profile.Settings, &ps)
 
 	var cm types.TLSCertMaterial
-	if key.Settings != "" {
-		_ = json.Unmarshal([]byte(key.Settings), &cm)
+	if key != nil {
+		_ = parseSettings(key.Settings, &cm)
 	}
 
 	clients := buildVlessClients(users, "")
@@ -312,13 +308,11 @@ func buildVlessWSTLSInbound(profile *entity.InboundProfile, key *entity.NodeProf
 
 func buildTrojanInbound(profile *entity.InboundProfile, key *entity.NodeProfileKey, users []entity.User) (Inbound, error) {
 	var ps types.TrojanSettings
-	if profile.Settings != "" {
-		_ = json.Unmarshal([]byte(profile.Settings), &ps)
-	}
+	_ = parseSettings(profile.Settings, &ps)
 
 	var cm types.TLSCertMaterial
-	if key.Settings != "" {
-		_ = json.Unmarshal([]byte(key.Settings), &cm)
+	if key != nil {
+		_ = parseSettings(key.Settings, &cm)
 	}
 
 	clients := make([]trojanClient, 0, len(users))
@@ -374,6 +368,24 @@ func buildVlessClients(users []entity.User, flow string) []VlessClient {
 		})
 	}
 	return clients
+}
+
+// parseSettings 将 settings 字符串反序列化到 v
+// 兼容两种存储形式：
+//   - 直接 JSON 对象：{"sni":"..."} → 正常解析
+//   - JSON 字符串（二次编码）："{\"sni\":\"...\"}" → 先展开再解析
+func parseSettings(raw string, v interface{}) error {
+	if raw == "" {
+		return nil
+	}
+	if raw[0] == '"' {
+		// 二次编码：先将 JSON string 展开为原始 JSON
+		var unwrapped string
+		if err := json.Unmarshal([]byte(raw), &unwrapped); err == nil {
+			raw = unwrapped
+		}
+	}
+	return json.Unmarshal([]byte(raw), v)
 }
 
 // decryptKey 解密 AES-GCM 加密的密钥

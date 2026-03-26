@@ -32,7 +32,7 @@ func (s *ProfileService) Create(req *dto.CreateProfileRequest) (*dto.ProfileResp
 		Name:     req.Name,
 		Protocol: req.Protocol,
 		Port:     req.Port,
-		Settings: string(req.Settings),
+		Settings: normalizeSettingsJSON(req.Settings),
 		Active:   active,
 		Remark:   req.Remark,
 	}
@@ -54,7 +54,7 @@ func (s *ProfileService) Update(id uint, req *dto.UpdateProfileRequest) (*dto.Pr
 		p.Port = req.Port
 	}
 	if len(req.Settings) > 0 {
-		p.Settings = string(req.Settings)
+		p.Settings = normalizeSettingsJSON(req.Settings)
 	}
 	if req.Active != nil {
 		p.Active = *req.Active
@@ -217,6 +217,22 @@ func toNodeKeyResponse(k *entity.NodeProfileKey) *dto.NodeKeyResponse {
 		CreatedAt: k.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: k.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+// normalizeSettingsJSON 规范化 settings 存储格式
+// 若前端将 JSON 作为字符串值发送（二次编码），先展开为 JSON 对象字符串
+func normalizeSettingsJSON(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// 如果是 JSON string（首字节为引号），展开内层字符串
+	if raw[0] == '"' {
+		var unwrapped string
+		if err := json.Unmarshal(raw, &unwrapped); err == nil {
+			return unwrapped
+		}
+	}
+	return string(raw)
 }
 
 // maskPrivateKey 将 settings JSON 中的 private_key 替换为 "***"
