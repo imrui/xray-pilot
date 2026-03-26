@@ -18,8 +18,8 @@ export default defineConfig({
     host: true,
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:8080',
-      '/sub': 'http://localhost:8080',
+      '/api': 'http://localhost:2026',
+      '/sub': 'http://localhost:2026',
     },
   },
 })

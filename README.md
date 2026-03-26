@@ -44,10 +44,10 @@ cp config.yaml.example config.yaml
 ./xray-pilot
 ```
 
-Open `http://localhost:8080` and call the setup endpoint to create the admin account:
+Open `http://localhost:2026` and call the setup endpoint to create the admin account:
 
 ```bash
-curl -X POST http://localhost:8080/api/setup \
+curl -X POST http://localhost:2026/api/setup \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"your-password"}'
 ```
@@ -58,7 +58,7 @@ curl -X POST http://localhost:8080/api/setup \
 # Terminal 1 — backend
 make dev-backend
 
-# Terminal 2 — frontend (proxies API to :8080)
+# Terminal 2 — frontend (proxies API to :2026)
 make dev-frontend
 ```
 
@@ -68,7 +68,7 @@ Copy `config.yaml.example` to `config.yaml`. Key settings:
 
 ```yaml
 server:
-  port: 8080
+  port: 2026
   mode: release          # debug | release
 
 database:
@@ -83,11 +83,9 @@ crypto:
   master_key: ""        # AES-GCM key for encrypting node private keys.
                         # Leave blank to auto-generate; save the generated
                         # key back here before restarting.
-
-scheduler:
-  drift_check_interval: 300   # Seconds between config drift checks (0 = off)
-  health_check_interval: 120  # Seconds between TCP health checks (0 = off)
 ```
+
+Runtime settings such as scheduler intervals, SSH defaults, subscription formatting, and Xray log options are now stored in the system settings table and managed from the web UI rather than `config.yaml`.
 
 **Environment variable override:**
 

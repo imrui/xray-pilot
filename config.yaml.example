@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 2026
   mode: release  # debug | release
 
 database:
@@ -18,7 +18,3 @@ crypto:
   # 留空则首次启动时自动生成并打印到日志，建议将其复制回此处后重启。
   # 也可通过环境变量覆盖：XRAY_PILOT_MASTER_KEY=<base64-key>
   master_key: ""
-
-scheduler:
-  drift_check_interval: 300   # 漂移检测间隔（秒），0 表示禁用
-  health_check_interval: 120  # 健康检测间隔（秒），0 表示禁用

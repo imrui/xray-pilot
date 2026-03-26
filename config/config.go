@@ -79,7 +79,7 @@ func Load() error {
 	viper.AddConfigPath(".")
 
 	// 设置默认值
-	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.port", 2026)
 	viper.SetDefault("server.mode", "debug")
 	viper.SetDefault("database.driver", "sqlite")
 	viper.SetDefault("database.dsn", "xray-pilot.db")
