@@ -218,7 +218,9 @@ export default function Profiles() {
   const openEdit = (p: InboundProfile) => {
     setForm({
       name: p.name, protocol: p.protocol, port: String(p.port),
-      settings: p.settings ? JSON.stringify(JSON.parse(p.settings), null, 2) : '',
+      settings: p.settings
+        ? (typeof p.settings === 'string' ? p.settings : JSON.stringify(p.settings, null, 2))
+        : '',
       active: p.active, remark: p.remark,
     })
     setErr('')

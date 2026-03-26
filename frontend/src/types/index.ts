@@ -55,7 +55,7 @@ export interface InboundProfile {
   name: string
   protocol: Protocol
   port: number
-  settings: string   // JSON 字符串
+  settings: unknown   // JSON object（后端返回 json.RawMessage，已解析为对象）
   active: boolean
   remark: string
   created_at: string
@@ -66,7 +66,7 @@ export interface InboundProfile {
 export interface NodeKey {
   node_id: number
   profile_id: number
-  settings: string   // JSON 字符串（private_key 已脱敏为 "***"）
+  settings: unknown   // JSON object（private_key 已脱敏为 "***"）
   created_at: string
   updated_at: string
 }
