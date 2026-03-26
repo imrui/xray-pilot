@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/imrui/xray-pilot/internal/dto"
@@ -11,14 +12,22 @@ import (
 )
 
 type UserHandler struct {
-	svc *service.UserService
+	svc        *service.UserService
+	settingSvc *service.SettingService
 }
 
 func NewUserHandler() *UserHandler {
-	return &UserHandler{svc: service.NewUserService()}
+	return &UserHandler{
+		svc:        service.NewUserService(),
+		settingSvc: service.NewSettingService(),
+	}
 }
 
 func (h *UserHandler) baseURL(c *gin.Context) string {
+	// 优先使用后台配置的 base_url，留空则从请求 Host 自动推断
+	if base := h.settingSvc.Get(service.KeySubscriptionBaseURL); base != "" {
+		return strings.TrimRight(base, "/")
+	}
 	scheme := "http"
 	if c.Request.TLS != nil {
 		scheme = "https"
