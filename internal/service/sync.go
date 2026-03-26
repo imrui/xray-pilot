@@ -238,18 +238,22 @@ func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 // maskXrayConfig 将 Xray config JSON 中的 privateKey 字段值替换为占位符
 func maskXrayConfig(configJSON string) string {
 	const marker = `"privateKey": "`
+	const replacement = "<masked>"
 	result := configJSON
+	offset := 0
 	for {
-		idx := strings.Index(result, marker)
+		idx := strings.Index(result[offset:], marker)
 		if idx < 0 {
 			break
 		}
-		start := idx + len(marker)
-		end := strings.Index(result[start:], `"`)
+		absStart := offset + idx + len(marker)
+		end := strings.Index(result[absStart:], `"`)
 		if end < 0 {
 			break
 		}
-		result = result[:start] + "<masked>" + result[start+end:]
+		result = result[:absStart] + replacement + result[absStart+end:]
+		// 跳过已替换部分，避免对 "<masked>" 重复匹配
+		offset = absStart + len(replacement)
 	}
 	return result
 }

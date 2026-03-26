@@ -317,7 +317,7 @@ function PreviewConfigModal({ node, onClose }: { node: Node; onClose: () => void
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
           <div>
             <h3 className="text-base font-semibold text-gray-900">预览生成配置 · {node.name}</h3>
-            <p className="text-xs text-slate-400 mt-0.5">private_key 已脱敏 · 此配置将被同步至节点</p>
+            <p className="text-xs text-slate-400 mt-0.5">仅预览，不会同步至节点 · private_key 已脱敏</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
         </div>
