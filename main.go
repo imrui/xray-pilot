@@ -25,6 +25,8 @@ import (
 //go:embed frontend/dist
 var frontendFS embed.FS
 
+var Version = "dev"
+
 func main() {
 	// 1. 加载配置
 	if err := config.Load(); err != nil {
@@ -82,7 +84,7 @@ func main() {
 	// 7. 启动 HTTP 服务器
 	addr := fmt.Sprintf(":%d", config.Global.Server.Port)
 	srv := &http.Server{Addr: addr, Handler: r}
-	log.Info("服务启动", zap.String("addr", addr))
+	log.Info("服务启动", zap.String("addr", addr), zap.String("version", Version))
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -1,5 +1,8 @@
 .PHONY: all frontend build dev-backend dev-frontend clean
 
+VERSION ?= dev
+LDFLAGS := -X main.Version=$(VERSION)
+
 # 默认目标
 all: build
 
@@ -9,11 +12,11 @@ frontend:
 
 # 完整构建（前端 + Go 二进制）
 build: frontend
-	go build -o xray-pilot .
+	go build -ldflags "$(LDFLAGS)" -o xray-pilot .
 
 # 仅启动后端开发服务器
 dev-backend:
-	go run main.go
+	go run -ldflags "$(LDFLAGS)" main.go
 
 # 仅启动前端开发服务器
 dev-frontend:

@@ -16,5 +16,9 @@ jwt:
 crypto:
   # AES-GCM 主密钥，用于加密节点 PrivateKey。
   # 留空则首次启动时自动生成并打印到日志，建议将其复制回此处后重启。
-  # 也可通过环境变量覆盖：XRAY_PILOT_MASTER_KEY=<base64-key>
+  # 也可通过环境变量覆盖：XRAY_PILOT_MASTER_KEY=<hex-key>
   master_key: ""
+
+admins:
+  - username: admin
+    password: "change-me-now"  # 启动时会自动 hash 到内存中
