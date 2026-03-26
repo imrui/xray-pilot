@@ -222,6 +222,53 @@ func loadKeyFile(path string) (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(signer), nil
 }
 
+// RemoveKnownHost 从 known_hosts 文件中删除指定主机名/IP 的所有条目。
+// 在节点 IP 或 Domain 发生变更时调用，防止旧密钥残留导致后续 TOFU 校验误报 MITM。
+func RemoveKnownHost(path, hostname string) error {
+	knownHostsMu.Lock()
+	defer knownHostsMu.Unlock()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // 文件不存在，无需处理
+		}
+		return fmt.Errorf("读取 known_hosts 失败: %w", err)
+	}
+
+	// 按行过滤，移除匹配该主机名的条目
+	normalized := knownhosts.Normalize(hostname)
+	lines := strings.Split(string(data), "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			kept = append(kept, line)
+			continue
+		}
+		// known_hosts 行格式：<hosts> <keytype> <key> [comment]
+		// hosts 字段可能包含多个以逗号分隔的主机名/IP
+		fields := strings.Fields(trimmed)
+		if len(fields) < 3 {
+			kept = append(kept, line)
+			continue
+		}
+		hosts := strings.Split(fields[0], ",")
+		matched := false
+		for _, h := range hosts {
+			if knownhosts.Normalize(h) == normalized {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			kept = append(kept, line)
+		}
+	}
+
+	return os.WriteFile(path, []byte(strings.Join(kept, "\n")), 0600)
+}
+
 // buildTOFUCallback 构建 TOFU（Trust On First Use）主机密钥校验回调：
 // 首次连接未知主机时自动信任并追加至 known_hosts；后续连接严格比对，密钥变更则拒绝。
 func buildTOFUCallback(path string) (ssh.HostKeyCallback, error) {

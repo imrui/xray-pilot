@@ -48,3 +48,10 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Antigravity
+.agent/
+design-system.md
+
+# codex
+.codex/

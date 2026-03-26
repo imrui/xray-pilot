@@ -5,20 +5,26 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
+	"github.com/imrui/xray-pilot/pkg/logger"
+	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
 
 type NodeService struct {
-	nodeRepo *repository.NodeRepository
-	logRepo  *repository.LogRepository
+	nodeRepo   *repository.NodeRepository
+	logRepo    *repository.LogRepository
+	settingSvc *SettingService
 }
 
 func NewNodeService() *NodeService {
 	return &NodeService{
-		nodeRepo: repository.NewNodeRepository(),
-		logRepo:  repository.NewLogRepository(),
+		nodeRepo:   repository.NewNodeRepository(),
+		logRepo:    repository.NewLogRepository(),
+		settingSvc: NewSettingService(),
 	}
 }
 
@@ -53,7 +59,10 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 		return nil, errors.New("节点不存在")
 	}
 
+	// 记录变更前的连接地址，用于清理 known_hosts
+	oldAddr := node.ConnectAddr()
 	ipChanged := req.IP != "" && req.IP != node.IP
+	domainChanged := req.Domain != "" && req.Domain != node.Domain
 
 	if req.Name != "" {
 		node.Name = req.Name
@@ -80,9 +89,17 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 		node.Remark = req.Remark
 	}
 
-	// IP 变更后标记漂移，触发重新同步
-	if ipChanged {
+	// IP 或 Domain 变更：清理旧的 known_hosts 条目，并标记漂移触发重新同步
+	if ipChanged || domainChanged {
 		node.SyncStatus = entity.SyncStatusDrifted
+		knownHostsPath := s.settingSvc.Get(KeySSHKnownHostsPath)
+		if err := xssh.RemoveKnownHost(knownHostsPath, oldAddr); err != nil {
+			// 非致命错误，记录警告后继续
+			logger.Log.Warn("清理 known_hosts 旧条目失败",
+				zap.String("addr", oldAddr),
+				zap.Error(err),
+			)
+		}
 	}
 
 	if err := s.nodeRepo.Update(node); err != nil {
