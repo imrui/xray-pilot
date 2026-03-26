@@ -18,6 +18,7 @@ import (
 	"github.com/imrui/xray-pilot/internal/handler"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/scheduler"
+	"github.com/imrui/xray-pilot/internal/service"
 	"github.com/imrui/xray-pilot/pkg/logger"
 )
 
@@ -45,7 +46,10 @@ func main() {
 	}
 	log.Info("数据库连接成功", zap.String("driver", config.Global.Database.Driver))
 
-	// 4. 启动定时任务（漂移检测 + 健康检测）
+	// 4. 将 config.yaml 中的运行时配置种入数据库（仅首次启动，已有则跳过）
+	service.NewSettingService().SeedFromConfig()
+
+	// 5. 启动定时任务（漂移检测 + 健康检测）
 	schedCtx, schedCancel := context.WithCancel(context.Background())
 	defer schedCancel()
 	scheduler.New().Start(schedCtx)

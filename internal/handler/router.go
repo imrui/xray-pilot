@@ -68,8 +68,10 @@ func RegisterRoutes(r *gin.Engine) {
 		// 操作日志
 		api.GET("/logs", logH.List)
 
-		// 系统配置
-		api.GET("/system/config", systemH.GetConfig)
-		api.PUT("/system/config", systemH.UpdateConfig)
+		// 系统信息（只读）
+		api.GET("/system/info", systemH.GetSystemInfo)
+		// 运行时配置（KV，可读写）
+		api.GET("/system/settings", systemH.GetSettings)
+		api.PUT("/system/settings", systemH.UpdateSettings)
 	}
 }

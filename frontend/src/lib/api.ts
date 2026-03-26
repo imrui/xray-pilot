@@ -156,15 +156,17 @@ export const logApi = {
     request.get<ApiResponse<PageResult<SyncLog>>>('/logs', { params }),
 }
 
-// ---- 系统配置 API ----
+// ---- 系统 API ----
 export const systemApi = {
-  getConfig: () =>
+  getInfo: () =>
     request.get<ApiResponse<{
       server: { port: number; mode: string }
       database: { driver: string }
-      scheduler: { drift_check_interval: number; health_check_interval: number }
-    }>>('/system/config'),
+    }>>('/system/info'),
 
-  updateConfig: (data: { drift_check_interval?: number; health_check_interval?: number }) =>
-    request.put<ApiResponse<{ message: string }>>('/system/config', data),
+  getSettings: () =>
+    request.get<ApiResponse<Record<string, string>>>('/system/settings'),
+
+  updateSettings: (data: Record<string, string>) =>
+    request.put<ApiResponse<Record<string, string>>>('/system/settings', data),
 }

@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/service"
@@ -16,35 +15,38 @@ import (
 
 // Scheduler 管理所有定时任务
 type Scheduler struct {
-	syncSvc  *service.SyncService
-	nodeRepo *repository.NodeRepository
-	logRepo  *repository.LogRepository
-	log      *zap.Logger
+	syncSvc    *service.SyncService
+	settingSvc *service.SettingService
+	nodeRepo   *repository.NodeRepository
+	logRepo    *repository.LogRepository
+	log        *zap.Logger
 }
 
 func New() *Scheduler {
 	return &Scheduler{
-		syncSvc:  service.NewSyncService(),
-		nodeRepo: repository.NewNodeRepository(),
-		logRepo:  repository.NewLogRepository(),
-		log:      zap.L().Named("scheduler"),
+		syncSvc:    service.NewSyncService(),
+		settingSvc: service.NewSettingService(),
+		nodeRepo:   repository.NewNodeRepository(),
+		logRepo:    repository.NewLogRepository(),
+		log:        zap.L().Named("scheduler"),
 	}
 }
 
 // Start 启动所有定时任务，ctx 取消时自动退出
 func (s *Scheduler) Start(ctx context.Context) {
-	cfg := config.Global.Scheduler
+	driftInterval := s.settingSvc.GetInt(service.KeySchedulerDriftInterval)
+	healthInterval := s.settingSvc.GetInt(service.KeySchedulerHealthInterval)
 
-	if cfg.DriftCheckInterval > 0 {
+	if driftInterval > 0 {
 		go s.runLoop(ctx, "drift_check",
-			time.Duration(cfg.DriftCheckInterval)*time.Second,
+			time.Duration(driftInterval)*time.Second,
 			s.runDriftCheck,
 		)
 	}
 
-	if cfg.HealthCheckInterval > 0 {
+	if healthInterval > 0 {
 		go s.runLoop(ctx, "health_check",
-			time.Duration(cfg.HealthCheckInterval)*time.Second,
+			time.Duration(healthInterval)*time.Second,
 			s.runHealthCheck,
 		)
 	}

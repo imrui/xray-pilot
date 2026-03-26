@@ -12,6 +12,7 @@ import (
 	"github.com/imrui/xray-pilot/pkg/response"
 )
 
+
 // ---- 日志 ----
 
 type LogHandler struct {
@@ -87,14 +88,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 // ---- 系统配置 ----
 
-type SystemHandler struct{}
-
-func NewSystemHandler() *SystemHandler {
-	return &SystemHandler{}
+type SystemHandler struct {
+	settingSvc *service.SettingService
 }
 
-// GetConfig 返回系统可公开配置项
-func (h *SystemHandler) GetConfig(c *gin.Context) {
+func NewSystemHandler() *SystemHandler {
+	return &SystemHandler{settingSvc: service.NewSettingService()}
+}
+
+// GetSystemInfo 返回只读系统信息（服务端口、数据库驱动）
+func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	cfg := config.Global
 	response.Success(c, gin.H{
 		"server": gin.H{
@@ -104,28 +107,24 @@ func (h *SystemHandler) GetConfig(c *gin.Context) {
 		"database": gin.H{
 			"driver": cfg.Database.Driver,
 		},
-		"scheduler": gin.H{
-			"drift_check_interval":  cfg.Scheduler.DriftCheckInterval,
-			"health_check_interval": cfg.Scheduler.HealthCheckInterval,
-		},
 	})
 }
 
-// UpdateConfig 更新运行时可调整的配置项（当前支持 scheduler 间隔）
-func (h *SystemHandler) UpdateConfig(c *gin.Context) {
-	var req struct {
-		DriftCheckInterval  *int `json:"drift_check_interval"`
-		HealthCheckInterval *int `json:"health_check_interval"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+// GetSettings 返回所有运行时配置（DB 值优先，无则返回默认值）
+func (h *SystemHandler) GetSettings(c *gin.Context) {
+	response.Success(c, h.settingSvc.GetAll())
+}
+
+// UpdateSettings 批量更新运行时配置
+func (h *SystemHandler) UpdateSettings(c *gin.Context) {
+	var kv map[string]string
+	if err := c.ShouldBindJSON(&kv); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if req.DriftCheckInterval != nil {
-		config.Global.Scheduler.DriftCheckInterval = *req.DriftCheckInterval
+	if err := h.settingSvc.BatchUpdate(kv); err != nil {
+		response.Fail(c, 500, err.Error())
+		return
 	}
-	if req.HealthCheckInterval != nil {
-		config.Global.Scheduler.HealthCheckInterval = *req.HealthCheckInterval
-	}
-	response.Success(c, gin.H{"message": "配置已更新（重启后定时器生效）"})
+	response.Success(c, h.settingSvc.GetAll())
 }

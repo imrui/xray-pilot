@@ -6,7 +6,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/xray"
@@ -18,6 +17,7 @@ type SyncService struct {
 	userRepo    *repository.UserRepository
 	logRepo     *repository.LogRepository
 	profileRepo *repository.InboundProfileRepository
+	settingSvc  *SettingService
 }
 
 func NewSyncService() *SyncService {
@@ -26,6 +26,7 @@ func NewSyncService() *SyncService {
 		userRepo:    repository.NewUserRepository(),
 		logRepo:     repository.NewLogRepository(),
 		profileRepo: repository.NewInboundProfileRepository(),
+		settingSvc:  NewSettingService(),
 	}
 }
 
@@ -190,7 +191,12 @@ func (s *SyncService) buildConfig(node *entity.Node) (string, []string, error) {
 		return "", nil, fmt.Errorf("查询节点用户失败: %w", err)
 	}
 
-	return xray.GenerateConfig(node, profileKeys, users)
+	logCfg := xray.LogConfig{
+		Access: s.settingSvc.Get(KeyXrayLogAccess),
+		Error:  s.settingSvc.Get(KeyXrayLogError),
+		Level:  s.settingSvc.Get(KeyXrayLogLevel),
+	}
+	return xray.GenerateConfig(node, profileKeys, users, logCfg)
 }
 
 // PreviewConfig 生成节点期望配置（供调试用，private_key 脱敏）
@@ -211,21 +217,21 @@ func (s *SyncService) PreviewConfig(nodeID uint) (string, []string, error) {
 func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 	sshPort := node.SSHPort
 	if sshPort == 0 {
-		sshPort = config.Global.SSH.DefaultPort
+		sshPort = s.settingSvc.GetInt(KeySSHDefaultPort)
 		if sshPort == 0 {
 			sshPort = 22
 		}
 	}
 	sshUser := node.SSHUser
 	if sshUser == "" {
-		sshUser = config.Global.SSH.DefaultUser
+		sshUser = s.settingSvc.Get(KeySSHDefaultUser)
 		if sshUser == "" {
 			sshUser = "root"
 		}
 	}
 	keyPath := node.SSHKeyPath
 	if keyPath == "" {
-		keyPath = config.Global.SSH.DefaultKeyPath
+		keyPath = s.settingSvc.Get(KeySSHDefaultKeyPath)
 	}
 	return xray.SSHParams{
 		Host:    node.IP,

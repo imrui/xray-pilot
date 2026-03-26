@@ -10,7 +10,6 @@ import (
 
 	"encoding/json"
 
-	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/pkg/crypto"
@@ -22,6 +21,7 @@ type SubscribeService struct {
 	userRepo    *repository.UserRepository
 	nodeRepo    *repository.NodeRepository
 	profileRepo *repository.InboundProfileRepository
+	settingSvc  *SettingService
 }
 
 func NewSubscribeService() *SubscribeService {
@@ -29,6 +29,7 @@ func NewSubscribeService() *SubscribeService {
 		userRepo:    repository.NewUserRepository(),
 		nodeRepo:    repository.NewNodeRepository(),
 		profileRepo: repository.NewInboundProfileRepository(),
+		settingSvc:  NewSettingService(),
 	}
 }
 
@@ -71,7 +72,7 @@ func (s *SubscribeService) GenerateSubscription(token string) (string, error) {
 		}
 		for _, key := range profileKeys {
 			key := key
-			link := buildURI(user, &node, key.Profile, &key)
+			link := s.buildURI(user, &node, key.Profile, &key)
 			if link != "" {
 				links = append(links, link)
 			}
@@ -83,24 +84,24 @@ func (s *SubscribeService) GenerateSubscription(token string) (string, error) {
 }
 
 // buildURI 根据协议类型分发 URI 构建
-func buildURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
+func (s *SubscribeService) buildURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
 	if profile == nil {
 		return ""
 	}
 	switch profile.Protocol {
 	case types.ProtocolVlessReality:
-		return buildVlessRealityURI(user, node, profile, key)
+		return s.buildVlessRealityURI(user, node, profile, key)
 	case types.ProtocolVlessWSTLS:
-		return buildVlessWSTLSURI(user, node, profile, key)
+		return s.buildVlessWSTLSURI(user, node, profile, key)
 	case types.ProtocolTrojan:
-		return buildTrojanURI(user, node, profile, key)
+		return s.buildTrojanURI(user, node, profile, key)
 	case types.ProtocolHysteria2:
-		return buildHysteria2URI(user, node, profile, key)
+		return s.buildHysteria2URI(user, node, profile, key)
 	}
 	return ""
 }
 
-func buildVlessRealityURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
+func (s *SubscribeService) buildVlessRealityURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
 	var ps types.VlessRealitySettings
 	if profile.Settings != "" {
 		_ = json.Unmarshal([]byte(profile.Settings), &ps)
@@ -135,12 +136,12 @@ func buildVlessRealityURI(user *entity.User, node *entity.Node, profile *entity.
 		params.Set("sid", km.ShortIds[0])
 	}
 
-	remark := buildRemark(node)
+	remark := s.buildRemark(node, user, "vless", "reality")
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",
 		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.QueryEscape(remark))
 }
 
-func buildVlessWSTLSURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
+func (s *SubscribeService) buildVlessWSTLSURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
 	var ps types.VlessWSTLSSettings
 	if profile.Settings != "" {
 		_ = json.Unmarshal([]byte(profile.Settings), &ps)
@@ -163,12 +164,12 @@ func buildVlessWSTLSURI(user *entity.User, node *entity.Node, profile *entity.In
 	params.Set("path", path)
 	params.Set("sni", host)
 
-	remark := buildRemark(node)
+	remark := s.buildRemark(node, user, "vless", "ws")
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",
 		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.QueryEscape(remark))
 }
 
-func buildTrojanURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
+func (s *SubscribeService) buildTrojanURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
 	var ps types.TrojanSettings
 	if profile.Settings != "" {
 		_ = json.Unmarshal([]byte(profile.Settings), &ps)
@@ -184,12 +185,12 @@ func buildTrojanURI(user *entity.User, node *entity.Node, profile *entity.Inboun
 	params.Set("sni", sni)
 	params.Set("type", "tcp")
 
-	remark := buildRemark(node)
+	remark := s.buildRemark(node, user, "trojan", "tcp")
 	return fmt.Sprintf("trojan://%s@%s:%d?%s#%s",
 		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.QueryEscape(remark))
 }
 
-func buildHysteria2URI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
+func (s *SubscribeService) buildHysteria2URI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
 	var ps types.Hysteria2Settings
 	if profile.Settings != "" {
 		_ = json.Unmarshal([]byte(profile.Settings), &ps)
@@ -209,22 +210,26 @@ func buildHysteria2URI(user *entity.User, node *entity.Node, profile *entity.Inb
 		params.Set("downmbps", fmt.Sprintf("%d", ps.DownMbps))
 	}
 
-	remark := buildRemark(node)
+	remark := s.buildRemark(node, user, "hy2", "udp")
 	return fmt.Sprintf("hy2://%s@%s:%d?%s#%s",
 		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.QueryEscape(remark))
 }
 
-// buildRemark 生成节点备注，支持 remark_format 配置
-func buildRemark(node *entity.Node) string {
-	format := config.Global.Subscription.RemarkFormat
+// buildRemark 生成节点备注，支持格式占位符：
+// {node_name} {username} {protocol} {transport} {region} {name}
+func (s *SubscribeService) buildRemark(node *entity.Node, user *entity.User, protocol, transport string) string {
+	format := s.settingSvc.Get(KeySubscriptionRemarkFormat)
 	if format == "" {
-		format = "{region}-{name}"
+		format = "{node_name}"
 	}
 	remark := format
+	remark = strings.ReplaceAll(remark, "{node_name}", node.Name)
+	remark = strings.ReplaceAll(remark, "{username}", user.Username)
+	remark = strings.ReplaceAll(remark, "{protocol}", protocol)
+	remark = strings.ReplaceAll(remark, "{transport}", transport)
 	remark = strings.ReplaceAll(remark, "{region}", node.Region)
-	remark = strings.ReplaceAll(remark, "{name}", node.Name)
-	// 去除首尾多余的连字符
-	remark = strings.Trim(remark, "-")
+	remark = strings.ReplaceAll(remark, "{name}", node.Name) // 向后兼容
+	remark = strings.Trim(remark, "- ")
 	if remark == "" {
 		remark = node.Name
 	}
