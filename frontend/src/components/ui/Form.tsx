@@ -62,9 +62,9 @@ interface BtnProps {
 }
 
 const btnClass: Record<string, string> = {
-  primary: 'border border-emerald-500/10 bg-[var(--accent)] text-slate-950 shadow-[0_12px_28px_rgba(16,185,129,0.18)] hover:brightness-105 focus-visible:ring-emerald-500',
-  secondary: 'border border-[var(--border-strong)] bg-[var(--panel-muted)] text-[var(--text)] hover:bg-[var(--panel)] focus-visible:ring-slate-400',
-  danger: 'border border-rose-500/10 bg-rose-500 text-white shadow-[0_12px_28px_rgba(244,63,94,0.18)] hover:brightness-105 focus-visible:ring-rose-500',
+  primary: 'border border-[var(--accent)]/18 bg-[var(--accent)] text-white shadow-[0_10px_24px_rgba(45,111,105,0.14)] hover:bg-[var(--accent-strong)] focus-visible:ring-[var(--accent)]',
+  secondary: 'border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text)] hover:bg-[var(--panel-muted)] focus-visible:ring-slate-400',
+  danger: 'border border-[var(--danger)]/14 bg-[var(--danger)] text-white shadow-[0_10px_24px_rgba(200,106,116,0.14)] hover:brightness-105 focus-visible:ring-[var(--danger)]',
   ghost: 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)] focus-visible:ring-slate-400',
 }
 
@@ -82,5 +82,27 @@ export function Btn({ variant = 'primary', loading, children, className, ...prop
       {loading && <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />}
       {children}
     </button>
+  )
+}
+
+export function FieldGroup({
+  title,
+  description,
+  children,
+  className,
+}: {
+  title: string
+  description?: string
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <section className={cn('rounded-[24px] border border-[var(--border)] bg-[var(--panel-muted)] p-4 md:p-5', className)}>
+      <div className="mb-4">
+        <h4 className="text-sm font-semibold tracking-[-0.02em]">{title}</h4>
+        {description && <p className="mt-1 text-xs leading-5 text-soft">{description}</p>}
+      </div>
+      <div className="space-y-4">{children}</div>
+    </section>
   )
 }

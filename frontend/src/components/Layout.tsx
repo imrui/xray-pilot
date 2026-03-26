@@ -45,8 +45,8 @@ export default function Layout() {
   return (
     <div className="relative min-h-screen overflow-hidden text-[var(--text)]">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-[-8%] top-[-6%] h-72 w-72 rounded-full bg-cyan-400/12 blur-[110px] dark:bg-cyan-400/10" />
-        <div className="absolute bottom-[-10%] right-[-6%] h-80 w-80 rounded-full bg-emerald-400/12 blur-[120px] dark:bg-emerald-400/10" />
+        <div className="absolute left-[-8%] top-[-6%] h-72 w-72 rounded-full bg-teal-400/10 blur-[110px]" />
+        <div className="absolute bottom-[-10%] right-[-6%] h-80 w-80 rounded-full bg-orange-300/8 blur-[120px]" />
       </div>
 
       <header className="panel-strong fixed inset-x-3 top-3 z-50 flex h-16 items-center justify-between rounded-2xl px-4 lg:hidden">
@@ -165,16 +165,23 @@ export default function Layout() {
                 )
               })}
             </nav>
+          </div>
+        </aside>
 
-            <div className="mt-auto flex flex-col gap-3 pt-6">
-              <div className="rounded-[22px] border border-[var(--border)] bg-[var(--panel-muted)] p-2">
-                <div className="grid grid-cols-2 gap-2">
+        <main className="min-w-0 flex-1">
+          <div className="panel relative min-h-[calc(100vh-24px)] rounded-[32px] p-4 md:p-6">
+            <div className="mb-4 hidden items-center justify-end gap-3 lg:flex">
+              <div className="rounded-full border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-faint">
+                {currentView}
+              </div>
+              <div className="rounded-[18px] border border-[var(--border)] bg-[var(--panel-muted)] p-1">
+                <div className="grid grid-cols-2 gap-1">
                   <button
                     onClick={() => {
                       if (theme === 'dark') toggleTheme()
                     }}
                     className={cn(
-                      'flex items-center justify-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-medium transition',
+                      'flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition',
                       theme === 'light' ? 'bg-[var(--panel-strong)] text-[var(--text)] shadow-sm' : 'text-soft hover:bg-[var(--panel)]'
                     )}
                   >
@@ -186,7 +193,7 @@ export default function Layout() {
                       if (theme === 'light') toggleTheme()
                     }}
                     className={cn(
-                      'flex items-center justify-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-medium transition',
+                      'flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition',
                       theme === 'dark' ? 'bg-[var(--panel-strong)] text-[var(--text)] shadow-sm' : 'text-soft hover:bg-[var(--panel)]'
                     )}
                   >
@@ -195,32 +202,16 @@ export default function Layout() {
                   </button>
                 </div>
               </div>
-
               <button
                 onClick={handleLogout}
-                className="flex items-center justify-center gap-2 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-500 transition hover:bg-rose-500/16"
+                className="flex items-center justify-center gap-2 rounded-2xl border border-[var(--danger)]/18 bg-[var(--danger-soft)] px-4 py-3 text-sm font-semibold text-[var(--danger)] transition hover:brightness-105"
               >
                 <LogOut className="h-4 w-4" />
                 退出登录
               </button>
             </div>
-          </div>
-        </aside>
 
-        <main className="min-w-0 flex-1">
-          <div className="panel relative min-h-[calc(100vh-24px)] rounded-[32px] p-4 md:p-6">
-            <div className="mb-5 hidden items-center justify-between rounded-[24px] border border-[var(--border)] bg-[var(--panel-muted)] px-5 py-4 lg:flex">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-faint">Command Center</div>
-                <div className="mt-2 text-sm font-semibold">可视化管理节点、协议、用户与系统配置</div>
-              </div>
-              <div className="text-right">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-faint">Current View</div>
-                <div className="mt-2 text-sm font-semibold">{currentView}</div>
-              </div>
-            </div>
-
-            <div className="min-h-[calc(100vh-120px)] overflow-auto rounded-[26px]">
+            <div className="min-h-[calc(100vh-88px)] overflow-auto rounded-[26px]">
               <Outlet />
             </div>
           </div>

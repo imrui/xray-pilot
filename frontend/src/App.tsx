@@ -9,6 +9,7 @@ import Profiles from '@/pages/Profiles'
 import Logs from '@/pages/Logs'
 import Settings from '@/pages/Settings'
 import { useAuthStore } from '@/store/auth'
+import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
 
 const queryClient = new QueryClient()
 
@@ -20,27 +21,29 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="/nodes" replace />} />
-            <Route path="users" element={<Users />} />
-            <Route path="groups" element={<Groups />} />
-            <Route path="nodes" element={<Nodes />} />
-            <Route path="profiles" element={<Profiles />} />
-            <Route path="logs" element={<Logs />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <ConfirmProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Navigate to="/nodes" replace />} />
+              <Route path="users" element={<Users />} />
+              <Route path="groups" element={<Groups />} />
+              <Route path="nodes" element={<Nodes />} />
+              <Route path="profiles" element={<Profiles />} />
+              <Route path="logs" element={<Logs />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </ConfirmProvider>
     </QueryClientProvider>
   )
 }
