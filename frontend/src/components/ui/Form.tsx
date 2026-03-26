@@ -8,17 +8,17 @@ interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
 
 export function Field({ label, error, className, ...props }: FieldProps) {
   return (
-    <div className="space-y-1">
-      <label className="block text-sm font-medium text-gray-700">{label}</label>
+    <div className="flex flex-col space-y-1.5">
+      <label className="text-[12px] font-semibold uppercase tracking-[0.16em] text-faint">{label}</label>
       <input
         className={cn(
-          'w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent',
-          error && 'border-red-400 focus:ring-red-400',
+          'w-full rounded-2xl border bg-[var(--panel-muted)] px-4 py-3 text-sm text-[var(--text)] placeholder:text-faint transition-all duration-200 focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-soft)]',
+          error && 'border-red-400/40 focus:border-red-500 focus:ring-red-500/10',
           className
         )}
         {...props}
       />
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="mt-1 text-[11px] font-medium text-red-500">{error}</p>}
     </div>
   )
 }
@@ -33,14 +33,14 @@ interface SelectFieldProps {
 
 export function SelectField({ label, value, onChange, options, placeholder }: SelectFieldProps) {
   return (
-    <div className="space-y-1">
-      <label className="block text-sm font-medium text-gray-700">{label}</label>
+    <div className="flex flex-col space-y-1.5">
+      <label className="text-[12px] font-semibold uppercase tracking-[0.16em] text-faint">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+        className="w-full rounded-2xl border bg-[var(--panel-muted)] px-4 py-3 text-sm text-[var(--text)] transition-all duration-200 focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-soft)]"
       >
-        {placeholder && <option value="">{placeholder}</option>}
+        {placeholder && <option value="" disabled>{placeholder}</option>}
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
@@ -51,7 +51,7 @@ export function SelectField({ label, value, onChange, options, placeholder }: Se
   )
 }
 
-interface Btn {
+interface BtnProps {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
   loading?: boolean
   children: React.ReactNode
@@ -62,26 +62,24 @@ interface Btn {
 }
 
 const btnClass: Record<string, string> = {
-  primary:   'bg-gray-900 text-white hover:bg-gray-800',
-  secondary: 'border border-gray-300 text-gray-700 hover:bg-gray-50',
-  danger:    'bg-red-600 text-white hover:bg-red-700',
-  ghost:     'text-gray-600 hover:bg-gray-100',
+  primary: 'border border-emerald-500/10 bg-[var(--accent)] text-slate-950 shadow-[0_12px_28px_rgba(16,185,129,0.18)] hover:brightness-105 focus-visible:ring-emerald-500',
+  secondary: 'border border-[var(--border-strong)] bg-[var(--panel-muted)] text-[var(--text)] hover:bg-[var(--panel)] focus-visible:ring-slate-400',
+  danger: 'border border-rose-500/10 bg-rose-500 text-white shadow-[0_12px_28px_rgba(244,63,94,0.18)] hover:brightness-105 focus-visible:ring-rose-500',
+  ghost: 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)] focus-visible:ring-slate-400',
 }
 
-export function Btn({ variant = 'primary', loading, children, className, ...props }: Btn) {
+export function Btn({ variant = 'primary', loading, children, className, ...props }: BtnProps) {
   return (
     <button
       className={cn(
-        'inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors disabled:opacity-50',
+        'inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50',
         btnClass[variant],
         className
       )}
       disabled={loading || props.disabled}
       {...props}
     >
-      {loading && (
-        <span className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-      )}
+      {loading && <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />}
       {children}
     </button>
   )

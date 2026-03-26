@@ -1,6 +1,6 @@
-import { QRCodeSVG } from 'qrcode.react'
-import { X, Copy, Check } from 'lucide-react'
 import { useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
+import { Check, Copy, X } from 'lucide-react'
 
 interface QRModalProps {
   open: boolean
@@ -21,39 +21,29 @@ export function QRModal({ open, onClose, url, title = '订阅二维码' }: QRMod
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
-        {/* 头部 */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <X className="w-5 h-5" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+      <div className="panel-strong w-full max-w-sm rounded-[28px]">
+        <div className="flex items-center justify-between border-b border-[var(--border)] p-6">
+          <h3 className="text-lg font-semibold tracking-[-0.03em]">{title}</h3>
+          <button onClick={onClose} className="rounded-xl p-2 text-soft transition-colors hover:bg-[var(--panel-muted)] hover:text-[var(--text)]">
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* 二维码 */}
-        <div className="p-6 flex flex-col items-center gap-4">
-          <div className="p-3 border border-gray-200 rounded-lg">
+        <div className="flex flex-col items-center gap-4 p-6">
+          <div className="rounded-[24px] border border-[var(--border)] bg-white p-4">
             <QRCodeSVG value={url} size={200} level="M" />
           </div>
 
-          {/* 订阅链接 */}
           <div className="w-full">
-            <p className="text-xs text-gray-500 mb-1.5">订阅链接</p>
-            <div className="flex gap-2 items-center">
-              <input
-                readOnly
-                value={url}
-                className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-xs text-gray-600 bg-gray-50 truncate"
-              />
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-faint">订阅链接</p>
+            <div className="flex items-center gap-2">
+              <input readOnly value={url} className="flex-1 rounded-2xl border bg-[var(--panel-muted)] px-3 py-3 text-xs text-soft" />
               <button
                 onClick={handleCopy}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                className="shrink-0 flex items-center gap-1.5 rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-105"
               >
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 {copied ? '已复制' : '复制'}
               </button>
             </div>

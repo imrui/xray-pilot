@@ -1,39 +1,115 @@
+@import url("https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    --radius: 0.5rem;
-  }
+@theme {
+  --font-sans: "Fira Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Fira Code", monospace;
+}
+
+:root {
+  color-scheme: light;
+  --app-bg: #edf2f7;
+  --app-bg-soft: #f8fafc;
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --panel-muted: rgba(241, 245, 249, 0.84);
+  --border: rgba(148, 163, 184, 0.26);
+  --border-strong: rgba(148, 163, 184, 0.4);
+  --text: #0f172a;
+  --text-soft: #475569;
+  --text-faint: #64748b;
+  --accent: #0f766e;
+  --accent-soft: rgba(13, 148, 136, 0.12);
+  --shadow-panel: 0 24px 60px rgba(15, 23, 42, 0.08);
+  --shadow-card: 0 12px 32px rgba(15, 23, 42, 0.06);
+}
+
+.dark {
+  color-scheme: dark;
+  --app-bg: #020617;
+  --app-bg-soft: #08111f;
+  --panel: rgba(8, 15, 28, 0.8);
+  --panel-strong: rgba(10, 18, 32, 0.96);
+  --panel-muted: rgba(15, 23, 42, 0.88);
+  --border: rgba(148, 163, 184, 0.14);
+  --border-strong: rgba(148, 163, 184, 0.24);
+  --text: #e2e8f0;
+  --text-soft: #94a3b8;
+  --text-faint: #64748b;
+  --accent: #34d399;
+  --accent-soft: rgba(52, 211, 153, 0.14);
+  --shadow-panel: 0 26px 64px rgba(2, 6, 23, 0.42);
+  --shadow-card: 0 14px 36px rgba(2, 6, 23, 0.32);
 }
 
 @layer base {
   * {
-    box-sizing: border-box;
-    border-color: hsl(var(--border));
+    border-color: var(--border);
   }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
   body {
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
-    margin: 0;
-    font-family: system-ui, -apple-system, sans-serif;
+    background:
+      radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 28%),
+      radial-gradient(circle at top right, rgba(16, 185, 129, 0.1), transparent 22%),
+      linear-gradient(180deg, var(--app-bg-soft), var(--app-bg));
+    color: var(--text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  button,
+  [role="button"],
+  a {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+  }
+}
+
+@layer utilities {
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-panel);
+    backdrop-filter: blur(18px);
+  }
+
+  .panel-strong {
+    background: var(--panel-strong);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(14px);
+  }
+
+  .panel-muted {
+    background: var(--panel-muted);
+    border: 1px solid var(--border);
+  }
+
+  .text-soft {
+    color: var(--text-soft);
+  }
+
+  .text-faint {
+    color: var(--text-faint);
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
