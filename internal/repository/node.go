@@ -70,6 +70,14 @@ func (r *NodeRepository) GetDriftedNodes() ([]entity.Node, error) {
 	return nodes, err
 }
 
+// BatchUpdateSyncStatus 批量更新节点同步状态
+func (r *NodeRepository) BatchUpdateSyncStatus(ids []uint, status entity.SyncStatus) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return DB.Model(&entity.Node{}).Where("id IN ?", ids).Update("sync_status", status).Error
+}
+
 // FindByIDs 批量查询节点
 func (r *NodeRepository) FindByIDs(ids []uint) ([]entity.Node, error) {
 	var nodes []entity.Node

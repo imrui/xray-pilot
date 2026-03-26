@@ -35,14 +35,14 @@ func (s *GroupService) Create(req *dto.CreateGroupRequest) (*dto.GroupResponse, 
 		nodes, err := s.nodeRepo.FindByIDs(req.NodeIDs)
 		if err == nil {
 			_ = s.groupRepo.ReplaceNodes(group, nodes)
+			// 新关联的节点需要同步新分组的用户配置
+			_ = s.nodeRepo.BatchUpdateSyncStatus(req.NodeIDs, entity.SyncStatusDrifted)
 		}
 	}
 	return s.toResponse(group), nil
 }
 
-// UpdateGroup 更新分组
-// 注意：变更分组节点后，需重新计算受影响节点的 ConfigHash 对比，标记漂移
-// TODO: 节点变更后调用 ConfigHashService 重算并对比，对有差异的节点置 SyncStatus=drifted
+// UpdateGroup 更新分组：节点关联变更后自动标记受影响节点为漂移状态
 func (s *GroupService) UpdateGroup(id uint, req *dto.UpdateGroupRequest) (*dto.GroupResponse, error) {
 	group, err := s.groupRepo.FindByID(id)
 	if err != nil {
@@ -58,11 +58,20 @@ func (s *GroupService) UpdateGroup(id uint, req *dto.UpdateGroupRequest) (*dto.G
 		return nil, err
 	}
 	if req.NodeIDs != nil {
+		// 记录变更前的旧节点 ID
+		oldIDs := make([]uint, 0, len(group.Nodes))
+		for _, n := range group.Nodes {
+			oldIDs = append(oldIDs, n.ID)
+		}
+
 		nodes, err := s.nodeRepo.FindByIDs(req.NodeIDs)
 		if err == nil {
 			_ = s.groupRepo.ReplaceNodes(group, nodes)
-			// TODO: 触发受影响节点的漂移检测
 		}
+
+		// 旧节点 ∪ 新节点均需重新同步（旧节点移除了该分组用户，新节点增加了该分组用户）
+		affected := unionUintSlices(oldIDs, req.NodeIDs)
+		_ = s.nodeRepo.BatchUpdateSyncStatus(affected, entity.SyncStatusDrifted)
 	}
 	return s.toResponse(group), nil
 }
@@ -108,4 +117,20 @@ func (s *GroupService) toResponse(g *entity.Group) *dto.GroupResponse {
 		UpdatedAt:   g.UpdatedAt.Format(time.RFC3339),
 	}
 	return resp
+}
+
+// unionUintSlices 合并两个 uint 切片（去重）
+func unionUintSlices(a, b []uint) []uint {
+	seen := make(map[uint]struct{}, len(a)+len(b))
+	for _, v := range a {
+		seen[v] = struct{}{}
+	}
+	for _, v := range b {
+		seen[v] = struct{}{}
+	}
+	result := make([]uint, 0, len(seen))
+	for v := range seen {
+		result = append(result, v)
+	}
+	return result
 }

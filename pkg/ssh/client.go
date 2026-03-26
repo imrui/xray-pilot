@@ -2,15 +2,22 @@ package ssh
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+// knownHostsMu 保护 known_hosts 文件的并发写入
+var knownHostsMu sync.Mutex
 
 // Client SSH 客户端，封装连接和常用操作
 type Client struct {
@@ -19,14 +26,15 @@ type Client struct {
 
 // Config SSH 连接配置
 type Config struct {
-	Host       string
-	Port       int
-	User       string
-	KeyPath    string        // SSH 私钥文件路径
-	Timeout    time.Duration // 连接超时，默认 15s
+	Host           string
+	Port           int
+	User           string
+	KeyPath        string        // SSH 私钥文件路径
+	KnownHostsPath string        // known_hosts 文件路径（TOFU），留空则使用 data/known_hosts
+	Timeout        time.Duration // 连接超时，默认 15s
 }
 
-// Connect 建立 SSH 连接
+// Connect 建立 SSH 连接（TOFU known_hosts 校验：首次自动信任并记录，后续严格比对）
 func Connect(cfg Config) (*Client, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 15 * time.Second
@@ -34,16 +42,24 @@ func Connect(cfg Config) (*Client, error) {
 	if cfg.Port == 0 {
 		cfg.Port = 22
 	}
+	if cfg.KnownHostsPath == "" {
+		cfg.KnownHostsPath = "data/known_hosts"
+	}
 
 	authMethods, err := buildAuthMethods(cfg.KeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("加载 SSH 密钥失败 (%s): %w", cfg.KeyPath, err)
 	}
 
+	hostKeyCallback, err := buildTOFUCallback(cfg.KnownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("初始化 known_hosts 失败: %w", err)
+	}
+
 	sshCfg := &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: 生产环境改为 known_hosts 校验
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         cfg.Timeout,
 	}
 
@@ -204,4 +220,49 @@ func loadKeyFile(path string) (ssh.AuthMethod, error) {
 		return nil, fmt.Errorf("解析密钥文件失败 (%s): %w", path, err)
 	}
 	return ssh.PublicKeys(signer), nil
+}
+
+// buildTOFUCallback 构建 TOFU（Trust On First Use）主机密钥校验回调：
+// 首次连接未知主机时自动信任并追加至 known_hosts；后续连接严格比对，密钥变更则拒绝。
+func buildTOFUCallback(path string) (ssh.HostKeyCallback, error) {
+	// 确保 known_hosts 文件及目录存在
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, fmt.Errorf("创建 known_hosts 目录失败: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("打开 known_hosts 文件失败 (%s): %w", path, err)
+	}
+	f.Close()
+
+	// 加载已知主机列表
+	cb, err := knownhosts.New(path)
+	if err != nil {
+		return nil, fmt.Errorf("加载 known_hosts 失败: %w", err)
+	}
+
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		err := cb(hostname, remote, key)
+		if err == nil {
+			return nil // 已知且匹配，直接通过
+		}
+		// 密钥已变更（Want 非空 = 已知主机但密钥不符，可能 MITM），拒绝连接
+		var keyErr *knownhosts.KeyError
+		if errors.As(err, &keyErr) && len(keyErr.Want) > 0 {
+			return fmt.Errorf("主机密钥已变更，拒绝连接（可能存在中间人攻击）[%s]: %w", hostname, err)
+		}
+		// 未知主机：TOFU — 追加并接受
+		knownHostsMu.Lock()
+		defer knownHostsMu.Unlock()
+		wf, werr := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+		if werr != nil {
+			return fmt.Errorf("写入 known_hosts 失败: %w", werr)
+		}
+		defer wf.Close()
+		line := knownhosts.Line([]string{hostname}, key)
+		if _, werr = fmt.Fprintln(wf, line); werr != nil {
+			return fmt.Errorf("写入主机密钥失败: %w", werr)
+		}
+		return nil
+	}, nil
 }

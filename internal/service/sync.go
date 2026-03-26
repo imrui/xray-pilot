@@ -234,10 +234,11 @@ func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 		keyPath = s.settingSvc.Get(KeySSHDefaultKeyPath)
 	}
 	return xray.SSHParams{
-		Host:    node.IP,
-		Port:    sshPort,
-		User:    sshUser,
-		KeyPath: keyPath,
+		Host:           node.IP,
+		Port:           sshPort,
+		User:           sshUser,
+		KeyPath:        keyPath,
+		KnownHostsPath: s.settingSvc.Get(KeySSHKnownHostsPath),
 	}
 }
 

@@ -14,6 +14,7 @@ const (
 	KeySSHDefaultPort           = "ssh.default_port"
 	KeySSHDefaultUser           = "ssh.default_user"
 	KeySSHDefaultKeyPath        = "ssh.default_key_path"
+	KeySSHKnownHostsPath        = "ssh.known_hosts_path"
 	KeySubscriptionBaseURL      = "subscription.base_url"
 	KeySubscriptionRemarkFormat = "subscription.remark_format"
 	KeyXrayLogAccess            = "xray.log_access"
@@ -28,6 +29,7 @@ var settingDefaults = map[string]string{
 	KeySSHDefaultPort:           "22",
 	KeySSHDefaultUser:           "root",
 	KeySSHDefaultKeyPath:        "",
+	KeySSHKnownHostsPath:        "data/known_hosts",
 	KeySubscriptionBaseURL:      "",
 	KeySubscriptionRemarkFormat: "{node_name} ({username}) [{protocol} - {transport}]",
 	KeyXrayLogAccess:            "none",
