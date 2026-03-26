@@ -125,7 +125,29 @@ func (h *NodeHandler) Sync(c *gin.Context) {
 		response.Fail(c, 500, result.Error)
 		return
 	}
-	response.Success(c, gin.H{"message": fmt.Sprintf("节点 %s 同步成功", result.Name)})
+	resp := gin.H{"message": fmt.Sprintf("节点 %s 同步成功", result.Name)}
+	if len(result.Warnings) > 0 {
+		resp["warnings"] = result.Warnings
+	}
+	response.Success(c, resp)
+}
+
+// PreviewConfig 预览节点生成的 Xray 配置（private_key 已脱敏）
+func (h *NodeHandler) PreviewConfig(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的节点ID")
+		return
+	}
+	content, warnings, err := h.syncSvc.PreviewConfig(uint(id))
+	if err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.Success(c, gin.H{
+		"config":   content,
+		"warnings": warnings,
+	})
 }
 
 // SyncAll 全量同步所有激活节点

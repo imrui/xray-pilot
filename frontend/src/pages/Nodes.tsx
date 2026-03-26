@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Wifi, ChevronDown, ChevronUp } from 'lucide-react'
+import { RefreshCw, Wifi, ChevronDown, ChevronUp, FileCode } from 'lucide-react'
 import { nodeApi } from '@/lib/api'
 import type { Node, SyncStatus } from '@/types'
 import { Pagination } from '@/components/ui/Table'
@@ -43,6 +43,7 @@ export default function Nodes() {
   const [syncOk, setSyncOk] = useState('')
   const syncOkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [previewNode, setPreviewNode] = useState<Node | null>(null)
 
   // 成功提示 3 秒后自动消失
   useEffect(() => {
@@ -172,6 +173,13 @@ export default function Nodes() {
             className="text-xs text-red-500 hover:text-red-700"
           >删除</button>
           <button
+            onClick={() => setPreviewNode(n)}
+            className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5"
+            title="预览生成配置"
+          >
+            <FileCode className="h-3.5 w-3.5" />
+          </button>
+          <button
             onClick={() => setExpanded(expanded === n.id ? null : n.id)}
             className="text-xs text-slate-400 hover:text-slate-600"
           >
@@ -286,6 +294,61 @@ export default function Nodes() {
           {err && <p className="col-span-2 text-sm text-red-500">{err}</p>}
         </div>
       </Modal>
+
+      {/* 预览配置弹窗 */}
+      {previewNode && (
+        <PreviewConfigModal node={previewNode} onClose={() => setPreviewNode(null)} />
+      )}
+    </div>
+  )
+}
+
+// PreviewConfigModal 预览节点生成的 Xray 配置
+function PreviewConfigModal({ node, onClose }: { node: Node; onClose: () => void }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['previewConfig', node.id],
+    queryFn: () => nodeApi.previewConfig(node.id).then(r => r.data.data!),
+    retry: false,
+  })
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">预览生成配置 · {node.name}</h3>
+            <p className="text-xs text-slate-400 mt-0.5">private_key 已脱敏 · 此配置将被同步至节点</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+        </div>
+        <div className="flex-1 overflow-auto p-4">
+          {isLoading && <p className="text-sm text-slate-400 text-center py-8">生成中…</p>}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <p className="text-sm text-red-600 font-medium">生成失败</p>
+              <p className="text-xs text-red-500 mt-1">{(error as Error).message}</p>
+            </div>
+          )}
+          {data && (
+            <>
+              {(data.warnings ?? []).length > 0 && (
+                <div className="mb-3 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                  <p className="text-xs font-medium text-yellow-700 mb-1">部分协议生成失败（不影响其他协议）：</p>
+                  {data.warnings.map((w, i) => (
+                    <p key={i} className="text-xs text-yellow-600">• {w}</p>
+                  ))}
+                </div>
+              )}
+              <pre className="text-xs font-mono bg-slate-950 text-slate-200 rounded-lg p-4 overflow-auto whitespace-pre">
+                {data.config}
+              </pre>
+            </>
+          )}
+        </div>
+        <div className="px-6 py-3 border-t border-gray-200 shrink-0 flex justify-end">
+          <Btn variant="secondary" onClick={onClose}>关闭</Btn>
+        </div>
+      </div>
     </div>
   )
 }

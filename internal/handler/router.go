@@ -51,6 +51,7 @@ func RegisterRoutes(r *gin.Engine) {
 		api.DELETE("/nodes/:id", nodeH.Delete)
 		api.PATCH("/nodes/:id/toggle", nodeH.Toggle)
 		api.POST("/nodes/:id/sync", nodeH.Sync)
+		api.GET("/nodes/:id/preview-config", nodeH.PreviewConfig)
 		api.POST("/nodes/:id/test-ssh", nodeH.TestSSH)
 		// 节点协议密钥管理（静态路径 keygen 必须在动态 :profile_id 之前）
 		api.GET("/nodes/:id/keys", profileH.GetNodeKeys)

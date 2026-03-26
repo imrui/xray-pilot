@@ -128,8 +128,10 @@ type dokodemoSettings struct {
 // ---- 配置生成 ----
 
 // GenerateConfig 根据节点、关联协议密钥和用户列表生成 Xray JSON 配置
-func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, users []entity.User) (string, error) {
+// 返回 (configJSON, inboundWarnings, error)：单个协议生成失败不中断整体，通过 warnings 上报
+func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, users []entity.User) (string, []string, error) {
 	var inbounds []Inbound
+	var warnings []string
 
 	for _, key := range profileKeys {
 		if key.Profile == nil || !key.Profile.Active {
@@ -137,7 +139,7 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 		}
 		inbound, err := buildInbound(node, key.Profile, &key, users)
 		if err != nil {
-			// 单个协议生成失败不中断整体，继续处理其他协议
+			warnings = append(warnings, fmt.Sprintf("协议[%s](%s): %v", key.Profile.Name, key.Profile.Protocol, err))
 			continue
 		}
 		inbounds = append(inbounds, inbound)
@@ -169,9 +171,9 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("序列化配置失败: %w", err)
+		return "", warnings, fmt.Errorf("序列化配置失败: %w", err)
 	}
-	return string(data), nil
+	return string(data), warnings, nil
 }
 
 func buildInbound(node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey, users []entity.User) (Inbound, error) {

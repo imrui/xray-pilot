@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -30,10 +31,12 @@ func NewSyncService() *SyncService {
 
 // SyncResult 单节点同步结果
 type SyncResult struct {
-	NodeID  uint
-	Name    string
-	Success bool
-	Error   string
+	NodeID        uint
+	Name          string
+	Success       bool
+	Error         string
+	InboundCount  int      // 成功生成的 inbound 数量
+	Warnings      []string // inbound 生成警告（某个协议失败但整体继续）
 }
 
 // SyncNode 同步单个节点：生成多协议配置 → 推送 → 重载 xray → 更新状态
@@ -45,11 +48,15 @@ func (s *SyncService) SyncNode(nodeID uint) *SyncResult {
 
 	result := &SyncResult{NodeID: nodeID, Name: node.Name}
 
-	configContent, err := s.buildConfig(node)
+	configContent, warnings, err := s.buildConfig(node)
 	if err != nil {
 		result.Error = fmt.Sprintf("生成配置失败: %v", err)
 		s.failNode(node, result.Error, 0)
 		return result
+	}
+	result.Warnings = warnings
+	if len(warnings) > 0 {
+		zap.L().Warn("部分协议 inbound 生成失败", zap.String("node", node.Name), zap.Strings("warnings", warnings))
 	}
 
 	params := s.sshParams(node)
@@ -118,7 +125,7 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 		return false, nil
 	}
 
-	expectedContent, err := s.buildConfig(node)
+	expectedContent, _, err := s.buildConfig(node)
 	if err != nil {
 		return false, fmt.Errorf("生成期望配置失败: %w", err)
 	}
@@ -170,20 +177,35 @@ func (s *SyncService) CheckDriftAll() (driftCount int, errs []string) {
 
 // ---- 内部工具方法 ----
 
-func (s *SyncService) buildConfig(node *entity.Node) (string, error) {
-	// 查询节点关联的所有激活协议密钥
+func (s *SyncService) buildConfig(node *entity.Node) (string, []string, error) {
+	// 查询节点关联的所有激活协议密钥（LEFT JOIN 语义，无节点密钥则 fallback 到协议默认值）
 	profileKeys, err := s.profileRepo.FindActiveKeysForNode(node.ID)
 	if err != nil {
-		return "", fmt.Errorf("查询节点协议配置失败: %w", err)
+		return "", nil, fmt.Errorf("查询节点协议配置失败: %w", err)
 	}
 
 	// 查询节点对应分组内的激活用户
 	users, err := s.userRepo.FindActiveUsersByNodeID(node.ID)
 	if err != nil {
-		return "", fmt.Errorf("查询节点用户失败: %w", err)
+		return "", nil, fmt.Errorf("查询节点用户失败: %w", err)
 	}
 
 	return xray.GenerateConfig(node, profileKeys, users)
+}
+
+// PreviewConfig 生成节点期望配置（供调试用，private_key 脱敏）
+func (s *SyncService) PreviewConfig(nodeID uint) (string, []string, error) {
+	node, err := s.nodeRepo.FindByID(nodeID)
+	if err != nil {
+		return "", nil, fmt.Errorf("节点不存在")
+	}
+	content, warnings, err := s.buildConfig(node)
+	if err != nil {
+		return "", warnings, err
+	}
+	// 脱敏：将生成配置中的 privateKey 替换为占位符（避免通过 API 暴露）
+	masked := maskXrayConfig(content)
+	return masked, warnings, nil
 }
 
 func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
@@ -211,6 +233,25 @@ func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 		User:    sshUser,
 		KeyPath: keyPath,
 	}
+}
+
+// maskXrayConfig 将 Xray config JSON 中的 privateKey 字段值替换为占位符
+func maskXrayConfig(configJSON string) string {
+	const marker = `"privateKey": "`
+	result := configJSON
+	for {
+		idx := strings.Index(result, marker)
+		if idx < 0 {
+			break
+		}
+		start := idx + len(marker)
+		end := strings.Index(result[start:], `"`)
+		if end < 0 {
+			break
+		}
+		result = result[:start] + "<masked>" + result[start+end:]
+	}
+	return result
 }
 
 func (s *SyncService) failNode(node *entity.Node, errMsg string, elapsedMs int64) {

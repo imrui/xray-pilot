@@ -119,6 +119,9 @@ export const nodeApi = {
 
   keygenForNode: (nodeId: number, profileId: number) =>
     request.post<ApiResponse<NodeKey>>(`/nodes/${nodeId}/keys/${profileId}/keygen`),
+
+  previewConfig: (nodeId: number) =>
+    request.get<ApiResponse<{ config: string; warnings: string[] }>>(`/nodes/${nodeId}/preview-config`),
 }
 
 // ---- 协议配置 API ----
