@@ -7,6 +7,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/entity"
 )
@@ -22,7 +24,10 @@ func Connect() error {
 	case "postgres":
 		dialector = postgres.Open(cfg.DSN)
 	default: // sqlite
-		dialector = sqlite.Open(cfg.DSN)
+		dialector = sqlite.Dialector{
+			DriverName: "sqlite",
+			DSN:        cfg.DSN,
+		}
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{})
