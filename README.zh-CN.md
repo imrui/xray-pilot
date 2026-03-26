@@ -41,6 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/install.sh | 
 - 校验 `checksums.txt`
 - 将二进制安装到 `/usr/local/bin/xray-pilot`
 - 生成 `/etc/xray-pilot/config.yaml`
+- 创建 `/etc/xray-pilot/ssh/` 目录用于存放服务读取的 SSH 私钥
 - 创建并启动 `xray-pilot.service`
 - 生成随机管理员密码、`jwt.secret` 和 `crypto.master_key`
 
@@ -73,6 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/install.sh | 
 
 - 用最新 Release 二进制替换 `/usr/local/bin/xray-pilot`
 - 保留现有 `/etc/xray-pilot/config.yaml`
+- 保留现有 `/etc/xray-pilot/ssh/` 密钥目录
 - 保留现有 SQLite 数据库或外部数据库配置
 - 重新加载并重启 `xray-pilot.service`
 
@@ -120,10 +122,18 @@ jwt:
 crypto:
   master_key: ""
 
+ssh:
+  default_port: 22
+  default_user: "root"
+  default_key_path: ""
+  known_hosts_path: "/var/lib/xray-pilot/known_hosts"
+
 admins:
   - username: admin
     password: "change-me-now"
 ```
+
+对于 Linux systemd 部署，推荐将 SSH 私钥放在 `/etc/xray-pilot/ssh/id_ed25519`，服务使用的 `known_hosts` 文件保存在 `/var/lib/xray-pilot/known_hosts`。
 
 调度周期、SSH 默认值、订阅格式、Xray 日志等级等运行时配置，已经迁移到数据库中的系统配置表，可在 Web UI 里调整。
 

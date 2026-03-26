@@ -138,7 +138,7 @@ func (s *SubscribeService) buildVlessRealityURI(user *entity.User, node *entity.
 
 	remark := s.buildRemark(node, user, "vless", "reality")
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",
-		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.QueryEscape(remark))
+		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.PathEscape(remark))
 }
 
 func (s *SubscribeService) buildVlessWSTLSURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
@@ -166,7 +166,7 @@ func (s *SubscribeService) buildVlessWSTLSURI(user *entity.User, node *entity.No
 
 	remark := s.buildRemark(node, user, "vless", "ws")
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",
-		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.QueryEscape(remark))
+		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.PathEscape(remark))
 }
 
 func (s *SubscribeService) buildTrojanURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
@@ -187,7 +187,7 @@ func (s *SubscribeService) buildTrojanURI(user *entity.User, node *entity.Node, 
 
 	remark := s.buildRemark(node, user, "trojan", "tcp")
 	return fmt.Sprintf("trojan://%s@%s:%d?%s#%s",
-		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.QueryEscape(remark))
+		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.PathEscape(remark))
 }
 
 func (s *SubscribeService) buildHysteria2URI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
@@ -212,7 +212,7 @@ func (s *SubscribeService) buildHysteria2URI(user *entity.User, node *entity.Nod
 
 	remark := s.buildRemark(node, user, "hy2", "udp")
 	return fmt.Sprintf("hy2://%s@%s:%d?%s#%s",
-		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.QueryEscape(remark))
+		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.PathEscape(remark))
 }
 
 // buildRemark 生成节点备注，支持格式占位符：

@@ -19,6 +19,12 @@ crypto:
   # 也可通过环境变量覆盖：XRAY_PILOT_MASTER_KEY=<hex-key>
   master_key: ""
 
+ssh:
+  default_port: 22
+  default_user: "root"
+  default_key_path: ""  # 例如: /etc/xray-pilot/ssh/id_ed25519
+  known_hosts_path: "/var/lib/xray-pilot/known_hosts"
+
 admins:
   - username: admin
     password: "change-me-now"  # 启动时会自动 hash 到内存中

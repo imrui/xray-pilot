@@ -30,7 +30,7 @@ type Config struct {
 	Port           int
 	User           string
 	KeyPath        string        // SSH 私钥文件路径
-	KnownHostsPath string        // known_hosts 文件路径（TOFU），留空则使用 data/known_hosts
+	KnownHostsPath string        // known_hosts 文件路径（TOFU），留空则使用 /var/lib/xray-pilot/known_hosts
 	Timeout        time.Duration // 连接超时，默认 15s
 }
 
@@ -43,7 +43,7 @@ func Connect(cfg Config) (*Client, error) {
 		cfg.Port = 22
 	}
 	if cfg.KnownHostsPath == "" {
-		cfg.KnownHostsPath = "data/known_hosts"
+		cfg.KnownHostsPath = "/var/lib/xray-pilot/known_hosts"
 	}
 
 	authMethods, err := buildAuthMethods(cfg.KeyPath)

@@ -62,6 +62,7 @@ type SSHConfig struct {
 	DefaultPort    int    `mapstructure:"default_port"`
 	DefaultUser    string `mapstructure:"default_user"`
 	DefaultKeyPath string `mapstructure:"default_key_path"`
+	KnownHostsPath string `mapstructure:"known_hosts_path"`
 }
 
 // SubscriptionConfig 订阅相关配置
@@ -88,6 +89,7 @@ func Load() error {
 	viper.SetDefault("scheduler.health_check_interval", 120) // 2 分钟
 	viper.SetDefault("ssh.default_port", 22)
 	viper.SetDefault("ssh.default_user", "root")
+	viper.SetDefault("ssh.known_hosts_path", "/var/lib/xray-pilot/known_hosts")
 	viper.SetDefault("subscription.remark_format", "{region}-{name}")
 
 	// 支持环境变量覆盖，例如 XRAY_PILOT_SERVER_PORT

@@ -29,7 +29,7 @@ var settingDefaults = map[string]string{
 	KeySSHDefaultPort:           "22",
 	KeySSHDefaultUser:           "root",
 	KeySSHDefaultKeyPath:        "",
-	KeySSHKnownHostsPath:        "data/known_hosts",
+	KeySSHKnownHostsPath:        "/var/lib/xray-pilot/known_hosts",
 	KeySubscriptionBaseURL:      "",
 	KeySubscriptionRemarkFormat: "{node_name} ({username}) [{protocol} - {transport}]",
 	KeyXrayLogAccess:            "none",
@@ -94,6 +94,7 @@ func (s *SettingService) SeedFromConfig() {
 		KeySSHDefaultPort:          strconv.Itoa(cfg.SSH.DefaultPort),
 		KeySSHDefaultUser:          cfg.SSH.DefaultUser,
 		KeySSHDefaultKeyPath:       cfg.SSH.DefaultKeyPath,
+		KeySSHKnownHostsPath:       cfg.SSH.KnownHostsPath,
 		KeySubscriptionBaseURL:     cfg.Subscription.BaseURL,
 	}
 	// remark_format 仅在 config.yaml 配置了非旧默认值时才种入

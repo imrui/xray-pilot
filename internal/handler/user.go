@@ -28,11 +28,36 @@ func (h *UserHandler) baseURL(c *gin.Context) string {
 	if base := h.settingSvc.Get(service.KeySubscriptionBaseURL); base != "" {
 		return strings.TrimRight(base, "/")
 	}
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
+
+	scheme := forwardedHeaderValue(c.GetHeader("X-Forwarded-Proto"))
+	if scheme == "" {
+		scheme = forwardedHeaderValue(c.GetHeader("X-Forwarded-Scheme"))
 	}
-	return scheme + "://" + c.Request.Host
+	if scheme == "" {
+		if c.Request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	host := forwardedHeaderValue(c.GetHeader("X-Forwarded-Host"))
+	if host == "" {
+		host = c.Request.Host
+	}
+
+	return scheme + "://" + host
+}
+
+func forwardedHeaderValue(value string) string {
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ",")
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
 }
 
 func (h *UserHandler) Create(c *gin.Context) {

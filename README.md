@@ -41,6 +41,7 @@ The installer will:
 - verify `checksums.txt`
 - install `xray-pilot` to `/usr/local/bin/xray-pilot`
 - create `/etc/xray-pilot/config.yaml`
+- create `/etc/xray-pilot/ssh/` for service-managed SSH keys
 - create and start the `xray-pilot.service` systemd unit
 - generate a random admin password, JWT secret, and crypto master key
 
@@ -73,6 +74,7 @@ The upgrade process will:
 
 - replace `/usr/local/bin/xray-pilot` with the latest release binary
 - keep the existing `/etc/xray-pilot/config.yaml`
+- keep the existing `/etc/xray-pilot/ssh/` key directory
 - keep the existing SQLite database or external database settings
 - reload and restart `xray-pilot.service`
 
@@ -120,10 +122,18 @@ jwt:
 crypto:
   master_key: ""
 
+ssh:
+  default_port: 22
+  default_user: "root"
+  default_key_path: ""
+  known_hosts_path: "/var/lib/xray-pilot/known_hosts"
+
 admins:
   - username: admin
     password: "change-me-now"
 ```
+
+For Linux service deployments, the recommended SSH key location is `/etc/xray-pilot/ssh/id_ed25519`. The service-owned known_hosts file is stored at `/var/lib/xray-pilot/known_hosts`.
 
 Runtime settings such as scheduler intervals, SSH defaults, subscription formatting, and Xray log options are stored in the database-backed system settings table and managed from the web UI.
 

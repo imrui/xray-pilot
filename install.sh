@@ -6,7 +6,9 @@ REPO="imrui/xray-pilot"
 INSTALL_BIN="/usr/local/bin/xray-pilot"
 CONFIG_DIR="/etc/xray-pilot"
 CONFIG_FILE="${CONFIG_DIR}/config.yaml"
+SSH_DIR="${CONFIG_DIR}/ssh"
 STATE_DIR="/var/lib/xray-pilot"
+KNOWN_HOSTS_FILE="${STATE_DIR}/known_hosts"
 SERVICE_FILE="/etc/systemd/system/xray-pilot.service"
 CREDS_FILE="${CONFIG_DIR}/install.env"
 SERVICE_USER="xray-pilot"
@@ -116,10 +118,17 @@ ensure_service_user() {
 }
 
 write_config() {
-  mkdir -p "${CONFIG_DIR}" "${STATE_DIR}"
+  mkdir -p "${CONFIG_DIR}" "${SSH_DIR}" "${STATE_DIR}"
   chown "${SERVICE_USER}:${SERVICE_GROUP}" "${STATE_DIR}"
+  chmod 0750 "${STATE_DIR}"
   chown root:"${SERVICE_GROUP}" "${CONFIG_DIR}"
   chmod 0750 "${CONFIG_DIR}"
+  chown root:"${SERVICE_GROUP}" "${SSH_DIR}"
+  chmod 0750 "${SSH_DIR}"
+
+  touch "${KNOWN_HOSTS_FILE}"
+  chown "${SERVICE_USER}:${SERVICE_GROUP}" "${KNOWN_HOSTS_FILE}"
+  chmod 0600 "${KNOWN_HOSTS_FILE}"
 
   if [[ ! -f "${CONFIG_FILE}" ]]; then
     JWT_SECRET="$(random_hex 32)"
@@ -141,6 +150,12 @@ jwt:
 
 crypto:
   master_key: "${MASTER_KEY}"
+
+ssh:
+  default_port: 22
+  default_user: "root"
+  default_key_path: "${SSH_DIR}/id_ed25519"
+  known_hosts_path: "${KNOWN_HOSTS_FILE}"
 
 admins:
   - username: admin
@@ -220,8 +235,10 @@ main() {
   echo "xray-pilot ${TAG} installed successfully."
   echo "Binary: ${INSTALL_BIN}"
   echo "Config: ${CONFIG_FILE}"
+  echo "SSH directory: ${SSH_DIR}"
   echo "Credentials: ${CREDS_FILE}"
   echo "Service: systemctl status xray-pilot.service"
+  echo "If you use SSH key auth, place the private key at ${SSH_DIR}/id_ed25519 and set ownership so ${SERVICE_USER} can read it."
 }
 
 main "$@"
