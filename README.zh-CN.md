@@ -61,6 +61,27 @@ curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/install.sh | 
 4. 将 [`config.yaml.example`](./config.yaml.example) 复制为 `config.yaml` 并修改配置。
 5. 执行 `./xray-pilot` 启动服务。
 
+## 升级
+
+已经通过一键安装部署的 Linux 机器，可以直接重新执行安装脚本完成升级：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/install.sh | sudo bash
+```
+
+升级过程会：
+
+- 用最新 Release 二进制替换 `/usr/local/bin/xray-pilot`
+- 保留现有 `/etc/xray-pilot/config.yaml`
+- 保留现有 SQLite 数据库或外部数据库配置
+- 重新加载并重启 `xray-pilot.service`
+
+升级后可以通过下面的命令确认当前运行版本：
+
+```bash
+journalctl -u xray-pilot -n 20 --no-pager
+```
+
 ## 从源码启动
 
 前置要求：Go 1.26.1+、Node.js 24+

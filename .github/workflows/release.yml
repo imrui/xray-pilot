@@ -104,6 +104,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
       - name: Download release archives
         uses: actions/download-artifact@v4
         with:
@@ -115,9 +118,24 @@ jobs:
         working-directory: release
         run: sha256sum *.tar.gz > checksums.txt
 
+      - name: Resolve release notes
+        id: release_notes
+        run: |
+          NOTES_FILE="release-notes/${GITHUB_REF_NAME}.md"
+          if [ ! -f "${NOTES_FILE}" ]; then
+            echo "Missing release notes file: ${NOTES_FILE}" >&2
+            exit 1
+          fi
+          {
+            echo "body<<EOF"
+            cat "${NOTES_FILE}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body: ${{ steps.release_notes.outputs.body }}
           files: |
             release/*.tar.gz
             release/checksums.txt

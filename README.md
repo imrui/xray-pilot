@@ -61,6 +61,27 @@ Manual installation steps:
 4. Copy [`config.yaml.example`](./config.yaml.example) to `config.yaml` and adjust the values.
 5. Start the service with `./xray-pilot`.
 
+## Upgrade
+
+Existing Linux installations can be upgraded by re-running the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/install.sh | sudo bash
+```
+
+The upgrade process will:
+
+- replace `/usr/local/bin/xray-pilot` with the latest release binary
+- keep the existing `/etc/xray-pilot/config.yaml`
+- keep the existing SQLite database or external database settings
+- reload and restart `xray-pilot.service`
+
+After the upgrade, you can confirm the running version with:
+
+```bash
+journalctl -u xray-pilot -n 20 --no-pager
+```
+
 ## Quick Start From Source
 
 **Prerequisites:** Go 1.26.1+, Node.js 24+
