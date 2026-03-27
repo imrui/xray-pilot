@@ -12,7 +12,6 @@ import (
 	"github.com/imrui/xray-pilot/pkg/response"
 )
 
-
 // ---- 日志 ----
 
 type LogHandler struct {
@@ -89,11 +88,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // ---- 系统配置 ----
 
 type SystemHandler struct {
-	settingSvc *service.SettingService
+	settingSvc    *service.SettingService
+	diagnosticSvc *service.DiagnosticsService
 }
 
 func NewSystemHandler() *SystemHandler {
-	return &SystemHandler{settingSvc: service.NewSettingService()}
+	return &SystemHandler{
+		settingSvc:    service.NewSettingService(),
+		diagnosticSvc: service.NewDiagnosticsService(),
+	}
 }
 
 // GetSystemInfo 返回只读系统信息（服务端口、数据库驱动）
@@ -106,6 +109,7 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		},
 		"database": gin.H{
 			"driver": cfg.Database.Driver,
+			"dsn":    cfg.Database.DSN,
 		},
 	})
 }
@@ -127,4 +131,9 @@ func (h *SystemHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	response.Success(c, h.settingSvc.GetAll())
+}
+
+// GetDiagnostics 返回部署诊断结果
+func (h *SystemHandler) GetDiagnostics(c *gin.Context) {
+	response.Success(c, h.diagnosticSvc.Run())
 }

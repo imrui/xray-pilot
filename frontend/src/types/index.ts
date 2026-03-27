@@ -91,3 +91,23 @@ export interface PageResult<T> {
   total: number
   list: T[]
 }
+
+export type DiagnosticStatus = 'ok' | 'warning' | 'error'
+
+export interface DiagnosticItem {
+  key: string
+  label: string
+  status: DiagnosticStatus
+  detail: string
+  suggestion?: string
+  value?: string
+}
+
+export interface DiagnosticsResult {
+  summary: {
+    ok: number
+    warning: number
+    error: number
+  }
+  items: DiagnosticItem[]
+}

@@ -1,5 +1,5 @@
 import request from './axios'
-import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog } from '@/types'
+import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult } from '@/types'
 
 // ---- 通用分页参数 ----
 interface PageParams {
@@ -161,8 +161,11 @@ export const systemApi = {
   getInfo: () =>
     request.get<ApiResponse<{
       server: { port: number; mode: string }
-      database: { driver: string }
+      database: { driver: string; dsn: string }
     }>>('/system/info'),
+
+  getDiagnostics: () =>
+    request.get<ApiResponse<DiagnosticsResult>>('/system/diagnostics'),
 
   getSettings: () =>
     request.get<ApiResponse<Record<string, string>>>('/system/settings'),
