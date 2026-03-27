@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, PencilLine, Sparkles } from 'lucide-react'
+import { KeyRound, PencilLine, Plus, Sparkles } from 'lucide-react'
 import { nodeApi, profileApi } from '@/lib/api'
 import type { InboundProfile, Protocol } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
@@ -12,7 +12,8 @@ import { ActionMenu } from '@/components/ui/ActionMenu'
 import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 const protocolOptions = [
   { value: 'vless-reality', label: 'VLESS + Reality' },
@@ -52,6 +53,26 @@ const emptyForm = (): FormState => ({
   active: true,
   remark: '',
 })
+
+function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative h-6 w-11 rounded-full border transition ${
+        checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-slate-200 dark:border-[var(--border)] dark:bg-white/10'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition ${
+          checked ? 'left-[22px]' : 'left-0.5'
+        }`}
+      />
+    </button>
+  )
+}
 
 function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose: () => void }) {
   const [nodeId, setNodeId] = useState('')
@@ -161,7 +182,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
             value={settings}
             onChange={(e) => setSettings(e.target.value)}
             rows={12}
-            className="min-h-[260px] w-full rounded-2xl border bg-[var(--panel-muted)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-soft)]"
+            className="min-h-[260px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
             placeholder='{"private_key": "...", "public_key": "...", "short_id": ""}'
           />
           {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>{msg}</p>}
@@ -175,6 +196,7 @@ export default function Profiles() {
   const confirm = useConfirm()
   const qc = useQueryClient()
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [drawer, setDrawer] = useState<{ open: boolean; profile?: InboundProfile }>({ open: false })
   const [keyDrawer, setKeyDrawer] = useState<InboundProfile | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm())
@@ -185,8 +207,8 @@ export default function Profiles() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['profiles', page],
-    queryFn: () => profileApi.list({ page, page_size: PAGE_SIZE }).then((r) => r.data.data!),
+    queryKey: ['profiles', page, pageSize],
+    queryFn: () => profileApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
   })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['profiles'] })
@@ -219,6 +241,10 @@ export default function Profiles() {
   })
 
   const remove = useMutation({ mutationFn: (id: number) => profileApi.remove(id), onSuccess: invalidate })
+  const toggle = useMutation({
+    mutationFn: ({ id, active }: { id: number; active: boolean }) => profileApi.update(id, { active }),
+    onSuccess: invalidate,
+  })
 
   const openCreate = () => {
     const next = emptyForm()
@@ -302,8 +328,8 @@ export default function Profiles() {
       key: 'name',
       label: '协议配置',
       render: (p: InboundProfile) => (
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">{p.name}</span>
             <Badge label={protocolOptions.find((o) => o.value === p.protocol)?.label ?? p.protocol} variant={protocolBadge[p.protocol as Protocol] ?? 'gray'} />
           </div>
@@ -311,7 +337,11 @@ export default function Profiles() {
         </div>
       ),
     },
-    { key: 'active', label: '状态', render: (p: InboundProfile) => <Badge label={p.active ? '启用' : '禁用'} variant={p.active ? 'green' : 'gray'} /> },
+    {
+      key: 'active',
+      label: '状态',
+      render: (p: InboundProfile) => <Switch checked={p.active} onChange={(next) => toggle.mutate({ id: p.id, active: next })} />,
+    },
     {
       key: 'actions',
       label: '操作',
@@ -319,14 +349,14 @@ export default function Profiles() {
         <div className="flex items-center justify-end gap-2">
           <button
             onClick={() => openEdit(p)}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-1.5 text-xs font-semibold text-soft transition hover:bg-[var(--panel)] hover:text-[var(--text)]"
+            className="inline-flex h-9 items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-semibold text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
           >
             <PencilLine className="h-3.5 w-3.5" />
             编辑
           </button>
           <button
             onClick={() => setKeyDrawer(p)}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] transition hover:bg-[var(--panel)]"
+            className="inline-flex h-9 items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-semibold text-[var(--accent)] transition hover:bg-[var(--panel-muted)]"
           >
             <KeyRound className="h-3.5 w-3.5" />
             配置密钥
@@ -358,13 +388,13 @@ export default function Profiles() {
     <PageShell>
       <PageHeader
         title="协议配置"
-        description="把常用编辑与密钥配置前置，复杂 JSON 参数放入抽屉处理，避免中断列表浏览。"
-        actions={<Btn onClick={openCreate}>新增协议</Btn>}
-        stats={[
-          { label: '总协议数', value: data?.total ?? 0 },
-          { label: '默认端口', value: form.port || '443' },
-          { label: '当前协议', value: protocolOptions.find((item) => item.value === form.protocol)?.label ?? 'VLESS + Reality' },
-        ]}
+        description="将协议定义、节点密钥和 JSON 参数拆开处理，让高频维护动作保持清晰。"
+        actions={
+          <Btn onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            新增协议
+          </Btn>
+        }
       />
 
       <ListToolbar
@@ -413,10 +443,52 @@ export default function Profiles() {
         }
       />
 
-      <SurfaceCard className="p-4">
-        <Table columns={columns} data={filteredProfiles} loading={isLoading} />
-        <Pagination page={page} pageSize={PAGE_SIZE} total={data?.total ?? 0} onChange={setPage} />
-      </SurfaceCard>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <SurfaceCard className="p-4">
+          <Table columns={columns} data={filteredProfiles} loading={isLoading} />
+          <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border)] pt-4 md:flex-row md:items-center md:justify-between">
+            <label className="inline-flex items-center gap-2 text-sm text-soft">
+              分页
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value))
+                  setPage(1)
+                }}
+                className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size} / 页
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard className="p-5">
+          <div className="mb-4">
+            <div className="text-sm font-semibold">协议提示</div>
+            <p className="mt-2 text-sm leading-6 text-soft">
+              协议配置负责定义模板，节点密钥负责补齐每台机器的差异化参数。把这两层拆开后，维护复杂 Reality 或 TLS 场景会更稳。
+            </p>
+          </div>
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Template</div>
+              <div className="mt-2 text-sm font-semibold">协议模板管理</div>
+              <p className="mt-2 text-xs leading-5 text-soft">统一维护端口、SNI、传输参数等共性配置，减少节点端重复输入。</p>
+            </div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Node Keys</div>
+              <div className="mt-2 text-sm font-semibold">节点密钥独立配置</div>
+              <p className="mt-2 text-xs leading-5 text-soft">将节点专属密钥放进单独抽屉管理，避免把敏感值混进大表单里。</p>
+            </div>
+          </div>
+        </SurfaceCard>
+      </div>
 
       <Drawer
         open={drawer.open}
@@ -448,7 +520,7 @@ export default function Profiles() {
               value={form.settings}
               onChange={(e) => setForm((p) => ({ ...p, settings: e.target.value }))}
               rows={12}
-              className="min-h-[280px] w-full rounded-2xl border bg-[var(--panel-muted)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-soft)]"
+              className="min-h-[280px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
             />
           </FieldGroup>
 

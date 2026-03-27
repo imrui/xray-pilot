@@ -1,3 +1,4 @@
+import { type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 
 interface BadgeProps {
@@ -5,17 +6,40 @@ interface BadgeProps {
   variant: 'green' | 'yellow' | 'red' | 'gray' | 'blue'
 }
 
-const variantClass: Record<BadgeProps['variant'], string> = {
-  green: 'bg-emerald-600/8 text-emerald-700 ring-1 ring-inset ring-emerald-600/12 dark:bg-emerald-400/10 dark:text-emerald-200 dark:ring-emerald-400/14',
-  yellow: 'bg-amber-600/8 text-amber-700 ring-1 ring-inset ring-amber-600/12 dark:bg-amber-400/10 dark:text-amber-200 dark:ring-amber-400/14',
-  red: 'bg-rose-600/8 text-rose-700 ring-1 ring-inset ring-rose-600/12 dark:bg-rose-400/10 dark:text-rose-200 dark:ring-rose-400/14',
-  gray: 'bg-slate-500/8 text-slate-600 ring-1 ring-inset ring-slate-500/12 dark:bg-slate-400/8 dark:text-slate-200 dark:ring-slate-400/12',
-  blue: 'bg-sky-600/8 text-sky-700 ring-1 ring-inset ring-sky-600/12 dark:bg-sky-400/10 dark:text-sky-200 dark:ring-sky-400/14',
+const variantStyle: Record<BadgeProps['variant'], CSSProperties> = {
+  green: {
+    backgroundColor: 'var(--badge-green-bg)',
+    color: 'var(--badge-green-text)',
+    borderColor: 'var(--badge-green-border)',
+  },
+  yellow: {
+    backgroundColor: 'var(--badge-yellow-bg)',
+    color: 'var(--badge-yellow-text)',
+    borderColor: 'var(--badge-yellow-border)',
+  },
+  red: {
+    backgroundColor: 'var(--badge-red-bg)',
+    color: 'var(--badge-red-text)',
+    borderColor: 'var(--badge-red-border)',
+  },
+  gray: {
+    backgroundColor: 'var(--badge-gray-bg)',
+    color: 'var(--badge-gray-text)',
+    borderColor: 'var(--badge-gray-border)',
+  },
+  blue: {
+    backgroundColor: 'var(--badge-blue-bg)',
+    color: 'var(--badge-blue-text)',
+    borderColor: 'var(--badge-blue-border)',
+  },
 }
 
 export function Badge({ label, variant }: BadgeProps) {
   return (
-    <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]', variantClass[variant])}>
+    <span
+      className={cn('inline-flex min-h-6 shrink-0 items-center whitespace-nowrap rounded-md border px-2.5 py-1 text-xs font-semibold leading-none')}
+      style={variantStyle[variant]}
+    >
       {label}
     </span>
   )

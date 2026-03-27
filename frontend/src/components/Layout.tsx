@@ -1,17 +1,21 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import {
-  Activity,
+  ChevronLeft,
   ChevronRight,
+  LayoutDashboard,
   Layers,
   LogOut,
   Menu,
   Moon,
   ScrollText,
+  Search,
   Server,
   Settings,
   Shield,
   Sun,
+  UserRound,
   Users,
   X,
 } from 'lucide-react'
@@ -19,14 +23,33 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
 import { useThemeStore } from '@/store/theme'
 
-const navItems = [
-  { path: '/users', label: '用户', icon: Users },
-  { path: '/groups', label: '分组', icon: Layers },
-  { path: '/nodes', label: '节点', icon: Server },
-  { path: '/profiles', label: '协议', icon: Shield },
-  { path: '/logs', label: '日志', icon: ScrollText },
-  { path: '/settings', label: '系统', icon: Settings },
+const navGroups = [
+  {
+    title: '概览',
+    items: [{ path: '/dashboard', label: '仪表总览', subtitle: '系统概览与快捷操作', icon: LayoutDashboard }],
+  },
+  {
+    title: '资源管理',
+    items: [
+      { path: '/nodes', label: '节点管理', subtitle: '管理服务节点与配置同步', icon: Server },
+      { path: '/profiles', label: '协议配置', subtitle: '维护协议模板与节点密钥', icon: Shield },
+      { path: '/groups', label: '分组管理', subtitle: '管理节点分组和策略映射', icon: Layers },
+    ],
+  },
+  {
+    title: '用户订阅',
+    items: [{ path: '/users', label: '用户管理', subtitle: '管理用户与订阅权限', icon: Users }],
+  },
+  {
+    title: '运维工具',
+    items: [
+      { path: '/logs', label: '操作日志', subtitle: '查看系统行为与同步记录', icon: ScrollText },
+      { path: '/settings', label: '系统设置', subtitle: '配置系统参数与诊断项', icon: Settings },
+    ],
+  },
 ]
+
+const allNavItems = navGroups.flatMap((group) => group.items)
 
 export default function Layout() {
   const location = useLocation()
@@ -34,185 +57,228 @@ export default function Layout() {
   const logout = useAuthStore((s) => s.logout)
   const { theme, toggleTheme } = useThemeStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
 
   const handleLogout = () => {
     logout()
     navigate('/login')
   }
 
-  const currentView = navItems.find((item) => location.pathname.startsWith(item.path))?.label ?? '控制台'
+  const currentView = useMemo(
+    () => allNavItems.find((item) => location.pathname.startsWith(item.path))?.label ?? '控制台',
+    [location.pathname]
+  )
+  const currentSubTitle = useMemo(
+    () => allNavItems.find((item) => location.pathname.startsWith(item.path))?.subtitle ?? '可视化管理与系统配置',
+    [location.pathname]
+  )
+
+  const sidebarWidth = collapsed ? 'w-[74px]' : 'w-[240px]'
 
   return (
-    <div className="relative min-h-screen overflow-hidden text-[var(--text)]">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-[-8%] top-[-6%] h-72 w-72 rounded-full bg-teal-400/10 blur-[110px]" />
-        <div className="absolute bottom-[-10%] right-[-6%] h-80 w-80 rounded-full bg-orange-300/8 blur-[120px]" />
-      </div>
-
-      <header className="panel-strong fixed inset-x-3 top-3 z-50 flex h-16 items-center justify-between rounded-2xl px-4 lg:hidden">
+    <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text)] lg:h-screen lg:overflow-hidden">
+      <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[color:var(--panel-strong)]/96 px-4 py-3 backdrop-blur-xl lg:hidden">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)]">
             <Shield className="h-4 w-4" />
           </div>
-          <div>
-            <div className="text-sm font-semibold tracking-[-0.03em]">xray-pilot</div>
-            <div className="text-[11px] uppercase tracking-[0.22em] text-faint">Network Control</div>
+          {!collapsed && (
+            <div>
+              <div className="text-sm font-semibold tracking-[-0.03em]">Xray Pilot</div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-faint">Console</div>
+            </div>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={toggleTheme}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--panel)] text-soft transition hover:text-[var(--text)]"
+              title="切换主题"
+            >
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-2 transition hover:text-[var(--text)]"
+            >
+              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={toggleTheme} className="rounded-xl p-2 text-soft transition hover:bg-[var(--panel-muted)]">
-            {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-          </button>
-          <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="rounded-xl p-2 transition hover:bg-[var(--panel-muted)]">
-            {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
         </div>
       </header>
 
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-slate-950/48 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
-          <div className="panel-strong absolute inset-x-3 bottom-3 top-20 overflow-auto rounded-[28px] p-4">
+          <div className="absolute inset-0 bg-slate-950/42 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
+          <div className="absolute inset-x-3 bottom-3 top-20 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] p-4 shadow-[var(--shadow-panel)]">
             <div className="mb-4 flex items-center justify-between border-b border-[var(--border)] pb-4">
               <div>
-                <div className="text-sm font-semibold">Navigation</div>
-                <div className="mt-1 text-xs text-faint">Quick access to core operations</div>
+                <div className="text-sm font-semibold">导航菜单</div>
+                <div className="mt-1 text-xs text-faint">当前页面：{currentView}</div>
               </div>
-              <Activity className="h-4 w-4 text-[var(--accent)]" />
             </div>
-            <nav className="space-y-2">
-              {navItems.map((item) => {
-                const active = location.pathname.startsWith(item.path)
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={cn(
-                      'flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-semibold transition-all',
-                      active
-                        ? 'bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[var(--border-strong)]'
-                        : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
-                    )}
-                  >
-                    <span className="flex items-center gap-3">
-                      <item.icon className="h-5 w-5" />
-                      {item.label}
-                    </span>
-                    <ChevronRight className="h-4 w-4 opacity-50" />
-                  </Link>
-                )
-              })}
-            </nav>
-            <div className="mt-4 border-t border-[var(--border)] pt-4">
-              <button
-                onClick={handleLogout}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-500/10 py-3 text-sm font-semibold text-rose-500 transition hover:bg-rose-500/16"
-              >
-                <LogOut className="h-4 w-4" />
-                退出登录
-              </button>
+            <div className="space-y-5">
+              {navGroups.map((group) => (
+                <div key={group.title}>
+                  <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-faint">{group.title}</div>
+                  <nav className="space-y-1">
+                    {group.items.map((item) => {
+                      const active = location.pathname.startsWith(item.path)
+                      return (
+                        <Link
+                          key={item.path}
+                          to={item.path}
+                          onClick={() => setMobileMenuOpen(false)}
+                          className={cn(
+                            'flex items-center justify-between rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+                            active
+                              ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                              : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
+                          )}
+                        >
+                          <span className="flex items-center gap-3">
+                            <item.icon className="h-4 w-4" />
+                            {item.label}
+                          </span>
+                          <ChevronRight className="h-4 w-4 opacity-50" />
+                        </Link>
+                      )
+                    })}
+                  </nav>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      <div className="relative z-10 flex min-h-screen gap-4 p-3 pt-20 lg:pt-3">
-        <aside className="hidden w-[280px] shrink-0 lg:block">
-          <div className="panel flex h-[calc(100vh-24px)] flex-col rounded-[32px] p-4">
-            <div className="flex items-center gap-3 rounded-[24px] border border-[var(--border)] bg-[var(--panel-muted)] p-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
-                <Shield className="h-5 w-5" strokeWidth={2.4} />
-              </div>
+      <div className="flex min-h-screen w-full lg:h-full">
+        <aside className={cn('hidden shrink-0 border-r border-[var(--border)] bg-[var(--sidebar)] transition-all duration-200 lg:flex lg:h-full lg:flex-col', sidebarWidth)}>
+          <div className="flex h-14 items-center gap-3 border-b border-[var(--border)] px-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)]">
+              <Shield className="h-4 w-4" strokeWidth={2.1} />
+            </div>
+            {!collapsed && (
               <div>
-                <h1 className="text-base font-semibold tracking-[-0.04em]">xray-pilot</h1>
-                <p className="mt-1 text-[11px] uppercase tracking-[0.22em] text-faint">Infrastructure Console</p>
+                <h1 className="text-sm font-semibold tracking-[-0.03em]">Xray Pilot</h1>
+                <p className="mt-0.5 text-[11px] uppercase tracking-[0.14em] text-faint">Control Panel</p>
               </div>
-            </div>
+            )}
+          </div>
 
-            <div className="mt-5 rounded-[24px] border border-[var(--border)] bg-[var(--panel-muted)] p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-faint">Status</div>
-                  <div className="mt-2 text-sm font-semibold">Control plane online</div>
-                </div>
-                <div className="h-2.5 w-2.5 rounded-full bg-[var(--accent)] shadow-[0_0_16px_var(--accent)]" />
+          <div className="flex-1 overflow-auto px-3 py-4">
+            {navGroups.map((group) => (
+              <div key={group.title} className="mb-6">
+                {!collapsed && (
+                  <div className="mb-2 px-2 text-[11px] font-medium uppercase tracking-[0.14em] text-faint">
+                    {group.title}
+                  </div>
+                )}
+                <nav className="space-y-1">
+                  {group.items.map((item) => {
+                    const active = location.pathname.startsWith(item.path)
+                    return (
+                      <Link
+                        key={item.path}
+                        to={item.path}
+                        className={cn(
+                          'group flex items-center rounded-md px-3 py-2.5 text-sm transition-all',
+                          collapsed ? 'justify-center' : 'gap-3',
+                          active
+                            ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                            : 'text-soft hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]'
+                        )}
+                      >
+                        <item.icon className={cn('h-4 w-4 transition-transform group-hover:scale-105', active && 'scale-105')} />
+                        {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
+                        {!collapsed && <ChevronRight className={cn('h-4 w-4 transition', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-40')} />}
+                      </Link>
+                    )
+                  })}
+                </nav>
               </div>
-              <div className="mt-3 text-xs leading-5 text-soft">
-                用户、节点、协议和系统参数集中管理，强调状态密度、响应反馈和清晰操作路径。
-              </div>
-            </div>
+            ))}
+          </div>
 
-            <div className="mt-5 text-[11px] font-semibold uppercase tracking-[0.22em] text-faint">Navigation</div>
-            <nav className="mt-3 space-y-1.5">
-              {navItems.map((item) => {
-                const active = location.pathname.startsWith(item.path)
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={cn(
-                      'group flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold transition-all',
-                      active
-                        ? 'bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[var(--border-strong)]'
-                        : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
-                    )}
-                  >
-                    <item.icon className={cn('h-[18px] w-[18px] transition-transform group-hover:scale-110', active && 'scale-110')} />
-                    <span className="flex-1">{item.label}</span>
-                    <ChevronRight className={cn('h-4 w-4 transition', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-60')} />
-                  </Link>
-                )
-              })}
-            </nav>
+          <div className="border-t border-[var(--border)] p-3">
+            <button
+              onClick={() => setCollapsed((s) => !s)}
+              className={cn(
+                'flex w-full items-center rounded-md px-3 py-2 text-sm text-soft transition hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]',
+                collapsed ? 'justify-center' : 'gap-2'
+              )}
+            >
+              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              {!collapsed && '收起侧栏'}
+            </button>
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1">
-          <div className="panel relative min-h-[calc(100vh-24px)] rounded-[32px] p-4 md:p-6">
-            <div className="mb-4 hidden items-center justify-end gap-3 lg:flex">
-              <div className="rounded-full border border-[var(--border)] bg-[var(--panel-muted)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-faint">
-                {currentView}
+        <main className="min-w-0 flex-1 lg:h-full">
+          <div className="flex min-h-screen flex-col lg:h-full lg:min-h-0">
+            <header className="hidden h-14 items-center justify-between border-b border-[var(--border)] bg-[color:var(--panel-strong)]/92 px-6 backdrop-blur-xl lg:flex">
+              <div className="leading-tight">
+                <div className="text-base font-semibold tracking-[-0.03em]">{currentView}</div>
+                <div className="mt-0.5 text-xs text-faint">{currentSubTitle}</div>
               </div>
-              <div className="rounded-[18px] border border-[var(--border)] bg-[var(--panel-muted)] p-1">
-                <div className="grid grid-cols-2 gap-1">
-                  <button
-                    onClick={() => {
-                      if (theme === 'dark') toggleTheme()
-                    }}
-                    className={cn(
-                      'flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition',
-                      theme === 'light' ? 'bg-[var(--panel-strong)] text-[var(--text)] shadow-sm' : 'text-soft hover:bg-[var(--panel)]'
-                    )}
-                  >
-                    <Sun className="h-4 w-4" />
-                    Light
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (theme === 'light') toggleTheme()
-                    }}
-                    className={cn(
-                      'flex items-center justify-center gap-2 rounded-2xl px-3 py-2 text-sm font-medium transition',
-                      theme === 'dark' ? 'bg-[var(--panel-strong)] text-[var(--text)] shadow-sm' : 'text-soft hover:bg-[var(--panel)]'
-                    )}
-                  >
-                    <Moon className="h-4 w-4" />
-                    Dark
-                  </button>
-                </div>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="flex items-center justify-center gap-2 rounded-2xl border border-[var(--danger)]/18 bg-[var(--danger-soft)] px-4 py-3 text-sm font-semibold text-[var(--danger)] transition hover:brightness-105"
-              >
-                <LogOut className="h-4 w-4" />
-                退出登录
-              </button>
-            </div>
+              <div className="flex items-center gap-2.5">
+                <label className="relative hidden lg:block">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+                  <input
+                    placeholder="搜索节点、用户..."
+                    className="h-9 w-64 rounded-md border border-[var(--border)] bg-[var(--panel)] pl-10 pr-14 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-[0.12em] text-faint">
+                    ⌘K
+                  </span>
+                </label>
+                {/* <button className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-2 text-soft transition hover:text-[var(--text)]">
+                  <RefreshCw className="h-4 w-4" />
+                </button> */}
+                <button
+                  onClick={toggleTheme}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--panel)] text-soft transition hover:text-[var(--text)]"
+                  title="切换主题"
+                >
+                  {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </button>
+                {/* <button className="relative rounded-md border border-[var(--border)] bg-[var(--panel)] p-2 text-soft transition hover:text-[var(--text)]">
+                  <Bell className="h-4 w-4" />
+                  <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--accent)]" />
+                </button> */}
 
-            <div className="min-h-[calc(100vh-88px)] overflow-auto rounded-[26px]">
-              <Outlet />
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild>
+                    <button className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[var(--border)]">
+                      <UserRound className="h-5 w-5" />
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content
+                      align="end"
+                      sideOffset={8}
+                      className="z-50 min-w-[160px] rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-1.5 shadow-[var(--shadow-card)]"
+                    >
+                      <DropdownMenu.Item className="cursor-default rounded-md px-2.5 py-2 text-sm text-soft outline-none">
+                        个人中心
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Separator className="my-1 h-px bg-[var(--border)]" />
+                      <DropdownMenu.Item
+                        onSelect={handleLogout}
+                        className="flex cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-2 text-sm text-[var(--danger)] outline-none transition hover:bg-[var(--danger-soft)]"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        退出登录
+                      </DropdownMenu.Item>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+              </div>
+            </header>
+
+            <div className="flex-1 px-4 py-4 md:px-6 md:py-5 lg:min-h-0 lg:overflow-y-auto">
+              <div className="min-h-full">
+                <Outlet />
+              </div>
             </div>
           </div>
         </main>

@@ -1,19 +1,23 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Activity, Clock3, RefreshCcw } from 'lucide-react'
 import { logApi } from '@/lib/api'
 import type { SyncLog } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
+import { Btn } from '@/components/ui/Form'
 import { PageHeader, PageShell, SurfaceCard } from '@/components/ui/Page'
 
-const PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 20
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 export default function Logs() {
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['logs', page],
-    queryFn: () => logApi.list({ page, page_size: PAGE_SIZE }).then((r) => r.data.data!),
+  const { data, isLoading, refetch, isFetching } = useQuery({
+    queryKey: ['logs', page, pageSize],
+    queryFn: () => logApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
     refetchInterval: 10_000,
   })
 
@@ -42,18 +46,62 @@ export default function Logs() {
     <PageShell>
       <PageHeader
         title="操作日志"
-        description="实时查看节点同步、健康检测和系统动作，默认每 10 秒自动刷新。"
-        stats={[
-          { label: '刷新周期', value: '10s' },
-          { label: '分页尺寸', value: PAGE_SIZE },
-          { label: '当前页记录', value: data?.list?.length ?? 0 },
-        ]}
+        description="集中查看同步、健康检测和系统动作。日志页保持偏冷静的信息密度，方便快速定位失败动作和耗时异常。"
+        actions={
+          <Btn variant="secondary" loading={isFetching} onClick={() => void refetch()}>
+            <RefreshCcw className="h-4 w-4" />
+            立即刷新
+          </Btn>
+        }
       />
 
-      <SurfaceCard className="p-4">
-        <Table columns={columns} data={data?.list ?? []} loading={isLoading} />
-        <Pagination page={page} pageSize={PAGE_SIZE} total={data?.total ?? 0} onChange={setPage} />
-      </SurfaceCard>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <SurfaceCard className="p-4">
+          <Table columns={columns} data={data?.list ?? []} loading={isLoading} />
+          <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border)] pt-4 md:flex-row md:items-center md:justify-between">
+            <label className="inline-flex items-center gap-2 text-sm text-soft">
+              分页
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value))
+                  setPage(1)
+                }}
+                className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size} / 页
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard className="p-5">
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Activity className="h-4 w-4 text-[var(--accent)]" />
+                观察重点
+              </div>
+              <p className="mt-2 text-sm leading-6 text-soft">优先看失败记录、异常耗时，以及重复出现的节点或动作名，这些通常能最快暴露部署问题。</p>
+            </div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Clock3 className="h-4 w-4 text-[var(--accent)]" />
+                自动刷新
+              </div>
+              <p className="mt-2 text-sm leading-6 text-soft">页面默认每 10 秒拉取一次最新日志，适合在同步节点、测试 SSH 或排查订阅问题时并排观察。</p>
+              <div className="mt-3 inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 py-1 text-xs font-medium text-soft">
+                刷新周期：10s
+              </div>
+            </div>
+          </div>
+        </SurfaceCard>
+      </div>
     </PageShell>
   )
 }

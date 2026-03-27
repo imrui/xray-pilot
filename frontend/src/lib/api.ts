@@ -49,7 +49,7 @@ export const groupApi = {
   create: (data: { name: string; description?: string; node_ids?: number[] }) =>
     request.post<ApiResponse<Group>>('/groups', data),
 
-  update: (id: number, data: { name?: string; description?: string; node_ids?: number[] }) =>
+  update: (id: number, data: { name?: string; description?: string; node_ids?: number[]; active?: boolean }) =>
     request.put<ApiResponse<Group>>(`/groups/${id}`, data),
 
   remove: (id: number) =>

@@ -79,12 +79,9 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 	if req.SSHPort != 0 {
 		node.SSHPort = req.SSHPort
 	}
-	if req.SSHUser != "" {
-		node.SSHUser = req.SSHUser
-	}
-	if req.SSHKeyPath != "" {
-		node.SSHKeyPath = req.SSHKeyPath
-	}
+	// SSHUser/SSHKeyPath 允许显式置空，置空后运行时会回退到系统默认设置。
+	node.SSHUser = req.SSHUser
+	node.SSHKeyPath = req.SSHKeyPath
 	if req.Remark != "" {
 		node.Remark = req.Remark
 	}

@@ -27,7 +27,7 @@ export function ListToolbar({
               value={searchValue}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full rounded-2xl border bg-[var(--panel-muted)] py-3 pl-10 pr-10 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-soft)]"
+              className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] py-2.5 pl-10 pr-10 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
             />
             {searchValue && (
               <button
@@ -41,7 +41,7 @@ export function ListToolbar({
           </label>
           {filters && (
             <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-              <div className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-faint">
+              <div className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-2.5 py-2 text-xs font-medium text-faint">
                 <SlidersHorizontal className="h-3.5 w-3.5" />
                 筛选
               </div>
@@ -70,10 +70,10 @@ export function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-full border px-3 py-2 text-xs font-semibold transition',
+        'rounded-md border px-3 py-2 text-xs font-medium transition',
         active
-          ? 'border-[var(--accent)]/16 bg-[var(--accent-soft)] text-[var(--accent)]'
-          : 'border-[var(--border)] bg-[var(--panel-muted)] text-soft hover:bg-[var(--panel)] hover:text-[var(--text)]'
+          ? 'border-[var(--accent)]/20 bg-[var(--accent-soft)] text-[var(--accent)]'
+          : 'border-[var(--border)] bg-[var(--panel-strong)] text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
       )}
     >
       {children}
@@ -82,5 +82,5 @@ export function FilterChip({
 }
 
 export function BulkBar({ children }: { children: ReactNode }) {
-  return <div className="rounded-[22px] border border-[var(--border)] bg-[var(--panel-muted)] p-3">{children}</div>
+  return <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] p-3 shadow-[var(--shadow-card)]">{children}</div>
 }

@@ -50,17 +50,20 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={() => void requestClose()} />
-      <div className={cn('panel-strong relative flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col border-l border-[var(--border)]', widths[width])}>
+      <div className="absolute inset-0 bg-slate-950/32 backdrop-blur-sm" onClick={() => void requestClose()} />
+      <div className={cn('relative flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col border-l border-[var(--border)] bg-[var(--panel-strong)] shadow-[var(--shadow-panel)]', widths[width])}>
         <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-semibold tracking-[-0.03em]">{title}</h3>
-              {dirty && <span className="inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" title="存在未保存更改" />}
+              {dirty && <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[var(--warning)]" title="存在未保存更改" />}
             </div>
             {description && <p className="mt-1.5 text-sm leading-6 text-soft">{description}</p>}
           </div>
-          <button onClick={() => void requestClose()} className="rounded-xl p-2 text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]">
+          <button
+            onClick={() => void requestClose()}
+            className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-2 text-soft transition hover:text-[var(--text)]"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -72,7 +75,7 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
             <div className="text-xs text-soft">
               {saving ? '保存中…' : dirty ? '有未保存更改' : '所有更改已同步到当前表单'}
             </div>
-            {footer}
+            <div className="flex flex-wrap items-center justify-end gap-2">{footer}</div>
           </div>
         )}
       </div>

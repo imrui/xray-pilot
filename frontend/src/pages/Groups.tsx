@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Layers2, PencilLine } from 'lucide-react'
+import { Layers2, PencilLine, Plus } from 'lucide-react'
 import { groupApi, nodeApi } from '@/lib/api'
 import type { Group } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
@@ -12,7 +12,8 @@ import { ActionMenu } from '@/components/ui/ActionMenu'
 import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 interface FormState {
   name: string
@@ -22,10 +23,31 @@ interface FormState {
 
 const emptyForm = (): FormState => ({ name: '', description: '', node_ids: [] })
 
+function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative h-6 w-11 rounded-full border transition ${
+        checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-slate-200 dark:border-[var(--border)] dark:bg-white/10'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition ${
+          checked ? 'left-[22px]' : 'left-0.5'
+        }`}
+      />
+    </button>
+  )
+}
+
 export default function Groups() {
   const confirm = useConfirm()
   const qc = useQueryClient()
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [drawer, setDrawer] = useState<{ open: boolean; group?: Group }>({ open: false })
   const [form, setForm] = useState<FormState>(emptyForm())
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm())
@@ -35,8 +57,8 @@ export default function Groups() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['groups', page],
-    queryFn: () => groupApi.list({ page, page_size: PAGE_SIZE }).then((r) => r.data.data!),
+    queryKey: ['groups', page, pageSize],
+    queryFn: () => groupApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
   })
 
   const { data: allNodes } = useQuery({
@@ -57,6 +79,10 @@ export default function Groups() {
 
   const remove = useMutation({
     mutationFn: (id: number) => groupApi.remove(id),
+    onSuccess: invalidate,
+  })
+  const toggle = useMutation({
+    mutationFn: ({ id, active }: { id: number; active: boolean }) => groupApi.update(id, { active }),
     onSuccess: invalidate,
   })
 
@@ -132,16 +158,20 @@ export default function Groups() {
       key: 'name',
       label: '分组',
       render: (g: Group) => (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           <div className="font-semibold">{g.name}</div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge label={`${g.node_count} 个节点`} variant="blue" />
             <span className="text-xs text-soft">{g.description || '未填写描述'}</span>
           </div>
         </div>
       ),
     },
-    { key: 'active', label: '状态', render: (g: Group) => <Badge label={g.active ? '启用' : '禁用'} variant={g.active ? 'green' : 'gray'} /> },
+    {
+      key: 'active',
+      label: '状态',
+      render: (g: Group) => <Switch checked={g.active} onChange={(next) => toggle.mutate({ id: g.id, active: next })} />,
+    },
     {
       key: 'actions',
       label: '操作',
@@ -149,7 +179,7 @@ export default function Groups() {
         <div className="flex items-center justify-end gap-2">
           <button
             onClick={() => openEdit(g)}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-1.5 text-xs font-semibold text-soft transition hover:bg-[var(--panel)] hover:text-[var(--text)]"
+            className="inline-flex h-9 items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-semibold text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
           >
             <PencilLine className="h-3.5 w-3.5" />
             编辑
@@ -181,13 +211,13 @@ export default function Groups() {
     <PageShell>
       <PageHeader
         title="分组管理"
-        description="分组不再是单纯的表格项，编辑时直接进入抽屉配置关联节点，减少来回切换。"
-        actions={<Btn onClick={openCreate}>新增分组</Btn>}
-        stats={[
-          { label: '总分组数', value: data?.total ?? 0 },
-          { label: '已发现节点', value: allNodes?.length ?? 0 },
-          { label: '分页尺寸', value: PAGE_SIZE },
-        ]}
+        description="把分组视为节点池和分发策略容器，而不是单纯的命名项。编辑时在右侧直接维护关联节点。"
+        actions={
+          <Btn onClick={openCreate}>
+            <Plus className="h-4 w-4" />
+            新增分组
+          </Btn>
+        }
       />
 
       <ListToolbar
@@ -233,10 +263,52 @@ export default function Groups() {
         }
       />
 
-      <SurfaceCard className="p-4">
-        <Table columns={columns} data={filteredGroups} loading={isLoading} />
-        <Pagination page={page} pageSize={PAGE_SIZE} total={data?.total ?? 0} onChange={setPage} />
-      </SurfaceCard>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <SurfaceCard className="p-4">
+          <Table columns={columns} data={filteredGroups} loading={isLoading} />
+          <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border)] pt-4 md:flex-row md:items-center md:justify-between">
+            <label className="inline-flex items-center gap-2 text-sm text-soft">
+              分页
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value))
+                  setPage(1)
+                }}
+                className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size} / 页
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard className="p-5">
+          <div className="mb-4">
+            <div className="text-sm font-semibold">分组说明</div>
+            <p className="mt-2 text-sm leading-6 text-soft">
+              建议把分组用于表达线路池、地区池或特定分发策略。这样用户和订阅逻辑在后续配置里会更清晰。
+            </p>
+          </div>
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Node Pool</div>
+              <div className="mt-2 text-sm font-semibold">节点按职责归类</div>
+              <p className="mt-2 text-xs leading-5 text-soft">比如海外中转、高可用入口、实验线路，不需要把这些语义散落在节点备注里。</p>
+            </div>
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Distribution</div>
+              <div className="mt-2 text-sm font-semibold">为订阅分发做准备</div>
+              <p className="mt-2 text-xs leading-5 text-soft">后续用户绑定分组后，订阅生成会更自然，排障时也更容易回溯。</p>
+            </div>
+          </div>
+        </SurfaceCard>
+      </div>
 
       <Drawer
         open={drawer.open}
@@ -273,11 +345,11 @@ export default function Groups() {
                       onClick={() => toggleNode(n.id)}
                       className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition ${
                         checked
-                          ? 'border-emerald-500/30 bg-emerald-500/10'
-                          : 'border-[var(--border)] bg-[var(--panel)] hover:bg-[var(--panel-muted)]'
+                          ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)]'
+                          : 'border-[var(--border)] bg-[var(--panel-strong)] hover:bg-[var(--panel-muted)]'
                       }`}
                     >
-                      <div className={`h-2.5 w-2.5 rounded-full ${checked ? 'bg-emerald-400' : 'bg-slate-400/60'}`} />
+                      <div className={`h-2.5 w-2.5 rounded-full ${checked ? 'bg-[var(--accent)]' : 'bg-slate-400/60'}`} />
                       <div className="min-w-0 flex-1">
                         <div className="font-medium">{n.name}</div>
                         <div className="mt-1 text-xs text-soft">{n.region ? `${n.region} · ${n.ip}` : n.ip}</div>

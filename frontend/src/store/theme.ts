@@ -1,43 +1,55 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export type ThemeMode = 'light' | 'dark'
+
 interface ThemeState {
-  theme: 'light' | 'dark'
+  theme: ThemeMode
   toggleTheme: () => void
-  setTheme: (t: 'light' | 'dark') => void
+  setTheme: (t: ThemeMode) => void
+}
+
+function applyTheme(mode: ThemeMode) {
+  if (mode === 'dark') {
+    document.documentElement.classList.add('dark')
+  } else {
+    document.documentElement.classList.remove('dark')
+  }
 }
 
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set) => ({
-      theme: 'light',
-      toggleTheme: () => set((state) => {
-        const nextTheme = state.theme === 'light' ? 'dark' : 'light'
-        if (nextTheme === 'dark') {
-          document.documentElement.classList.add('dark')
-        } else {
-          document.documentElement.classList.remove('dark')
-        }
-        return { theme: nextTheme }
-      }),
-      setTheme: (t) => set(() => {
-        if (t === 'dark') {
-          document.documentElement.classList.add('dark')
-        } else {
-          document.documentElement.classList.remove('dark')
-        }
-        return { theme: t }
-      })
+      theme: 'dark',
+      toggleTheme: () =>
+        set((state) => {
+          const next: ThemeMode = state.theme === 'dark' ? 'light' : 'dark'
+          applyTheme(next)
+          return { theme: next }
+        }),
+      setTheme: (t) =>
+        set(() => {
+          applyTheme(t)
+          return { theme: t }
+        }),
     }),
     { name: 'theme-storage' }
   )
 )
 
 export function initTheme() {
-  const store = localStorage.getItem('theme-storage')
-  if (store && JSON.parse(store)?.state?.theme === 'dark') {
-    document.documentElement.classList.add('dark')
-  } else if (!store && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    document.documentElement.classList.add('dark')
+  const raw = localStorage.getItem('theme-storage')
+  let mode: ThemeMode = 'dark'
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      const saved = parsed?.state?.theme as ThemeMode | undefined
+      if (saved === 'light' || saved === 'dark') {
+        mode = saved
+      }
+    } catch {
+      mode = 'dark'
+    }
   }
+  applyTheme(mode)
 }
