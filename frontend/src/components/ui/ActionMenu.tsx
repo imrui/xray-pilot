@@ -15,7 +15,7 @@ export function ActionMenu({ items, label = '更多操作' }: { items: ActionIte
       <DropdownMenu.Trigger asChild>
         <button
           aria-label={label}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--panel-muted)] text-soft transition hover:bg-[var(--panel)] hover:text-[var(--text)]"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
         >
           <MoreHorizontal className="h-4 w-4" />
         </button>
@@ -25,7 +25,7 @@ export function ActionMenu({ items, label = '更多操作' }: { items: ActionIte
         <DropdownMenu.Content
           sideOffset={8}
           align="end"
-          className="panel-strong z-50 min-w-[160px] rounded-2xl p-1.5"
+          className="z-50 min-w-[176px] rounded-2xl border border-[var(--border)] bg-[var(--panel-strong)] p-1.5 shadow-[var(--shadow-card)]"
         >
           {items.map((item) => (
             <DropdownMenu.Item

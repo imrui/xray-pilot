@@ -54,6 +54,9 @@ func (s *GroupService) UpdateGroup(id uint, req *dto.UpdateGroupRequest) (*dto.G
 	if req.Description != "" {
 		group.Description = req.Description
 	}
+	if req.Active != nil {
+		group.Active = *req.Active
+	}
 	if err := s.groupRepo.Update(group); err != nil {
 		return nil, err
 	}

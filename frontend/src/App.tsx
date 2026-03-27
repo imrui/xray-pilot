@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Layout from '@/components/Layout'
+import Dashboard from '@/pages/Dashboard'
 import Login from '@/pages/Login'
 import Users from '@/pages/Users'
 import Groups from '@/pages/Groups'
@@ -33,7 +34,8 @@ export default function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<Navigate to="/nodes" replace />} />
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
               <Route path="users" element={<Users />} />
               <Route path="groups" element={<Groups />} />
               <Route path="nodes" element={<Nodes />} />
