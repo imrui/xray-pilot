@@ -142,6 +142,6 @@ func (r *NodeRepository) FindHealthyByGroupID(groupID uint, lastCheckOKFilter bo
 	if lastCheckOKFilter {
 		query = query.Where("last_check_ok = ?", true)
 	}
-	err := query.Find(&nodes).Error
+	err := query.Order("id asc").Find(&nodes).Error
 	return nodes, err
 }

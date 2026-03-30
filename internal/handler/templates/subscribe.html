@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Xray Pilot 订阅</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M16%202L28%209V23L16%2030L4%2023V9L16%202Z%22%20stroke%3D%22%2316A34A%22%20stroke-width%3D%221.8%22%20stroke-linejoin%3D%22round%22%2F%3E%3Cpath%20d%3D%22M16%2010V22%22%20stroke%3D%22%2316A34A%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M10.5%2013L21.5%2019%22%20stroke%3D%22%2316A34A%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%2F%3E%3Cpath%20d%3D%22M10.5%2019L21.5%2013%22%20stroke%3D%22%2316A34A%22%20stroke-width%3D%221.8%22%20stroke-linecap%3D%22round%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%222.3%22%20fill%3D%22%2316A34A%22%2F%3E%3C%2Fsvg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  color-scheme:light;
+  --bg:#f3f4f6;--panel:#fff;--panel-muted:#f6f7f9;--border:#e5e7eb;--border-strong:#d1d5db;
+  --text:#111827;--text-soft:#4b5563;--text-faint:#9aa1ad;--accent:#16a34a;--accent-strong:#15803d;
+  --accent-soft:rgba(22,163,74,.1);--link:#2563eb;--shadow-card:0 1px 3px rgba(17,24,39,.04);
+  --badge-green-bg:#d1fae5;--badge-green-text:#065f46;--badge-green-border:#6ee7b7;
+  --badge-red-bg:#fee2e2;--badge-red-text:#991b1b;--badge-red-border:#fca5a5;
+}
+.dark{
+  color-scheme:dark;
+  --bg:#030303;--panel:#080808;--panel-muted:#101010;--border:#1b1b1b;--border-strong:#252525;
+  --text:#f5f5f5;--text-soft:#a3a3a3;--text-faint:#737373;--accent:#22c55e;--accent-strong:#16a34a;
+  --accent-soft:rgba(34,197,94,.14);--link:#60a5fa;--shadow-card:0 10px 24px rgba(0,0,0,.35);
+  --badge-green-bg:rgba(74,222,128,.12);--badge-green-text:#bbf7d0;--badge-green-border:rgba(74,222,128,.32);
+  --badge-red-bg:rgba(251,113,133,.12);--badge-red-text:#fecdd3;--badge-red-border:rgba(251,113,133,.32);
+}
+body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased;transition:background-color .2s ease,color .2s ease}
+a{color:inherit;text-decoration:none}
+button{font:inherit}
+header{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--panel) 94%, transparent);border-bottom:1px solid var(--border);backdrop-filter:blur(12px)}
+.header-inner{max-width:760px;height:56px;margin:0 auto;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600}
+.logo svg{color:var(--accent)}
+.header-actions{display:flex;align-items:center;gap:4px}
+.icon-btn{width:36px;height:36px;border:none;border-radius:10px;background:transparent;color:var(--text-faint);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .15s ease,color .15s ease}
+.icon-btn:hover{background:var(--panel-muted);color:var(--text)}
+main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-direction:column;gap:16px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:20px;box-shadow:var(--shadow-card)}
+.section-kicker{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.section-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.section-subtitle{margin-top:8px;font-size:12px;color:var(--text-faint);line-height:1.6}
+.user-grid{display:grid;grid-template-columns:minmax(0,1fr) 1px 280px;gap:0;align-items:start}
+.user-divider{height:100%;background:var(--border)}
+.user-left{padding-right:24px;display:flex;flex-direction:column;justify-content:flex-start;min-height:220px;padding-top:4px}
+.user-right{padding-left:24px;display:flex;flex-direction:column;align-items:center;padding-top:4px}
+.user-fields{display:grid;gap:16px}
+.field-label{margin-bottom:4px;font-size:12px;color:var(--text-faint)}
+.field-value{font-size:15px;font-weight:600;color:var(--text)}
+.field-inline{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:20px}
+.field-inline-item{min-width:0}
+.field-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid;font-size:12px;font-weight:600}
+.badge-active{background:var(--badge-green-bg);color:var(--badge-green-text);border-color:var(--badge-green-border)}
+.badge-inactive{background:var(--badge-red-bg);color:var(--badge-red-text);border-color:var(--badge-red-border)}
+.qr-box,.modal-qr-inner{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px;line-height:0}
+.qr-actions{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;flex-wrap:wrap}
+.btn-subtle{min-height:32px;padding:0 10px;border:1px solid var(--border);border-radius:999px;background:var(--panel);color:var(--text-soft);display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;white-space:nowrap}
+.btn-subtle:hover{background:var(--panel-muted);border-color:var(--border-strong);color:var(--text)}
+.qr-hint{margin-top:12px;font-size:12px;color:var(--text-faint);text-align:center;line-height:1.6}
+.qr-save-hint{font-size:11px;color:var(--text-faint);text-align:center}
+.qr-mobile-head{display:none}
+.qr-mobile-head .btn-subtle{min-height:28px;padding:0 10px;font-size:12px}
+.count{font-size:12px;color:var(--text-faint)}
+.node-list{display:flex;flex-direction:column;gap:8px}
+.node-item{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-muted);transition:border-color .15s ease,background-color .15s ease}
+.node-item:hover{border-color:var(--border-strong);background:var(--panel)}
+.node-info{flex:1;min-width:0}
+.node-name-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.region-tag{display:inline-flex;align-items:center;padding:2px 6px;border:1px solid var(--border);border-radius:6px;background:var(--panel);font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-faint);text-transform:uppercase}
+.node-name{font-size:15px;font-weight:600;color:var(--text)}
+.node-link,.alt-link{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-actions,.alt-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.btn{min-height:34px;padding:0 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--text-soft);display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;white-space:nowrap}
+.btn:hover{background:var(--panel-muted);border-color:var(--border-strong);color:var(--text)}
+.btn-icon{width:34px;padding:0}
+.alt-row{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-muted);transition:border-color .15s ease,background-color .15s ease}
+.alt-row:hover{border-color:var(--border-strong);background:var(--panel)}
+.alt-info{flex:1;min-width:0}
+.empty{padding:18px 0;text-align:center;color:var(--text-faint);font-size:13px}
+.modal-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);z-index:100}
+.modal{position:relative;width:min(100%,360px);padding:22px;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-card)}
+.modal-close{position:absolute;top:14px;right:14px;width:28px;height:28px;border:1px solid var(--accent);border-radius:8px;background:transparent;color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .15s ease}
+.modal-close:hover{background:var(--accent-soft)}
+.modal-title{padding-right:36px;font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
+.modal-sub{margin-top:4px;margin-bottom:18px;font-size:12px;color:var(--text-faint)}
+.modal-qr{display:flex;justify-content:center}
+@media (min-width:641px){
+  .qr-hint{white-space:nowrap}
+  .qr-actions{display:none}
+}
+@media (max-width:640px){
+  .header-inner{height:52px;padding:0 12px}
+  .logo{gap:8px;font-size:14px}
+  .icon-btn{width:34px;height:34px}
+  main{padding:12px 12px 22px;gap:12px}
+  .card{padding:16px;border-radius:14px}
+  .section-header{margin-bottom:12px}
+  .section-subtitle{margin-top:6px}
+  .user-grid{grid-template-columns:1fr;gap:14px}
+  .user-divider{width:100%;height:1px}
+  .user-left{padding-right:0;min-height:0;padding-top:0}
+  .user-right{padding-left:0;align-items:center;text-align:center}
+  .user-fields{gap:14px}
+  .field-inline{grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:14px}
+  .qr-box{padding:8px}
+  .qr-hint{max-width:250px;font-size:11px;white-space:normal}
+  .qr-mobile-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .qr-desktop-title{display:none}
+  .qr-actions{display:none}
+  .qr-mobile-head .qr-actions{display:flex;margin-top:0}
+  .btn-subtle{width:auto;padding:0 12px}
+  .qr-save-hint{display:none}
+  .alt-row,.node-item{align-items:flex-start;flex-direction:column;gap:10px}
+  .node-info,.alt-info{width:100%}
+  .node-link,.alt-link{font-size:11px}
+  .node-actions,.alt-actions{
+    width:100%;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 38px;
+    justify-content:stretch;
+    gap:8px;
+  }
+  .btn{width:100%;min-height:36px}
+  .btn-icon{width:38px;min-height:36px;padding:0}
+  .modal{width:min(100%,340px);padding:18px;border-radius:14px}
+  .modal-title{font-size:15px}
+  .modal-sub{margin-bottom:14px}
+  .modal-close{top:12px;right:12px}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <div class="logo">
+      <svg width="26" height="26" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z"/>
+        <path d="M16 10V22"/>
+        <path d="M10.5 13L21.5 19"/>
+        <path d="M10.5 19L21.5 13"/>
+        <circle cx="16" cy="16" r="2" fill="currentColor" stroke="none"/>
+      </svg>
+      Xray Pilot
+    </div>
+    <div class="header-actions">
+      <a href="https://github.com/imrui/xray-pilot" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844a9.59 9.59 0 012.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      </a>
+      <button class="icon-btn" title="切换主题" onclick="toggleTheme()">
+        <svg id="moonIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+        <svg id="sunIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="user-grid">
+      <div class="user-left">
+        <div class="section-header" style="margin-bottom:18px">
+          <div class="section-kicker">用户信息</div>
+        </div>
+        <div class="user-fields">
+          <div class="field-inline">
+            <div class="field-inline-item">
+              <div class="field-label">用户名</div>
+              <div class="field-meta">
+                <div class="field-value">{{.Username}}</div>
+              </div>
+            </div>
+            <div class="field-inline-item">
+              <div class="field-label">状态</div>
+              <span class="badge {{if .Active}}badge-active{{else}}badge-inactive{{end}}">{{if .Active}}Active{{else}}Disabled{{end}}</span>
+            </div>
+          </div>
+          <div>
+            <div class="field-label">到期时间</div>
+            <div class="field-value">{{.ExpiresStr}}</div>
+          </div>
+        </div>
+      </div>
+      <div class="user-divider"></div>
+      <div class="user-right">
+        <div class="qr-mobile-head">
+          <div class="section-kicker" style="color:var(--accent)">扫码订阅</div>
+          <div class="qr-actions">
+            <button class="btn-subtle" type="button" onclick="saveQRCode('qrMain', 'xray-pilot-subscription')">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+              保存二维码
+            </button>
+          </div>
+        </div>
+        <div class="section-kicker qr-desktop-title" style="color:var(--accent)">扫码订阅</div>
+        <div class="qr-box" id="qrMain" style="margin-top:14px"></div>
+        <div class="qr-actions">
+          <button class="btn-subtle" type="button" onclick="saveQRCode('qrMain', 'xray-pilot-subscription')">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+            保存二维码
+          </button>
+        </div>
+        <p class="qr-hint">支持 V2rayN / Clash / Shadowrocket 等客户端</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-header">
+      <div class="section-kicker">节点列表</div>
+      <div class="count">{{len .Nodes}} 个节点</div>
+    </div>
+    {{if eq (len .Nodes) 0}}
+    <div class="empty">暂无可用节点，请联系管理员</div>
+    {{else}}
+    <div class="node-list">
+      {{range .Nodes}}
+      <div class="node-item">
+        <div class="node-info">
+          <div class="node-name-row">
+            {{if .Region}}<span class="region-tag">{{.Region}}</span>{{end}}
+            <span class="node-name">{{.Name}}</span>
+          </div>
+          <div class="node-link" title="{{.Link}}">{{.Link}}</div>
+        </div>
+        <div class="node-actions">
+          <button class="btn copy-btn" data-copy="{{.Link}}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            复制
+          </button>
+          <button class="btn btn-icon qr-btn" title="二维码" data-name="{{.Name}}" data-region="{{.Region}}" data-link="{{.Link}}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+          </button>
+        </div>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  </section>
+
+  <section class="card">
+    <div class="section-kicker">备用订阅链接</div>
+    <p class="section-subtitle">如客户端无法自动识别，请使用以下链接</p>
+    <div class="alt-row">
+      <div class="alt-info">
+        <div class="alt-link" title="{{.AltSubURL}}">{{.AltSubURL}}</div>
+      </div>
+      <div class="alt-actions">
+        <button class="btn copy-btn" data-copy="{{.AltSubURL}}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          复制
+        </button>
+        <button class="btn btn-icon qr-btn" title="二维码" data-name="备用订阅链接" data-region="" data-link="{{.AltSubURL}}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+        </button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="pageData" data-sub-url="{{.SubURL}}" style="display:none"></div>
+
+<div class="modal-overlay" id="modalOverlay" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-sub" id="modalSub"></div>
+    <div class="modal-qr"><div class="modal-qr-inner" id="modalQR"></div></div>
+    <div class="qr-actions" style="margin-top:16px">
+      <button class="btn-subtle" type="button" onclick="saveQRCode('modalQR', 'xray-pilot-qr')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+        保存二维码
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var theme = localStorage.getItem('xp-theme') || 'light';
+  if(theme === 'dark'){
+    document.documentElement.classList.add('dark');
+    document.getElementById('moonIcon').style.display = 'none';
+    document.getElementById('sunIcon').style.display = '';
+  }
+})();
+
+function toggleTheme(){
+  var dark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('xp-theme', dark ? 'dark' : 'light');
+  document.getElementById('moonIcon').style.display = dark ? 'none' : '';
+  document.getElementById('sunIcon').style.display = dark ? '' : 'none';
+}
+
+window.addEventListener('load', function(){
+  var subUrl = document.getElementById('pageData').dataset.subUrl;
+  if(!subUrl){ return; }
+  var qrSize = window.innerWidth <= 640 ? 116 : 128;
+  new QRCode(document.getElementById('qrMain'), {
+    text: subUrl,
+    width: qrSize,
+    height: qrSize,
+    colorDark: '#000000',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+});
+
+function fallbackCopy(text, onSuccess, onFail){
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    document.execCommand('copy') ? onSuccess() : onFail();
+  } catch(e){
+    onFail();
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+function copyText(btn){
+  var text = btn.dataset.copy || '';
+  var original = btn.innerHTML;
+  var successHtml = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> 已复制';
+  function onSuccess(){
+    btn.innerHTML = successHtml;
+    setTimeout(function(){ btn.innerHTML = original; }, 1500);
+  }
+  function onFail(){
+    btn.textContent = '复制失败';
+    setTimeout(function(){ btn.innerHTML = original; }, 1500);
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(onSuccess, function(){
+      fallbackCopy(text, onSuccess, onFail);
+    });
+  } else {
+    fallbackCopy(text, onSuccess, onFail);
+  }
+}
+
+function showQR(name, region, link){
+  var regionHtml = region ? '<span class="region-tag" style="margin-right:4px">' + region + '</span>' : '';
+  document.getElementById('modalTitle').innerHTML = regionHtml + name;
+  document.getElementById('modalSub').textContent = name === '备用订阅链接' ? '扫描二维码导入订阅' : '扫描二维码导入此节点';
+  var el = document.getElementById('modalQR');
+  el.innerHTML = '';
+  var size = window.innerWidth <= 640 ? Math.min(180, window.innerWidth - 120) : 220;
+  new QRCode(el, {
+    text: link,
+    width: size,
+    height: size,
+    colorDark: '#000000',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function getQRCodeDataURL(containerId){
+  var container = document.getElementById(containerId);
+  if(!container){ return ''; }
+  var canvas = container.querySelector('canvas');
+  if(canvas && canvas.toDataURL){
+    return canvas.toDataURL('image/png');
+  }
+  var img = container.querySelector('img');
+  if(img && img.src){
+    return img.src;
+  }
+  return '';
+}
+
+function saveQRCode(containerId, fileBaseName){
+  var dataUrl = getQRCodeDataURL(containerId);
+  if(!dataUrl){ return; }
+  if(navigator.share && dataUrl.indexOf('data:image/png') === 0){
+    try {
+      var file = dataURLToFile(dataUrl, fileBaseName + '.png');
+      if(file && (!navigator.canShare || navigator.canShare({ files:[file] }))){
+        navigator.share({ files:[file], title:'二维码', text:'保存二维码' }).catch(function(){});
+        return;
+      }
+    } catch(e){}
+  }
+  var link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = fileBaseName + '.png';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  if(/iphone|ipad|android/i.test(navigator.userAgent)){
+    setTimeout(function(){
+      window.open(dataUrl, '_blank', 'noopener');
+    }, 50);
+  }
+}
+
+function dataURLToFile(dataUrl, filename){
+  var arr = dataUrl.split(',');
+  if(arr.length < 2){ return null; }
+  var mimeMatch = arr[0].match(/:(.*?);/);
+  if(!mimeMatch){ return null; }
+  var mime = mimeMatch[1];
+  var bstr = atob(arr[1]);
+  var n = bstr.length;
+  var u8arr = new Uint8Array(n);
+  while(n--){
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, { type: mime });
+}
+
+function closeModal(){
+  document.getElementById('modalOverlay').style.display = 'none';
+  document.getElementById('modalQR').innerHTML = '';
+}
+
+document.addEventListener('click', function(e){
+  var copyBtn = e.target.closest('.copy-btn');
+  if(copyBtn){
+    copyText(copyBtn);
+    return;
+  }
+  var qrBtn = e.target.closest('.qr-btn');
+  if(qrBtn){
+    showQR(qrBtn.dataset.name || '', qrBtn.dataset.region || '', qrBtn.dataset.link || '');
+  }
+});
+
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape'){
+    closeModal();
+  }
+});
+</script>
+</body>
+</html>

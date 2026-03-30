@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Filter, PencilLine, Plus, QrCode, Search } from 'lucide-react'
+import { Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, Search } from 'lucide-react'
 import { userApi, groupApi } from '@/lib/api'
 import type { User } from '@/types'
 import { Badge } from '@/components/ui/Badge'
@@ -411,8 +411,17 @@ export default function Users() {
                           className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--panel-muted)]"
                         >
                           <QrCode className="h-3.5 w-3.5" />
-                          订阅
+                          二维码
                         </button>
+                        <a
+                          href={u.subscribe_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          订阅页
+                        </a>
                         <button
                           onClick={() => openEdit(u)}
                           className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
@@ -548,6 +557,15 @@ export default function Users() {
                   <QrCode className="h-4 w-4" />
                   查看订阅二维码
                 </Btn>
+                <a
+                  href={drawer.user!.subscribe_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--panel-strong)] px-4 text-sm font-medium text-[var(--text)] transition-all hover:border-[var(--accent)]/40 hover:bg-[var(--panel-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  打开订阅页
+                </a>
                 <Btn
                   variant="secondary"
                   onClick={async () => {

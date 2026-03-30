@@ -23,6 +23,7 @@ Place screenshots in [`docs/screenshots/`](./docs/screenshots/) with the followi
 - `03-users.png`
 - `04-profiles.png`
 - `05-settings.png`
+- `06-subscribe.png`
 
 Recommended capture order:
 
@@ -31,6 +32,7 @@ Recommended capture order:
 3. User management
 4. Protocol configuration
 5. System settings
+6. Subscription portal
 
 > The current admin UI is primarily Chinese. Keeping `README.md` in English is still recommended for project discovery, while the screenshots and the Chinese manual provide localized context.
 
@@ -63,6 +65,12 @@ Define protocol templates, attach node-specific key material, and keep shared se
 ![Settings](./docs/screenshots/05-settings.png)
 
 Inspect runtime diagnostics, review deployment hints, and manage database-backed system settings without editing config files manually.
+
+### Subscription Portal
+
+![Subscribe](./docs/screenshots/06-subscribe.png)
+
+Render a browser-friendly subscription page with QR import, node-level copy actions, theme support, and smart fallback links while keeping client access on the same `/sub/{token}` endpoint.
 
 ## Tech Stack
 

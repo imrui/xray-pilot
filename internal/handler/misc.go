@@ -1,8 +1,12 @@
 package handler
 
 import (
+	_ "embed"
+	"fmt"
+	"html/template"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +16,9 @@ import (
 	"github.com/imrui/xray-pilot/internal/service"
 	"github.com/imrui/xray-pilot/pkg/response"
 )
+
+//go:embed templates/subscribe.html
+var subscribePageHTML string
 
 // ---- 日志 ----
 
@@ -70,22 +77,148 @@ func NewSubscribeHandler() *SubscribeHandler {
 	return &SubscribeHandler{svc: service.NewSubscribeService()}
 }
 
-// Subscribe 处理 /sub/:token，返回 base64 编码订阅内容
+// isProxyClient 检测 UA 是否为代理客户端
+func isProxyClient(ua string) bool {
+	lower := strings.ToLower(ua)
+	for _, kw := range []string{
+		"v2rayn", "v2rayng", "clash", "mihomo", "clash-verge", "clash-meta",
+		"sing-box", "singbox", "shadowrocket", "quantumult", "surge",
+		"stash", "loon", "hiddify", "nekoray", "matsuri", "antenna", "xray", "neko",
+	} {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// detectFormat 从 UA 推断订阅格式
+func detectFormat(ua string) string {
+	lower := strings.ToLower(ua)
+	if strings.Contains(lower, "clash") || strings.Contains(lower, "mihomo") {
+		return "clash"
+	}
+	if strings.Contains(lower, "sing-box") || strings.Contains(lower, "singbox") {
+		return "singbox"
+	}
+	return "v2ray"
+}
+
+func (h *SubscribeHandler) baseURL(c *gin.Context) string {
+	if base := strings.TrimRight(strings.TrimSpace(h.svc.GetSetting(service.KeySubscriptionBaseURL)), "/"); base != "" {
+		return base
+	}
+
+	scheme := forwardedHeaderValue(c.GetHeader("X-Forwarded-Proto"))
+	if scheme == "" {
+		scheme = forwardedHeaderValue(c.GetHeader("X-Forwarded-Scheme"))
+	}
+	if scheme == "" {
+		if c.Request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	host := forwardedHeaderValue(c.GetHeader("X-Forwarded-Host"))
+	if host == "" {
+		host = c.Request.Host
+	}
+
+	return scheme + "://" + host
+}
+
+// Subscribe 处理 /sub/:token
+// 优先级：format 参数 > sub=1 参数 > 代理客户端 UA > HTML 信息页
 func (h *SubscribeHandler) Subscribe(c *gin.Context) {
 	token := c.Param("token")
-	content, err := h.svc.GenerateSubscription(token)
+	format := strings.ToLower(strings.TrimSpace(c.Query("format")))
+	sub := c.Query("sub")
+	ua := c.GetHeader("User-Agent")
+
+	switch {
+	case format == "html":
+		h.handleInfoPage(c, token)
+	case format != "":
+		h.handleSubscription(c, token, format)
+	case sub == "1":
+		h.handleSubscription(c, token, "v2ray")
+	case isProxyClient(ua):
+		h.handleSubscription(c, token, detectFormat(ua))
+	default:
+		h.handleInfoPage(c, token)
+	}
+}
+
+// handleSubscription 返回代理客户端格式的订阅内容
+func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format string) {
+	var expire int64
+	if u, err := h.svc.GetUser(token); err == nil && u.ExpiresAt != nil {
+		expire = u.ExpiresAt.Unix()
+	}
+
+	var (
+		content string
+		err     error
+	)
+	switch format {
+	case "clash":
+		content, err = h.svc.GenerateClash(token)
+	default:
+		content, err = h.svc.GenerateSubscription(token)
+	}
 	if err != nil {
-		c.String(http.StatusNotFound, err.Error())
+		c.String(http.StatusForbidden, err.Error())
 		return
 	}
-	if content == "" {
-		// 订阅内容为空：用户未分组或分组内无可用节点/协议配置
-		c.String(http.StatusOK, "# xray-pilot: no active nodes in subscription")
-		return
+
+	c.Header("Subscription-Userinfo", fmt.Sprintf("upload=0; download=0; total=0; expire=%d", expire))
+	c.Header("Profile-Update-Interval", "24")
+	c.Header("Content-Disposition", `attachment; filename="xray-pilot"`)
+	if format == "clash" {
+		c.Header("Content-Type", "text/yaml; charset=utf-8")
+	} else {
+		c.Header("Content-Type", "text/plain; charset=utf-8")
 	}
-	c.Header("Content-Type", "text/plain; charset=utf-8")
-	c.Header("Profile-Title", "xray-pilot")
 	c.String(http.StatusOK, content)
+}
+
+// handleInfoPage 返回 HTML 订阅信息页
+func (h *SubscribeHandler) handleInfoPage(c *gin.Context, token string) {
+	data, err := h.svc.GetSubscribePageDataWithBaseURL(token, h.baseURL(c))
+	if err != nil {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(renderErrorPage(err.Error())))
+		return
+	}
+
+	tmpl, parseErr := template.New("subscribe").Parse(subscribePageHTML)
+	if parseErr != nil {
+		c.String(http.StatusInternalServerError, "模板解析失败")
+		return
+	}
+
+	type tmplData struct {
+		*service.SubscribePageData
+		ExpiresStr string
+	}
+
+	td := tmplData{SubscribePageData: data}
+	if data.ExpiresAt != nil {
+		td.ExpiresStr = data.ExpiresAt.Format("2006-01-02")
+	} else {
+		td.ExpiresStr = "∞"
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Status(http.StatusOK)
+	_ = tmpl.Execute(c.Writer, td)
+}
+
+func renderErrorPage(msg string) string {
+	return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Xray Pilot</title>` +
+		`<style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8fafc}.box{text-align:center;padding:2rem;background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}h2{color:#ef4444;margin:0 0 .5rem}p{color:#64748b;margin:0}</style>` +
+		`</head><body><div class="box"><h2>订阅不可用</h2><p>` + template.HTMLEscapeString(msg) + `</p></div></body></html>`
 }
 
 // ---- 认证 ----
