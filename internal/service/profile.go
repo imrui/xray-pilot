@@ -50,6 +50,9 @@ func (s *ProfileService) Update(id uint, req *dto.UpdateProfileRequest) (*dto.Pr
 	if req.Name != "" {
 		p.Name = req.Name
 	}
+	if req.Protocol != "" {
+		p.Protocol = req.Protocol
+	}
 	if req.Port != 0 {
 		p.Port = req.Port
 	}

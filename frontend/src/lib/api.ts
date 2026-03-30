@@ -140,6 +140,7 @@ export const profileApi = {
 
   update: (id: number, data: {
     name?: string
+    protocol?: string
     port?: number
     settings?: string
     active?: boolean

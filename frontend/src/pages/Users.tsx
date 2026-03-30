@@ -31,6 +31,21 @@ const emptyForm = (): FormState => ({
   remark: '',
 })
 
+function toApiDateTime(value: string) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toISOString()
+}
+
+function toDateTimeLocalValue(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 16)
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+
 function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
   return (
     <button
@@ -89,7 +104,7 @@ export default function Users() {
   const save = useMutation({
     mutationFn: () => {
       const groupId = form.group_id ? Number(form.group_id) : undefined
-      const expiresAt = form.expires_at || null
+      const expiresAt = toApiDateTime(form.expires_at)
       if (drawer.user) {
         return userApi.update(drawer.user.id, {
           real_name: form.real_name,
@@ -130,7 +145,7 @@ export default function Users() {
       username: u.username,
       real_name: u.real_name,
       group_id: String(u.group_id ?? ''),
-      expires_at: u.expires_at ? u.expires_at.slice(0, 16) : '',
+      expires_at: toDateTimeLocalValue(u.expires_at),
       remark: u.remark,
     }
     setForm(next)

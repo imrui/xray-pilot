@@ -14,6 +14,56 @@ Self-hosted Xray proxy management for small teams. Push configs over SSH, detect
 - Single-binary deployment with the frontend embedded via `go:embed`
 - Runtime system settings managed from the web UI and persisted in the database
 
+## Screenshots
+
+Place screenshots in [`docs/screenshots/`](./docs/screenshots/) with the following naming convention:
+
+- `01-login.png`
+- `02-dashboard.png`
+- `03-users.png`
+- `04-profiles.png`
+- `05-settings.png`
+
+Recommended capture order:
+
+1. Login screen
+2. Dashboard overview
+3. User management
+4. Protocol configuration
+5. System settings
+
+> The current admin UI is primarily Chinese. Keeping `README.md` in English is still recommended for project discovery, while the screenshots and the Chinese manual provide localized context.
+
+### Login
+
+![Login](./docs/screenshots/01-login.png)
+
+Secure access to the control panel with a lightweight sign-in screen, theme toggle, GitHub link, and clear operator-facing branding.
+
+### Dashboard
+
+![Dashboard](./docs/screenshots/02-dashboard.png)
+
+The dashboard highlights node health, active users, subscription delivery, recent operations, and the current control-plane status in a single view.
+
+### User Management
+
+![Users](./docs/screenshots/03-users.png)
+
+Manage subscription users, copy subscription links, open QR codes, assign groups, control expiration, and toggle access with consistent confirmation flows.
+
+### Protocol Configuration
+
+![Profiles](./docs/screenshots/04-profiles.png)
+
+Define protocol templates, attach node-specific key material, and keep shared settings separate from node overrides for clearer operations.
+
+### System Settings
+
+![Settings](./docs/screenshots/05-settings.png)
+
+Inspect runtime diagnostics, review deployment hints, and manage database-backed system settings without editing config files manually.
+
 ## Tech Stack
 
 | Layer | Technology |
