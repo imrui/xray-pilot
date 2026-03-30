@@ -71,6 +71,24 @@ func main() {
 		assetsFS, _ := fs.Sub(distFS, "assets")
 		r.StaticFS("/assets", http.FS(assetsFS))
 
+		// 根目录静态资源：避免 favicon.svg / icons.svg 被 SPA fallback 吞掉
+		for _, name := range []string{"favicon.svg", "icons.svg"} {
+			name := name
+			r.GET("/"+name, func(c *gin.Context) {
+				data, readErr := fs.ReadFile(distFS, name)
+				if readErr != nil {
+					c.Status(http.StatusNotFound)
+					return
+				}
+				switch name {
+				case "favicon.svg", "icons.svg":
+					c.Data(http.StatusOK, "image/svg+xml; charset=utf-8", data)
+				default:
+					c.Data(http.StatusOK, "application/octet-stream", data)
+				}
+			})
+		}
+
 		// 直接读取 index.html 字节，避免 http.FileServer 产生 301 重定向
 		indexHTML, _ := fs.ReadFile(distFS, "index.html")
 		serveSPA := func(c *gin.Context) {
