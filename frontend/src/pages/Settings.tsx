@@ -167,8 +167,8 @@ export default function Settings() {
 
           <SurfaceCard className="p-5">
             <div className="text-sm font-semibold">保存状态</div>
-            <div className="mt-3 flex items-center gap-2">
-              <Badge label={saved ? '已保存' : '待保存'} variant={saved ? 'green' : 'gray'} />
+            <div className="mt-3 items-center gap-2">
+              <Badge label={saved ? '已保存' : '待保存'} variant={saved ? 'green' : 'gray'} /><br/>
               <span className="min-w-0 text-sm text-soft">{saved ? '最近一次更新已写入系统配置。' : '修改完成后点击顶部保存按钮提交。'}</span>
             </div>
           </SurfaceCard>

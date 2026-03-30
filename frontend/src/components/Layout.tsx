@@ -22,6 +22,9 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
 import { useThemeStore } from '@/store/theme'
+import { GitHubMark } from '@/components/icons/GitHubMark'
+import { Logo } from '@/components/icons/Logo'
+import { APP_VERSION } from '@/lib/version'
 
 const navGroups = [
   {
@@ -79,8 +82,8 @@ export default function Layout() {
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text)] lg:h-screen lg:overflow-hidden">
       <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[color:var(--panel-strong)]/96 px-4 py-3 backdrop-blur-xl lg:hidden">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)]">
-            <Shield className="h-4 w-4" />
+          <div className="flex h-9 w-9 items-center justify-center text-[var(--accent)]">
+            <Logo size={32} className="text-[var(--accent)]" />
           </div>
           {!collapsed && (
             <div>
@@ -154,8 +157,8 @@ export default function Layout() {
       <div className="flex min-h-screen w-full lg:h-full">
         <aside className={cn('hidden shrink-0 border-r border-[var(--border)] bg-[var(--sidebar)] transition-all duration-200 lg:flex lg:h-full lg:flex-col', sidebarWidth)}>
           <div className="flex h-14 items-center gap-3 border-b border-[var(--border)] px-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)] text-[var(--accent-contrast)]">
-              <Shield className="h-4 w-4" strokeWidth={2.1} />
+            <div className="flex h-9 w-9 items-center justify-center text-[var(--accent)]">
+              <Logo size={32} className="text-[var(--accent)]" />
             </div>
             {!collapsed && (
               <div>
@@ -200,6 +203,11 @@ export default function Layout() {
           </div>
 
           <div className="border-t border-[var(--border)] p-3">
+            {!collapsed && (
+              <div className="px-1 pb-2 text-[11px] uppercase tracking-[0.12em] text-faint">
+                Version {APP_VERSION}
+              </div>
+            )}
             <button
               onClick={() => setCollapsed((s) => !s)}
               className={cn(
@@ -231,6 +239,16 @@ export default function Layout() {
                     ⌘K
                   </span>
                 </label>
+                <a
+                  href="https://github.com/imrui/xray-pilot"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--panel)] px-2.5 text-xs text-soft transition hover:text-[var(--text)]"
+                  title="GitHub 仓库"
+                >
+                  <GitHubMark className="h-4 w-4" />
+                  GitHub
+                </a>
                 {/* <button className="rounded-md border border-[var(--border)] bg-[var(--panel)] p-2 text-soft transition hover:text-[var(--text)]">
                   <RefreshCw className="h-4 w-4" />
                 </button> */}
