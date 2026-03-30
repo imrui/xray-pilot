@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Filter, PencilLine, Plus, QrCode, Search } from 'lucide-react'
+import { Copy, Filter, PencilLine, Plus, QrCode, Search } from 'lucide-react'
 import { userApi, groupApi } from '@/lib/api'
 import type { User } from '@/types'
 import { Badge } from '@/components/ui/Badge'
@@ -10,6 +10,7 @@ import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -64,6 +65,7 @@ export default function Users() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'expired'>('all')
   const [groupFilter, setGroupFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [copiedUserId, setCopiedUserId] = useState<number | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['users', page, pageSize],
@@ -77,6 +79,12 @@ export default function Users() {
 
   const groupOptions = (groups ?? []).map((g) => ({ value: g.id, label: g.name }))
   const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] })
+
+  useEffect(() => {
+    if (copiedUserId == null) return
+    const timer = setTimeout(() => setCopiedUserId(null), 1800)
+    return () => clearTimeout(timer)
+  }, [copiedUserId])
 
   const save = useMutation({
     mutationFn: () => {
@@ -189,6 +197,45 @@ export default function Users() {
     invalidate()
   }
 
+  const handleBulkToggle = async () => {
+    const willDisable = selectedUsers.filter((u) => u.active)
+    if (willDisable.length > 0) {
+      const ok = await confirm({
+        title: `禁用所选用户中的 ${willDisable.length} 个启用用户？`,
+        description: '禁用后这些用户的订阅与节点连接会立即失效。',
+        confirmText: '确认禁用',
+        cancelText: '取消',
+        tone: 'danger',
+      })
+      if (!ok) return
+    }
+    await runBulk((u) => userApi.toggle(u.id))
+  }
+
+  const copySubscribeUrl = async (user: User) => {
+    await navigator.clipboard.writeText(user.subscribe_url)
+    setCopiedUserId(user.id)
+    pushToast({
+      title: '订阅链接已复制',
+      description: `${user.username} 的订阅地址已复制到剪贴板。`,
+      variant: 'success',
+    })
+  }
+
+  const toggleUserActive = async (user: User) => {
+    if (user.active) {
+      const ok = await confirm({
+        title: `禁用用户 ${user.username}？`,
+        description: '禁用后该用户的订阅与节点连接会立即失效。',
+        confirmText: '确认禁用',
+        cancelText: '取消',
+        tone: 'danger',
+      })
+      if (!ok) return
+    }
+    toggle.mutate(user.id)
+  }
+
   return (
     <PageShell className="space-y-6">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -248,7 +295,7 @@ export default function Users() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Btn variant="secondary" onClick={() => runBulk((u) => userApi.resetToken(u.id))}>批量重置订阅</Btn>
-              <Btn variant="secondary" onClick={() => runBulk((u) => userApi.toggle(u.id))}>批量切换启用</Btn>
+              <Btn variant="secondary" onClick={() => void handleBulkToggle()}>批量切换启用</Btn>
               <Btn
                 variant="danger"
                 onClick={async () => {
@@ -333,10 +380,17 @@ export default function Users() {
                       <Badge label={u.active ? '正常' : '已禁用'} variant={u.active ? 'green' : 'red'} />
                     </td>
                     <td className="px-4 py-3.5">
-                      <Switch checked={u.active} onChange={() => toggle.mutate(u.id)} />
+                      <Switch checked={u.active} onChange={() => void toggleUserActive(u)} />
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => void copySubscribeUrl(u)}
+                          className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          {copiedUserId === u.id ? '已复制' : '复制'}
+                        </button>
                         <button
                           onClick={() => setQrUser(u)}
                           className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--panel-muted)]"
@@ -367,7 +421,7 @@ export default function Users() {
                             },
                             {
                               label: u.active ? '禁用用户' : '启用用户',
-                              onSelect: () => toggle.mutate(u.id),
+                              onSelect: () => void toggleUserActive(u),
                             },
                             {
                               label: '删除用户',
@@ -444,8 +498,16 @@ export default function Users() {
       >
         <div className="space-y-4">
           <FieldGroup title="基础信息" description="用户标识、展示名称和所属分组。">
-            {!drawer.user && <Field label="用户名 *" value={form.username} onChange={f('username')} placeholder="如：alice" />}
-            <Field label="真实姓名" value={form.real_name} onChange={f('real_name')} />
+            {!drawer.user && (
+              <div className="space-y-1.5">
+                <Field label="用户名 *" value={form.username} onChange={f('username')} placeholder="如：alice01" />
+                <p className="text-xs text-soft">建议使用字母和数字组合；该名称会展示在客户端订阅信息中。</p>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Field label="真实姓名" value={form.real_name} onChange={f('real_name')} placeholder="如：张三 / 测试账号" />
+              <p className="text-xs text-soft">仅用于后台显示与运维识别，不会出现在客户端。</p>
+            </div>
             <SelectField
               label="所属分组"
               value={form.group_id}
@@ -463,7 +525,14 @@ export default function Users() {
           {drawer.user && (
             <FieldGroup title="快捷动作" description="把高频动作前置，不需要先关闭编辑抽屉。">
               <div className="flex flex-wrap gap-2">
-                <Btn variant="secondary" onClick={() => setQrUser(drawer.user!)}><ExternalLink className="h-4 w-4" />查看订阅二维码</Btn>
+                <Btn variant="secondary" onClick={() => void copySubscribeUrl(drawer.user!)}>
+                  <Copy className="h-4 w-4" />
+                  {copiedUserId === drawer.user!.id ? '已复制' : '复制订阅链接'}
+                </Btn>
+                <Btn variant="secondary" onClick={() => setQrUser(drawer.user!)}>
+                  <QrCode className="h-4 w-4" />
+                  查看订阅二维码
+                </Btn>
                 <Btn
                   variant="secondary"
                   onClick={async () => {

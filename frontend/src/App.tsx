@@ -11,6 +11,7 @@ import Logs from '@/pages/Logs'
 import Settings from '@/pages/Settings'
 import { useAuthStore } from '@/store/auth'
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
+import { GlobalToastProvider } from '@/components/ui/GlobalToastProvider'
 
 const queryClient = new QueryClient()
 
@@ -22,30 +23,32 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ConfirmProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <Layout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="users" element={<Users />} />
-              <Route path="groups" element={<Groups />} />
-              <Route path="nodes" element={<Nodes />} />
-              <Route path="profiles" element={<Profiles />} />
-              <Route path="logs" element={<Logs />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </ConfirmProvider>
+      <GlobalToastProvider>
+        <ConfirmProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <Layout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="dashboard" element={<Dashboard />} />
+                <Route path="users" element={<Users />} />
+                <Route path="groups" element={<Groups />} />
+                <Route path="nodes" element={<Nodes />} />
+                <Route path="profiles" element={<Profiles />} />
+                <Route path="logs" element={<Logs />} />
+                <Route path="settings" element={<Settings />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </ConfirmProvider>
+      </GlobalToastProvider>
     </QueryClientProvider>
   )
 }

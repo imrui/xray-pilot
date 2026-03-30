@@ -67,6 +67,7 @@ func RegisterRoutes(r *gin.Engine) {
 
 		// 操作日志
 		api.GET("/logs", logH.List)
+		api.POST("/logs/cleanup", logH.Cleanup)
 
 		// 系统信息（只读）
 		api.GET("/system/info", systemH.GetSystemInfo)

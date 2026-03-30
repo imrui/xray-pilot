@@ -14,6 +14,7 @@ import { useConfirm } from '@/components/ui/ConfirmProvider'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const DESCRIPTION_PREVIEW_LIMIT = 24
 
 interface FormState {
   name: string
@@ -22,6 +23,12 @@ interface FormState {
 }
 
 const emptyForm = (): FormState => ({ name: '', description: '', node_ids: [] })
+
+function truncateDescription(text: string, limit = DESCRIPTION_PREVIEW_LIMIT) {
+  const normalized = text.trim()
+  if (normalized.length <= limit) return normalized
+  return `${normalized.slice(0, limit)}...`
+}
 
 function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
   return (
@@ -162,10 +169,25 @@ export default function Groups() {
           <div className="font-semibold">{g.name}</div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge label={`${g.node_count} 个节点`} variant="blue" />
-            <span className="text-xs text-soft">{g.description || '未填写描述'}</span>
           </div>
         </div>
       ),
+    },
+    {
+      key: 'description',
+      label: '描述',
+      render: (g: Group) => {
+        const text = g.description?.trim() || '未填写描述'
+        const preview = truncateDescription(text)
+        return (
+          <span
+            title={text}
+            className="block max-w-[280px] truncate text-xs text-soft"
+          >
+            {preview}
+          </span>
+        )
+      },
     },
     {
       key: 'active',

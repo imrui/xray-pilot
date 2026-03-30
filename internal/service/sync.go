@@ -150,6 +150,9 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 		)
 		return true, nil
 	}
+	if node.SyncStatus != entity.SyncStatusSynced || node.ConfigHash != expectedHash {
+		_ = s.nodeRepo.UpdateLastSync(nodeID, entity.SyncStatusSynced, expectedHash)
+	}
 	return false, nil
 }
 

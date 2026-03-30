@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/service"
@@ -19,6 +18,7 @@ type NodeHandler struct {
 	svc      *service.NodeService
 	syncSvc  *service.SyncService
 	nodeRepo *repository.NodeRepository
+	setting  *service.SettingService
 }
 
 func NewNodeHandler() *NodeHandler {
@@ -26,6 +26,7 @@ func NewNodeHandler() *NodeHandler {
 		svc:      service.NewNodeService(),
 		syncSvc:  service.NewSyncService(),
 		nodeRepo: repository.NewNodeRepository(),
+		setting:  service.NewSettingService(),
 	}
 }
 
@@ -216,21 +217,21 @@ func (h *NodeHandler) TestSSH(c *gin.Context) {
 
 	sshPort := node.SSHPort
 	if sshPort == 0 {
-		sshPort = config.Global.SSH.DefaultPort
+		sshPort = h.setting.GetInt(service.KeySSHDefaultPort)
 		if sshPort == 0 {
 			sshPort = 22
 		}
 	}
 	sshUser := node.SSHUser
 	if sshUser == "" {
-		sshUser = config.Global.SSH.DefaultUser
+		sshUser = h.setting.Get(service.KeySSHDefaultUser)
 		if sshUser == "" {
 			sshUser = "root"
 		}
 	}
 	keyPath := node.SSHKeyPath
 	if keyPath == "" {
-		keyPath = config.Global.SSH.DefaultKeyPath
+		keyPath = h.setting.Get(service.KeySSHDefaultKeyPath)
 	}
 
 	latencyMs, ok, err := xray.CheckNodeHealth(xray.SSHParams{
@@ -244,11 +245,11 @@ func (h *NodeHandler) TestSSH(c *gin.Context) {
 		if err != nil {
 			errMsg = err.Error()
 		}
-		response.Success(c, gin.H{"ok": false, "error": errMsg, "latency_ms": 0})
+		_ = h.nodeRepo.UpdateLastCheck(node.ID, false, latencyMs)
+		response.Success(c, gin.H{"ok": false, "error": errMsg, "latency_ms": latencyMs})
 		return
 	}
 
 	_ = h.nodeRepo.UpdateLastCheck(node.ID, true, latencyMs)
 	response.Success(c, gin.H{"ok": true, "latency_ms": latencyMs})
 }
-

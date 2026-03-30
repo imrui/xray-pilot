@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileCode, Filter, PencilLine, Plus, RefreshCw, Search, Wifi } from 'lucide-react'
-import { nodeApi } from '@/lib/api'
-import type { Node, SyncStatus } from '@/types'
+import { AlertTriangle, Copy, FileCode, Filter, PencilLine, Plus, RefreshCw, Search, Wifi } from 'lucide-react'
+import { nodeApi, profileApi } from '@/lib/api'
+import type { InboundProfile, Node, NodeKey, SyncStatus } from '@/types'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Btn, FieldGroup } from '@/components/ui/Form'
@@ -10,15 +10,17 @@ import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
-const statusBadge: Record<SyncStatus, { label: string; variant: 'green' | 'yellow' | 'red' | 'gray' }> = {
-  synced: { label: '在线', variant: 'green' },
-  drifted: { label: '同步中', variant: 'yellow' },
-  failed: { label: '离线', variant: 'red' },
-  pending: { label: '待同步', variant: 'gray' },
+const statusMeta: Record<SyncStatus, { label: string; variant: 'green' | 'yellow' | 'red' | 'gray'; tip: string }> = {
+  synced: { label: '已同步', variant: 'green', tip: '配置已是最新' },
+  drifted: { label: '配置漂移', variant: 'yellow', tip: '配置已变更，需要重新同步' },
+  failed: { label: '同步失败', variant: 'red', tip: '同步失败，建议先测试 SSH 连通性' },
+  pending: { label: '待同步', variant: 'gray', tip: '节点尚未同步，请点击同步按钮' },
 }
 
 interface FormState {
@@ -72,27 +74,19 @@ export default function Nodes() {
   const [form, setForm] = useState<FormState>(emptyForm())
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm())
   const [err, setErr] = useState('')
-  const [syncErr, setSyncErr] = useState('')
-  const [syncOk, setSyncOk] = useState('')
-  const syncOkTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [previewNode, setPreviewNode] = useState<Node | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'synced' | 'drifted' | 'failed' | 'pending'>('all')
   const [regionFilter, setRegionFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
-  useEffect(() => {
-    if (!syncOk) return
-    if (syncOkTimer.current) clearTimeout(syncOkTimer.current)
-    syncOkTimer.current = setTimeout(() => setSyncOk(''), 2800)
-    return () => {
-      if (syncOkTimer.current) clearTimeout(syncOkTimer.current)
-    }
-  }, [syncOk])
-
   const { data, isLoading } = useQuery({
     queryKey: ['nodes', page, pageSize],
     queryFn: () => nodeApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
+  })
+  const { data: profilesData } = useQuery({
+    queryKey: ['profiles-for-nodes'],
+    queryFn: () => profileApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data!),
   })
 
   const regions = useMemo(() => {
@@ -117,22 +111,58 @@ export default function Nodes() {
   const remove = useMutation({
     mutationFn: (id: number) => nodeApi.remove(id),
     onSuccess: invalidate,
-    onError: (e: Error) => setSyncErr(e.message),
   })
   const sync = useMutation({
     mutationFn: (id: number) => nodeApi.sync(id),
     onSuccess: (res) => {
-      setSyncErr('')
-      setSyncOk(res.data.data?.message ?? '同步成功')
+      pushToast({
+        title: '节点同步成功',
+        description: res.data.data?.message ?? '节点配置已同步到远端。',
+        variant: 'success',
+      })
       invalidate()
     },
-    onError: (e: Error) => setSyncErr(e.message),
   })
-  const syncDrifted = useMutation({ mutationFn: () => nodeApi.syncDrifted(), onSuccess: invalidate })
+  const syncDrifted = useMutation({
+    mutationFn: () => nodeApi.syncDrifted(),
+    onSuccess: (res) => {
+      const summary = res.data.data
+      pushToast({
+        title: '批量同步已完成',
+        description: summary
+          ? `总计 ${summary.total} 个节点，成功 ${summary.success} 个，失败 ${summary.failed} 个。`
+          : '漂移节点已完成同步。',
+        variant: summary?.failed ? 'warning' : 'success',
+      })
+      invalidate()
+    },
+  })
   const testSSH = useMutation({
     mutationFn: (id: number) => nodeApi.testSSH(id),
-    onSuccess: invalidate,
-    onError: (e: Error) => setSyncErr(e.message),
+    onSuccess: (res, id) => {
+      invalidate()
+      const result = res.data.data
+      if (result?.ok) {
+        pushToast({
+          title: 'SSH 连接正常',
+          description: `节点 #${id} 延迟 ${result.latency_ms}ms`,
+          variant: 'success',
+        })
+        return
+      }
+      pushToast({
+        title: 'SSH 测试失败',
+        description: result?.error || '连接失败，请检查密钥、端口和 known_hosts 配置。',
+        variant: 'warning',
+      })
+    },
+    onError: (e: Error) => {
+      pushToast({
+        title: 'SSH 测试失败',
+        description: e.message,
+        variant: 'error',
+      })
+    },
   })
 
   const openCreate = () => {
@@ -225,9 +255,9 @@ export default function Nodes() {
               className="w-full bg-transparent text-sm outline-none"
             >
               <option value="all">全部状态</option>
-              <option value="synced">在线</option>
-              <option value="drifted">同步中</option>
-              <option value="failed">离线</option>
+              <option value="synced">已同步</option>
+              <option value="drifted">配置漂移</option>
+              <option value="failed">同步失败</option>
               <option value="pending">待同步</option>
             </select>
           </label>
@@ -256,23 +286,9 @@ export default function Nodes() {
         </div>
       </div>
 
-      {syncOk && (
-        <SurfaceCard className="border-emerald-500/30 bg-emerald-500/8 p-4 text-sm text-emerald-300">
-          <div className="flex items-center justify-between gap-3">
-            <span>{syncOk}</span>
-            <button onClick={() => setSyncOk('')} className="text-emerald-400 transition hover:text-emerald-200">关闭</button>
-          </div>
-        </SurfaceCard>
-      )}
-
-      {syncErr && (
-        <SurfaceCard className="border-rose-500/30 bg-rose-500/8 p-4 text-sm text-rose-300">
-          <div className="flex items-center justify-between gap-3">
-            <span>{syncErr}</span>
-            <button onClick={() => setSyncErr('')} className="text-rose-400 transition hover:text-rose-200">关闭</button>
-          </div>
-        </SurfaceCard>
-      )}
+      <p className="text-xs text-soft">
+        协议绑定提示：只有在“配置节点密钥”中保存过的协议，才会参与该节点的配置生成；保存空对象 <code>{'{}'}</code> 表示继承协议默认参数。
+      </p>
 
       {selectedNodes.length > 0 && (
         <SurfaceCard className="p-3">
@@ -368,57 +384,86 @@ export default function Nodes() {
                       <div className="text-xs text-soft">{n.domain || n.ip}:{n.ssh_port}</div>
                     </td>
                     <td className="px-4 py-3.5">
-                      <Badge label={(statusBadge[n.sync_status] ?? statusBadge.pending).label} variant={(statusBadge[n.sync_status] ?? statusBadge.pending).variant} />
+                      <Tooltip content={(statusMeta[n.sync_status] ?? statusMeta.pending).tip}>
+                        <span tabIndex={0} className="inline-flex">
+                          <Badge
+                            label={(statusMeta[n.sync_status] ?? statusMeta.pending).label}
+                            variant={(statusMeta[n.sync_status] ?? statusMeta.pending).variant}
+                          />
+                        </span>
+                      </Tooltip>
                     </td>
-                    <td className="px-4 py-3.5">{n.region || '—'}</td>
-                    <td className="px-4 py-3.5">{n.last_check_ok ? Math.max(1, Math.round((n.last_latency_ms || 1) / 5)) : 0}</td>
+                    <td className="px-4 py-3.5">
+                      {n.group_names && n.group_names.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {n.group_names.map((groupName) => (
+                            <Badge key={groupName} label={groupName} variant="blue" />
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-soft">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5">{n.online_user_count}</td>
                     <td className="px-4 py-3.5 text-soft">{n.last_sync_at ? new Date(n.last_sync_at).toLocaleString('zh-CN') : '—'}</td>
                     <td className="px-4 py-3.5">
                       <Switch checked={n.active} onChange={() => toggle.mutate(n.id)} />
                     </td>
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => sync.mutate(n.id)}
-                          className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--panel-muted)]"
-                        >
-                          <RefreshCw className={`h-3.5 w-3.5${sync.isPending && sync.variables === n.id ? ' animate-spin' : ''}`} />
-                          同步
-                        </button>
-                        <button
-                          onClick={() => openEdit(n)}
-                          className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
-                        >
-                          <PencilLine className="h-3.5 w-3.5" />
-                          编辑
-                        </button>
-                        <ActionMenu
-                          items={[
-                            {
-                              label: '测试 SSH',
-                              onSelect: () => testSSH.mutate(n.id),
-                              disabled: testSSH.isPending && testSSH.variables === n.id,
-                            },
-                            {
-                              label: '预览生成配置',
-                              onSelect: () => setPreviewNode(n),
-                            },
-                            {
-                              label: '删除节点',
-                              danger: true,
-                              onSelect: async () => {
-                                const ok = await confirm({
-                                  title: `删除节点「${n.name}」？`,
-                                  description: '该操作不可撤销。',
-                                  confirmText: '删除节点',
-                                  cancelText: '取消',
-                                  tone: 'danger',
-                                })
-                                if (ok) remove.mutate(n.id)
+                      <div className="flex flex-col items-end gap-2">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => sync.mutate(n.id)}
+                            className={`inline-flex h-9 items-center gap-1 rounded-md border px-3 text-xs font-medium transition ${
+                              n.sync_status === 'failed'
+                                ? 'border-amber-500/40 bg-amber-500/12 text-amber-300 hover:bg-amber-500/18'
+                                : 'border-[var(--border)] bg-[var(--panel-strong)] text-[var(--accent)] hover:bg-[var(--panel-muted)]'
+                            }`}
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5${sync.isPending && sync.variables === n.id ? ' animate-spin' : ''}`} />
+                            同步
+                          </button>
+                          <button
+                            onClick={() => openEdit(n)}
+                            className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                          >
+                            <PencilLine className="h-3.5 w-3.5" />
+                            编辑
+                          </button>
+                          <ActionMenu
+                            items={[
+                              {
+                                label: '测试 SSH',
+                                onSelect: () => testSSH.mutate(n.id),
+                                disabled: testSSH.isPending && testSSH.variables === n.id,
                               },
-                            },
-                          ]}
-                        />
+                              {
+                                label: '预览生成配置',
+                                onSelect: () => setPreviewNode(n),
+                              },
+                              {
+                                label: '删除节点',
+                                danger: true,
+                                onSelect: async () => {
+                                  const ok = await confirm({
+                                    title: `删除节点「${n.name}」？`,
+                                    description: '该操作不可撤销。',
+                                    confirmText: '删除节点',
+                                    cancelText: '取消',
+                                    tone: 'danger',
+                                  })
+                                  if (ok) remove.mutate(n.id)
+                                },
+                              },
+                            ]}
+                          />
+                        </div>
+                        {n.sync_status === 'failed' && (
+                          <div className="inline-flex items-center gap-1 text-[11px] text-amber-300">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            建议先测试 SSH
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -524,17 +569,41 @@ export default function Nodes() {
         </div>
       </Drawer>
 
-      {previewNode && <PreviewConfigModal node={previewNode} onClose={() => setPreviewNode(null)} />}
+      {previewNode && (
+        <PreviewConfigModal
+          node={previewNode}
+          activeProfiles={(profilesData?.list ?? []).filter((item) => item.active)}
+          onClose={() => setPreviewNode(null)}
+        />
+      )}
     </PageShell>
   )
 }
 
-function PreviewConfigModal({ node, onClose }: { node: Node; onClose: () => void }) {
+function PreviewConfigModal({ node, activeProfiles, onClose }: { node: Node; activeProfiles: InboundProfile[]; onClose: () => void }) {
+  const [copied, setCopied] = useState(false)
   const { data, isLoading, error } = useQuery({
     queryKey: ['previewConfig', node.id],
     queryFn: () => nodeApi.previewConfig(node.id).then((r) => r.data.data!),
     retry: false,
   })
+  const { data: nodeKeys } = useQuery({
+    queryKey: ['nodeKeys', node.id],
+    queryFn: () => nodeApi.getKeys(node.id).then((r) => r.data.data ?? []),
+    retry: false,
+  })
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 1800)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  const handleCopy = async () => {
+    if (!data?.config) return
+    await navigator.clipboard.writeText(data.config)
+    setCopied(true)
+  }
 
   return (
     <Modal
@@ -545,7 +614,16 @@ function PreviewConfigModal({ node, onClose }: { node: Node; onClose: () => void
       footer={<Btn variant="secondary" onClick={onClose}>关闭</Btn>}
     >
       <div className="space-y-4">
-        <p className="text-xs text-soft">仅预览，不会同步至节点；`private_key` 已脱敏。</p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-xs text-soft">仅预览，不会同步至节点；`private_key` 已脱敏。</p>
+            <ProtocolSummary nodeKeys={nodeKeys ?? []} activeProfiles={activeProfiles} />
+          </div>
+          <Btn variant="secondary" onClick={() => void handleCopy()} disabled={!data?.config}>
+            <Copy className="h-4 w-4" />
+            {copied ? '已复制' : '快速复制'}
+          </Btn>
+        </div>
         {isLoading && <p className="py-8 text-center text-sm text-soft">生成中…</p>}
         {error && (
           <div className="rounded-2xl border border-rose-500/20 bg-rose-500/8 p-4">
@@ -570,5 +648,25 @@ function PreviewConfigModal({ node, onClose }: { node: Node; onClose: () => void
         )}
       </div>
     </Modal>
+  )
+}
+
+function ProtocolSummary({ nodeKeys, activeProfiles }: { nodeKeys: NodeKey[]; activeProfiles: InboundProfile[] }) {
+  const profileMap = new Map(activeProfiles.map((profile) => [profile.id, profile]))
+  const matchedProfiles = nodeKeys
+    .map((key) => profileMap.get(key.profile_id))
+    .filter((item): item is InboundProfile => Boolean(item))
+
+  if (matchedProfiles.length === 0) {
+    return <p className="text-xs text-soft">当前节点未绑定任何协议，预览只会包含系统基础入站。</p>
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-soft">
+      <span>当前绑定协议 {matchedProfiles.length} 个：</span>
+      {matchedProfiles.map((profile) => (
+        <Badge key={profile.id} label={profile.name} variant="blue" />
+      ))}
+    </div>
   )
 }

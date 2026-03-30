@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/imrui/xray-pilot/internal/entity"
 )
 
@@ -34,4 +36,9 @@ func (r *LogRepository) List(page, pageSize int) ([]entity.SyncLog, int64, error
 	offset := (page - 1) * pageSize
 	err := DB.Model(&entity.SyncLog{}).Order("id desc").Offset(offset).Limit(pageSize).Find(&logs).Error
 	return logs, total, err
+}
+
+func (r *LogRepository) CleanupBefore(cutoff time.Time) (int64, error) {
+	result := DB.Where("created_at < ?", cutoff).Delete(&entity.SyncLog{})
+	return result.RowsAffected, result.Error
 }

@@ -53,7 +53,7 @@ func (r *UserRepository) Delete(id uint) error {
 
 func (r *UserRepository) FindActiveByGroupID(groupID uint) ([]entity.User, error) {
 	var users []entity.User
-	err := DB.Where("group_id = ? AND active = ?", groupID, true).Find(&users).Error
+	err := DB.Where("group_id = ? AND active = ?", groupID, true).Order("id asc").Find(&users).Error
 	return users, err
 }
 
@@ -66,7 +66,7 @@ func (r *UserRepository) FindActiveUsersByNodeID(nodeID uint) ([]entity.User, er
 		true,
 		now,
 		DB.Table("group_nodes").Select("group_id").Where("node_id = ?", nodeID),
-	).Find(&users).Error
+	).Order("id asc").Find(&users).Error
 	return users, err
 }
 
@@ -92,4 +92,18 @@ func (r *UserRepository) UpdateUUID(id uint, newUUID string) error {
 // UpdateToken 更新用户订阅 Token
 func (r *UserRepository) UpdateToken(id uint, newToken string) error {
 	return DB.Model(&entity.User{}).Where("id = ?", id).Update("token", newToken).Error
+}
+
+func (r *UserRepository) CountActiveByNodeID(nodeID uint) (int64, error) {
+	var total int64
+	now := time.Now()
+	err := DB.Model(&entity.User{}).
+		Where(
+			"active = ? AND (expires_at IS NULL OR expires_at > ?) AND group_id IN (?)",
+			true,
+			now,
+			DB.Table("group_nodes").Select("group_id").Where("node_id = ?", nodeID),
+		).
+		Count(&total).Error
+	return total, err
 }

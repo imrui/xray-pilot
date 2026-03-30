@@ -5,10 +5,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/imrui/xray-pilot/config"
 )
@@ -84,6 +86,25 @@ func Decrypt(cipherHex string) (string, error) {
 
 // HashConfig 计算配置内容的 SHA256，用于 ConfigHash 漂移检测
 func HashConfig(content string) string {
+	content = canonicalizeJSON(content)
 	h := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(h[:])
+}
+
+func canonicalizeJSON(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return ""
+	}
+
+	var payload interface{}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return trimmed
+	}
+
+	normalized, err := json.Marshal(payload)
+	if err != nil {
+		return trimmed
+	}
+	return string(normalized)
 }

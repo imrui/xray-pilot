@@ -31,6 +31,8 @@ export interface Node {
   region: string
   ip: string
   domain: string          // 客户端连接域名（CDN/中转），空则用 ip
+  group_names?: string[]
+  online_user_count: number
   ssh_port: number
   ssh_user: string
   ssh_key_path: string
@@ -66,7 +68,7 @@ export interface InboundProfile {
 export interface NodeKey {
   node_id: number
   profile_id: number
-  settings: unknown   // JSON object（private_key 已脱敏为 "***"）
+  settings: unknown   // JSON object（编辑节点密钥时返回可直接修改的原值）
   created_at: string
   updated_at: string
 }

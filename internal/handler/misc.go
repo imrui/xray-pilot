@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/imrui/xray-pilot/config"
@@ -31,6 +32,32 @@ func (h *LogHandler) List(c *gin.Context) {
 		return
 	}
 	response.PageSuccess(c, total, logs)
+}
+
+func (h *LogHandler) Cleanup(c *gin.Context) {
+	var req struct {
+		Days int `json:"days" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if req.Days < 1 || req.Days > 3650 {
+		response.BadRequest(c, "清理范围需在 1 到 3650 天之间")
+		return
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -req.Days)
+	deleted, err := h.logRepo.CleanupBefore(cutoff)
+	if err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	h.logRepo.Record("cleanup_logs", "logs", true, "清理 "+strconv.Itoa(req.Days)+" 天前日志", 0)
+	response.Success(c, gin.H{
+		"deleted": deleted,
+		"before":  cutoff.Format(time.RFC3339),
+	})
 }
 
 // ---- 订阅 ----

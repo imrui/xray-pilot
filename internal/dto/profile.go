@@ -39,11 +39,11 @@ type UpsertNodeKeyRequest struct {
 	Settings json.RawMessage `json:"settings" binding:"required"` // JSON 对象: RealityKeyMaterial / TLSCertMaterial
 }
 
-// NodeKeyResponse 节点密钥材料响应（不含明文私钥）
+// NodeKeyResponse 节点密钥材料响应（编辑场景返回可直接修改的 settings）
 type NodeKeyResponse struct {
 	NodeID    uint            `json:"node_id"`
 	ProfileID uint            `json:"profile_id"`
-	Settings  json.RawMessage `json:"settings"` // 返回脱敏后的 settings（private_key 替换为 "***"）
+	Settings  json.RawMessage `json:"settings"` // 返回 JSON 对象；Reality private_key 已解密
 	CreatedAt string          `json:"created_at"`
 	UpdatedAt string          `json:"updated_at"`
 }

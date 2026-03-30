@@ -154,6 +154,9 @@ export const profileApi = {
 export const logApi = {
   list: (params?: PageParams) =>
     request.get<ApiResponse<PageResult<SyncLog>>>('/logs', { params }),
+
+  cleanup: (days: number) =>
+    request.post<ApiResponse<{ deleted: number; before: string }>>('/logs/cleanup', { days }),
 }
 
 // ---- 系统 API ----

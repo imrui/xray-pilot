@@ -81,7 +81,7 @@ export default function Dashboard() {
 
   const logsQuery = useQuery({
     queryKey: ['dashboard-logs'],
-    queryFn: () => logApi.list({ page: 1, page_size: 5 }).then((r) => r.data.data!),
+    queryFn: () => logApi.list({ page: 1, page_size: 6 }).then((r) => r.data.data!),
   })
 
   const users = usersQuery.data?.list ?? []
@@ -108,13 +108,13 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_520px]">
-        <SurfaceCard className="overflow-hidden">
+      <div className="grid gap-6 xl:min-h-[calc(100vh-19rem)] xl:grid-cols-[minmax(0,1fr)_520px]">
+        <SurfaceCard className="flex h-full min-h-[420px] flex-col overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
             <h3 className="text-lg font-semibold">最近操作</h3>
             <a href="/logs" className="text-sm text-[var(--accent)] transition hover:opacity-80">查看全部</a>
           </div>
-          <div>
+          <div className="flex-1 overflow-auto">
             {logs.length === 0 ? (
               <div className="px-5 py-10 text-sm text-soft">暂无日志记录</div>
             ) : (
@@ -134,7 +134,7 @@ export default function Dashboard() {
           </div>
         </SurfaceCard>
 
-        <SurfaceCard className="overflow-hidden">
+        <SurfaceCard className="flex h-full min-h-[420px] flex-col overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
             <h3 className="text-lg font-semibold">节点健康</h3>
             <Btn variant="ghost" onClick={() => void nodesQuery.refetch()}>
@@ -142,11 +142,11 @@ export default function Dashboard() {
               刷新
             </Btn>
           </div>
-          <div>
+          <div className="flex-1 overflow-auto">
             {nodes.length === 0 ? (
               <div className="px-5 py-10 text-sm text-soft">暂无节点数据</div>
             ) : (
-              nodes.slice(0, 6).map((node) => <NodeHealthRow key={node.id} node={node} />)
+              nodes.map((node) => <NodeHealthRow key={node.id} node={node} />)
             )}
           </div>
         </SurfaceCard>

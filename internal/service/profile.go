@@ -99,7 +99,7 @@ func (s *ProfileService) UpsertNodeKey(nodeID, profileID uint, req *dto.UpsertNo
 		return nil, errors.New("协议配置不存在")
 	}
 
-	settingsJSON := string(req.Settings)
+	settingsJSON := normalizeSettingsJSON(req.Settings)
 	// 对 Reality 私钥加密存储
 	if profile.Protocol == types.ProtocolVlessReality {
 		settingsJSON, err = encryptRealityKey(settingsJSON)
@@ -119,7 +119,7 @@ func (s *ProfileService) UpsertNodeKey(nodeID, profileID uint, req *dto.UpsertNo
 	return toNodeKeyResponse(key), nil
 }
 
-// GetNodeKeys 获取节点关联的所有协议密钥（含 Profile 信息，私钥脱敏）
+// GetNodeKeys 获取节点关联的所有协议密钥（编辑场景返回可编辑明文）
 func (s *ProfileService) GetNodeKeys(nodeID uint) ([]dto.NodeKeyResponse, error) {
 	keys, err := s.profileRepo.FindKeysForNode(nodeID)
 	if err != nil {
@@ -151,9 +151,13 @@ func (s *ProfileService) KeygenForNode(nodeID, profileID uint) (*dto.NodeKeyResp
 	if err != nil {
 		return nil, fmt.Errorf("生成密钥对失败: %w", err)
 	}
-	shortID, err := xray.GenerateShortID()
-	if err != nil {
-		return nil, fmt.Errorf("生成 short_id 失败: %w", err)
+	shortIDs := make([]string, 0, 6)
+	for i := 0; i < 6; i++ {
+		shortID, genErr := xray.GenerateShortID()
+		if genErr != nil {
+			return nil, fmt.Errorf("生成 short_id 失败: %w", genErr)
+		}
+		shortIDs = append(shortIDs, shortID)
 	}
 
 	// 加密私钥后存储
@@ -165,7 +169,7 @@ func (s *ProfileService) KeygenForNode(nodeID, profileID uint) (*dto.NodeKeyResp
 	km := types.RealityKeyMaterial{
 		PrivateKey: encPrivKey,
 		PublicKey:  pubKey,
-		ShortIds:   []string{shortID},
+		ShortIds:   shortIDs,
 	}
 	settingsJSON, err := json.Marshal(km)
 	if err != nil {
@@ -203,12 +207,12 @@ func toProfileResponse(p *entity.InboundProfile) *dto.ProfileResponse {
 	}
 }
 
-// toNodeKeyResponse 返回密钥响应，对 private_key 字段脱敏
+// toNodeKeyResponse 返回节点密钥响应；Reality 私钥在返回前解密，供编辑界面直接使用
 func toNodeKeyResponse(k *entity.NodeProfileKey) *dto.NodeKeyResponse {
-	masked := maskPrivateKey(k.Settings)
 	var settings json.RawMessage
-	if masked != "" {
-		settings = json.RawMessage(masked)
+	decoded := decryptRealityKey(k.Settings)
+	if decoded != "" {
+		settings = json.RawMessage(decoded)
 	}
 	return &dto.NodeKeyResponse{
 		NodeID:    k.NodeID,
@@ -235,23 +239,30 @@ func normalizeSettingsJSON(raw json.RawMessage) string {
 	return string(raw)
 }
 
-// maskPrivateKey 将 settings JSON 中的 private_key 替换为 "***"
-func maskPrivateKey(settings string) string {
+// decryptRealityKey 将 settings JSON 中的 private_key 从密文还原为明文。
+// 若不是 Reality 密钥材料或解密失败，则返回原始 settings，避免影响非加密协议。
+func decryptRealityKey(settings string) string {
 	if settings == "" {
 		return settings
 	}
-	var m map[string]interface{}
-	if err := json.Unmarshal([]byte(settings), &m); err != nil {
+
+	var km types.RealityKeyMaterial
+	if err := json.Unmarshal([]byte(settings), &km); err != nil {
 		return settings
 	}
-	if _, ok := m["private_key"]; ok {
-		m["private_key"] = "***"
+	if km.PrivateKey == "" {
+		return settings
 	}
-	masked, err := json.Marshal(m)
+	plain, err := crypto.Decrypt(km.PrivateKey)
 	if err != nil {
 		return settings
 	}
-	return string(masked)
+	km.PrivateKey = plain
+	decoded, err := json.Marshal(km)
+	if err != nil {
+		return settings
+	}
+	return string(decoded)
 }
 
 // encryptRealityKey 对 RealityKeyMaterial JSON 中的 private_key 字段加密

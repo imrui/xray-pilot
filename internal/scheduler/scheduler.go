@@ -123,10 +123,6 @@ func (s *Scheduler) runHealthCheck() {
 			failCount++
 		}
 
-		// 节点不健康且配置已同步，触发漂移标记（下次同步会重新推送配置）
-		if !ok && node.SyncStatus == entity.SyncStatusSynced {
-			_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusDrifted, "")
-		}
 	}
 	s.log.Info("健康检测完成",
 		zap.Int("ok", okCount),

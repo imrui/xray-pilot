@@ -3,6 +3,7 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/pkg/crypto"
@@ -105,8 +106,8 @@ type wsSettings struct {
 }
 
 type tlsSettings struct {
-	ServerName  string        `json:"serverName"`
-	Certificates []tlsCert   `json:"certificates,omitempty"`
+	ServerName   string    `json:"serverName"`
+	Certificates []tlsCert `json:"certificates,omitempty"`
 }
 
 type tlsCert struct {
@@ -141,6 +142,19 @@ type LogConfig struct {
 // GenerateConfig 根据节点、关联协议密钥和用户列表生成 Xray JSON 配置
 // 返回 (configJSON, inboundWarnings, error)：单个协议生成失败不中断整体，通过 warnings 上报
 func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, users []entity.User, logCfg LogConfig) (string, []string, error) {
+	sort.Slice(profileKeys, func(i, j int) bool {
+		if profileKeys[i].ProfileID == profileKeys[j].ProfileID {
+			return profileKeys[i].ID < profileKeys[j].ID
+		}
+		return profileKeys[i].ProfileID < profileKeys[j].ProfileID
+	})
+	sort.Slice(users, func(i, j int) bool {
+		if users[i].ID == users[j].ID {
+			return users[i].Username < users[j].Username
+		}
+		return users[i].ID < users[j].ID
+	})
+
 	var inbounds []Inbound
 	var warnings []string
 

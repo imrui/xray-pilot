@@ -47,3 +47,15 @@ func (r *GroupRepository) Delete(id uint) error {
 func (r *GroupRepository) ReplaceNodes(group *entity.Group, nodes []entity.Node) error {
 	return DB.Model(group).Association("Nodes").Replace(nodes)
 }
+
+func (r *GroupRepository) FindNamesByNodeID(nodeID uint) ([]string, error) {
+	var names []string
+	err := DB.
+		Table("groups").
+		Select("groups.name").
+		Joins("JOIN group_nodes ON group_nodes.group_id = groups.id").
+		Where("group_nodes.node_id = ?", nodeID).
+		Order("groups.id asc").
+		Scan(&names).Error
+	return names, err
+}

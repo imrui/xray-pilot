@@ -36,6 +36,26 @@ const defaultSettings: Record<Protocol, string> = {
   hysteria2: JSON.stringify({ sni: 'example.com', up_mbps: 100, down_mbps: 100 }, null, 2),
 }
 
+function generateShortIds(count = 6) {
+  return Array.from({ length: count }, () => {
+    const bytes = new Uint8Array(4)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  })
+}
+
+function stringifySettings(settings: unknown) {
+  if (!settings) return '{}'
+  if (typeof settings === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(settings), null, 2)
+    } catch {
+      return settings
+    }
+  }
+  return JSON.stringify(settings, null, 2)
+}
+
 interface FormState {
   name: string
   protocol: string
@@ -93,7 +113,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
       const keys = res.data.data ?? []
       const key = keys.find((k) => k.profile_id === profile.id)
       if (key) {
-        setSettings(JSON.stringify(typeof key.settings === 'string' ? JSON.parse(key.settings) : key.settings, null, 2))
+        setSettings(stringifySettings(key.settings))
       } else {
         setSettings('')
       }
@@ -116,15 +136,24 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
   })
 
   const keygen = useMutation({
-    mutationFn: () => nodeApi.keygenForNode(Number(nodeId), profile.id),
-    onSuccess: (res) => {
-      const key = res.data.data
-      if (key) {
-        setSettings(JSON.stringify(typeof key.settings === 'string' ? JSON.parse(key.settings) : key.settings, null, 2))
-      }
+    mutationFn: async () => {
+      const res = await nodeApi.keygen()
+      const keys = res.data.data
+      if (!keys) throw new Error('密钥生成失败')
+      return JSON.stringify(
+        {
+          private_key: keys.private_key,
+          public_key: keys.public_key,
+          short_ids: generateShortIds(6),
+        },
+        null,
+        2,
+      )
+    },
+    onSuccess: (nextSettings) => {
+      setSettings(nextSettings)
       setMsg('密钥已生成')
       setMsgType('ok')
-      qc.invalidateQueries({ queryKey: ['nodeKey', nodeId, profile.id] })
     },
     onError: (e: Error) => {
       setMsg(`生成失败: ${e.message}`)
@@ -133,11 +162,9 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
   })
 
   const fillTemplate = () => {
-    if (profile.protocol === 'vless-reality') {
-      setSettings(JSON.stringify({ private_key: '', public_key: '', short_id: '' }, null, 2))
-    } else {
-      setSettings(JSON.stringify({ cert_path: '', key_path: '' }, null, 2))
-    }
+    setSettings(stringifySettings(profile.settings))
+    setMsg('已填入协议默认配置')
+    setMsgType('ok')
   }
 
   return (
@@ -165,9 +192,9 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
           />
         </FieldGroup>
 
-        <FieldGroup title="密钥参数" description="支持一键生成、模板填充和手动编辑。">
+        <FieldGroup title="密钥参数" description="支持一键生成、模板填充和手动编辑。保存空对象 `{}` 表示该节点继承协议默认参数。">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-soft">{loadingKey ? '正在加载当前密钥…' : '保持 JSON 结构正确后再保存。'}</div>
+            <div className="text-xs text-soft">{loadingKey ? '正在加载当前密钥…' : '保持 JSON 结构正确后再保存；只保存后该协议才会绑定到当前节点。'}</div>
             <div className="flex gap-2">
               {profile.protocol === 'vless-reality' && (
                 <Btn variant="secondary" loading={keygen.isPending} onClick={() => keygen.mutate()} disabled={!nodeId}>
@@ -183,7 +210,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
             onChange={(e) => setSettings(e.target.value)}
             rows={12}
             className="min-h-[260px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
-            placeholder='{"private_key": "...", "public_key": "...", "short_id": ""}'
+            placeholder='{"private_key": "...", "public_key": "...", "short_ids": ["..."]}'
           />
           {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>{msg}</p>}
         </FieldGroup>
@@ -205,6 +232,30 @@ export default function Profiles() {
   const [search, setSearch] = useState('')
   const [protocolFilter, setProtocolFilter] = useState<'all' | Protocol>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+
+  const generateProtocolDefaults = useMutation({
+    mutationFn: async () => {
+      const res = await nodeApi.keygen()
+      const keys = res.data.data
+      if (!keys) throw new Error('密钥生成失败')
+      return JSON.stringify(
+        {
+          sni: 'www.microsoft.com',
+          fingerprint: 'chrome',
+          private_key: keys.private_key,
+          public_key: keys.public_key,
+          short_ids: generateShortIds(6),
+        },
+        null,
+        2,
+      )
+    },
+    onSuccess: (settings) => {
+      setForm((prev) => ({ ...prev, settings }))
+      setErr('')
+    },
+    onError: (e: Error) => setErr(e.message),
+  })
 
   const { data, isLoading } = useQuery({
     queryKey: ['profiles', page, pageSize],
@@ -516,6 +567,15 @@ export default function Profiles() {
           </FieldGroup>
 
           <FieldGroup title="协议参数" description="编辑 JSON 时保留格式化结构，切换协议会自动填入默认模板。">
+            {form.protocol === 'vless-reality' && (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-soft">默认参数用于给所有未覆盖节点生成一份可直接使用的 Reality 配置。</p>
+                <Btn variant="secondary" loading={generateProtocolDefaults.isPending} onClick={() => generateProtocolDefaults.mutate()}>
+                  <Sparkles className="h-4 w-4" />
+                  一键生成
+                </Btn>
+              </div>
+            )}
             <textarea
               value={form.settings}
               onChange={(e) => setForm((p) => ({ ...p, settings: e.target.value }))}

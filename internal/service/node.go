@@ -16,14 +16,18 @@ import (
 
 type NodeService struct {
 	nodeRepo   *repository.NodeRepository
+	groupRepo  *repository.GroupRepository
 	logRepo    *repository.LogRepository
+	userRepo   *repository.UserRepository
 	settingSvc *SettingService
 }
 
 func NewNodeService() *NodeService {
 	return &NodeService{
 		nodeRepo:   repository.NewNodeRepository(),
+		groupRepo:  repository.NewGroupRepository(),
 		logRepo:    repository.NewLogRepository(),
+		userRepo:   repository.NewUserRepository(),
 		settingSvc: NewSettingService(),
 	}
 }
@@ -50,7 +54,7 @@ func (s *NodeService) Create(req *dto.CreateNodeRequest) (*dto.NodeResponse, err
 	if err := s.nodeRepo.Create(node); err != nil {
 		return nil, fmt.Errorf("创建节点失败: %w", err)
 	}
-	return toNodeResponse(node), nil
+	return s.toNodeResponse(node), nil
 }
 
 func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResponse, error) {
@@ -102,7 +106,7 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 	if err := s.nodeRepo.Update(node); err != nil {
 		return nil, err
 	}
-	return toNodeResponse(node), nil
+	return s.toNodeResponse(node), nil
 }
 
 func (s *NodeService) Delete(id uint) error {
@@ -122,7 +126,7 @@ func (s *NodeService) GetByID(id uint) (*dto.NodeResponse, error) {
 	if err != nil {
 		return nil, errors.New("节点不存在")
 	}
-	return toNodeResponse(node), nil
+	return s.toNodeResponse(node), nil
 }
 
 func (s *NodeService) List(page, pageSize int) ([]dto.NodeResponse, int64, error) {
@@ -132,7 +136,7 @@ func (s *NodeService) List(page, pageSize int) ([]dto.NodeResponse, int64, error
 	}
 	result := make([]dto.NodeResponse, 0, len(nodes))
 	for i := range nodes {
-		result = append(result, *toNodeResponse(&nodes[i]))
+		result = append(result, *s.toNodeResponse(&nodes[i]))
 	}
 	return result, total, nil
 }
@@ -144,30 +148,35 @@ func (s *NodeService) GetDriftedNodes() ([]dto.NodeResponse, error) {
 	}
 	result := make([]dto.NodeResponse, 0, len(nodes))
 	for i := range nodes {
-		result = append(result, *toNodeResponse(&nodes[i]))
+		result = append(result, *s.toNodeResponse(&nodes[i]))
 	}
 	return result, nil
 }
 
-func toNodeResponse(n *entity.Node) *dto.NodeResponse {
+func (s *NodeService) toNodeResponse(n *entity.Node) *dto.NodeResponse {
+	groupNames, _ := s.groupRepo.FindNamesByNodeID(n.ID)
+	onlineUsers, _ := s.userRepo.CountActiveByNodeID(n.ID)
+
 	resp := &dto.NodeResponse{
-		ID:            n.ID,
-		Name:          n.Name,
-		Region:        n.Region,
-		IP:            n.IP,
-		Domain:        n.Domain,
-		SSHPort:       n.SSHPort,
-		SSHUser:       n.SSHUser,
-		SSHKeyPath:    n.SSHKeyPath,
-		Active:        n.Active,
-		XrayActive:    n.XrayActive,
-		XrayVersion:   n.XrayVersion,
-		SyncStatus:    string(n.SyncStatus),
-		LastCheckOK:   n.LastCheckOK,
-		LastLatencyMs: n.LastLatencyMs,
-		Remark:        n.Remark,
-		CreatedAt:     n.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:     n.UpdatedAt.Format(time.RFC3339),
+		ID:              n.ID,
+		Name:            n.Name,
+		Region:          n.Region,
+		IP:              n.IP,
+		Domain:          n.Domain,
+		GroupNames:      groupNames,
+		OnlineUserCount: int(onlineUsers),
+		SSHPort:         n.SSHPort,
+		SSHUser:         n.SSHUser,
+		SSHKeyPath:      n.SSHKeyPath,
+		Active:          n.Active,
+		XrayActive:      n.XrayActive,
+		XrayVersion:     n.XrayVersion,
+		SyncStatus:      string(n.SyncStatus),
+		LastCheckOK:     n.LastCheckOK,
+		LastLatencyMs:   n.LastLatencyMs,
+		Remark:          n.Remark,
+		CreatedAt:       n.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:       n.UpdatedAt.Format(time.RFC3339),
 	}
 	if n.LastSyncAt != nil {
 		resp.LastSyncAt = n.LastSyncAt.Format(time.RFC3339)
