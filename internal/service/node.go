@@ -65,29 +65,33 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 
 	// 记录变更前的连接地址，用于清理 known_hosts
 	oldAddr := node.ConnectAddr()
-	ipChanged := req.IP != "" && req.IP != node.IP
-	domainChanged := req.Domain != "" && req.Domain != node.Domain
+	ipChanged := req.IP != nil && *req.IP != node.IP
+	domainChanged := req.Domain != nil && *req.Domain != node.Domain
 
-	if req.Name != "" {
-		node.Name = req.Name
+	if req.Name != nil {
+		node.Name = *req.Name
 	}
-	if req.Region != "" {
-		node.Region = req.Region
+	if req.Region != nil {
+		node.Region = *req.Region
 	}
-	if req.IP != "" {
-		node.IP = req.IP
+	if req.IP != nil {
+		node.IP = *req.IP
 	}
-	if req.Domain != "" {
-		node.Domain = req.Domain
+	if req.Domain != nil {
+		node.Domain = *req.Domain
 	}
-	if req.SSHPort != 0 {
-		node.SSHPort = req.SSHPort
+	if req.SSHPort != nil && *req.SSHPort != 0 {
+		node.SSHPort = *req.SSHPort
 	}
 	// SSHUser/SSHKeyPath 允许显式置空，置空后运行时会回退到系统默认设置。
-	node.SSHUser = req.SSHUser
-	node.SSHKeyPath = req.SSHKeyPath
-	if req.Remark != "" {
-		node.Remark = req.Remark
+	if req.SSHUser != nil {
+		node.SSHUser = *req.SSHUser
+	}
+	if req.SSHKeyPath != nil {
+		node.SSHKeyPath = *req.SSHKeyPath
+	}
+	if req.Remark != nil {
+		node.Remark = *req.Remark
 	}
 
 	// IP 或 Domain 变更：清理旧的 known_hosts 条目，并标记漂移触发重新同步

@@ -14,14 +14,14 @@ type CreateNodeRequest struct {
 
 // UpdateNodeRequest 更新节点请求
 type UpdateNodeRequest struct {
-	Name       string `json:"name"`
-	Region     string `json:"region"`
-	IP         string `json:"ip"`
-	Domain     string `json:"domain"`
-	SSHPort    int    `json:"ssh_port"`
-	SSHUser    string `json:"ssh_user"`
-	SSHKeyPath string `json:"ssh_key_path"`
-	Remark     string `json:"remark"`
+	Name       *string `json:"name"`
+	Region     *string `json:"region"`
+	IP         *string `json:"ip"`
+	Domain     *string `json:"domain"`
+	SSHPort    *int    `json:"ssh_port"`
+	SSHUser    *string `json:"ssh_user"`
+	SSHKeyPath *string `json:"ssh_key_path"`
+	Remark     *string `json:"remark"`
 }
 
 // NodeResponse 节点响应（含同步状态，不含私钥）

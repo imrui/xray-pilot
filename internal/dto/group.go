@@ -9,10 +9,10 @@ type CreateGroupRequest struct {
 
 // UpdateGroupRequest 更新分组请求
 type UpdateGroupRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	NodeIDs     []uint `json:"node_ids"`
-	Active      *bool  `json:"active"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	NodeIDs     []uint  `json:"node_ids"`
+	Active      *bool   `json:"active"`
 }
 
 // GroupResponse 分组响应

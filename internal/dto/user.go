@@ -1,6 +1,9 @@
 package dto
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // CreateUserRequest 创建订阅用户请求
 type CreateUserRequest struct {
@@ -13,11 +16,11 @@ type CreateUserRequest struct {
 
 // UpdateUserRequest 更新订阅用户请求
 type UpdateUserRequest struct {
-	RealName  string     `json:"real_name"`
-	GroupID   *uint      `json:"group_id"`
-	Active    *bool      `json:"active"`
-	ExpiresAt *time.Time `json:"expires_at"`
-	Remark    string     `json:"remark"`
+	RealName  *string         `json:"real_name"`
+	GroupID   json.RawMessage `json:"group_id"`
+	Active    *bool           `json:"active"`
+	ExpiresAt json.RawMessage `json:"expires_at"`
+	Remark    *string         `json:"remark"`
 }
 
 // UserResponse 用户响应 DTO（Token/UUID 不直接暴露，通过 subscribe_url 间接暴露）

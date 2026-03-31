@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -42,20 +43,28 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	if err != nil {
 		return nil, errors.New("用户不存在")
 	}
-	if req.RealName != "" {
-		user.RealName = req.RealName
+	if req.RealName != nil {
+		user.RealName = *req.RealName
 	}
 	if req.GroupID != nil {
-		user.GroupID = req.GroupID
+		groupID, err := parseOptionalUint(req.GroupID)
+		if err != nil {
+			return nil, fmt.Errorf("解析分组失败: %w", err)
+		}
+		user.GroupID = groupID
 	}
-	if req.Remark != "" {
-		user.Remark = req.Remark
+	if req.Remark != nil {
+		user.Remark = *req.Remark
 	}
 	if req.Active != nil {
 		user.Active = *req.Active
 	}
 	if req.ExpiresAt != nil {
-		user.ExpiresAt = req.ExpiresAt
+		expiresAt, err := parseOptionalTime(req.ExpiresAt)
+		if err != nil {
+			return nil, fmt.Errorf("解析过期时间失败: %w", err)
+		}
+		user.ExpiresAt = expiresAt
 	}
 	if err := s.userRepo.Update(user); err != nil {
 		return nil, err
@@ -134,4 +143,42 @@ func (s *UserService) toResponse(u *entity.User, baseURL string) *dto.UserRespon
 		resp.GroupName = u.Group.Name
 	}
 	return resp
+}
+
+func parseOptionalUint(raw json.RawMessage) (*uint, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var value uint
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func parseOptionalTime(raw json.RawMessage) (*time.Time, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	if value == "" {
+		return nil, nil
+	}
+
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04",
+		"2006-01-02 15:04",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return &parsed, nil
+		}
+	}
+	return nil, fmt.Errorf("unsupported time format: %s", value)
 }

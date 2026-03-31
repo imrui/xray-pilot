@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/imrui/xray-pilot/internal/dto"
@@ -48,11 +49,11 @@ func (s *GroupService) UpdateGroup(id uint, req *dto.UpdateGroupRequest) (*dto.G
 	if err != nil {
 		return nil, errors.New("分组不存在")
 	}
-	if req.Name != "" {
-		group.Name = req.Name
+	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
+		group.Name = *req.Name
 	}
-	if req.Description != "" {
-		group.Description = req.Description
+	if req.Description != nil {
+		group.Description = *req.Description
 	}
 	if req.Active != nil {
 		group.Active = *req.Active

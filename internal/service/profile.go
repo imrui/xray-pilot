@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/imrui/xray-pilot/internal/dto"
@@ -47,14 +48,14 @@ func (s *ProfileService) Update(id uint, req *dto.UpdateProfileRequest) (*dto.Pr
 	if err != nil {
 		return nil, errors.New("协议配置不存在")
 	}
-	if req.Name != "" {
-		p.Name = req.Name
+	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
+		p.Name = *req.Name
 	}
-	if req.Protocol != "" {
-		p.Protocol = req.Protocol
+	if req.Protocol != nil && *req.Protocol != "" {
+		p.Protocol = *req.Protocol
 	}
-	if req.Port != 0 {
-		p.Port = req.Port
+	if req.Port != nil && *req.Port != 0 {
+		p.Port = *req.Port
 	}
 	if len(req.Settings) > 0 {
 		p.Settings = normalizeSettingsJSON(req.Settings)
@@ -62,8 +63,8 @@ func (s *ProfileService) Update(id uint, req *dto.UpdateProfileRequest) (*dto.Pr
 	if req.Active != nil {
 		p.Active = *req.Active
 	}
-	if req.Remark != "" {
-		p.Remark = req.Remark
+	if req.Remark != nil {
+		p.Remark = *req.Remark
 	}
 	if err := s.profileRepo.Update(p); err != nil {
 		return nil, err

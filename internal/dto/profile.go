@@ -14,12 +14,12 @@ type CreateProfileRequest struct {
 
 // UpdateProfileRequest 更新协议接入配置请求
 type UpdateProfileRequest struct {
-	Name     string          `json:"name"`
-	Protocol string          `json:"protocol"`
-	Port     int             `json:"port" binding:"omitempty,min=1,max=65535"`
+	Name     *string         `json:"name"`
+	Protocol *string         `json:"protocol"`
+	Port     *int            `json:"port" binding:"omitempty,min=1,max=65535"`
 	Settings json.RawMessage `json:"settings"`
 	Active   *bool           `json:"active"`
-	Remark   string          `json:"remark"`
+	Remark   *string         `json:"remark"`
 }
 
 // ProfileResponse 协议接入配置响应

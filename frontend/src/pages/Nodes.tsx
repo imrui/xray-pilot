@@ -337,7 +337,7 @@ export default function Nodes() {
 
       <SurfaceCard className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1120px] text-left text-sm">
+          <table className="w-full min-w-[1240px] text-left text-sm">
             <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
               <tr>
                 <th className="w-10 px-4 py-3">
@@ -350,6 +350,7 @@ export default function Nodes() {
                   />
                 </th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">节点名称</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">连接地址</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">在线用户</th>
@@ -361,11 +362,11 @@ export default function Nodes() {
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={9} className="px-4 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredNodes.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
+                  <td colSpan={9} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
                 </tr>
               ) : (
                 filteredNodes.map((n) => (
@@ -381,7 +382,11 @@ export default function Nodes() {
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="font-semibold">{n.name}</div>
-                      <div className="text-xs text-soft">{n.domain || n.ip}:{n.ssh_port}</div>
+                      <div className="text-xs text-soft">{n.region || '未设置地区'}</div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="font-medium text-[var(--text)]">{n.ip}</div>
+                      <div className="text-xs text-soft">{n.domain || '—'}</div>
                     </td>
                     <td className="px-4 py-3.5">
                       <Tooltip content={(statusMeta[n.sync_status] ?? statusMeta.pending).tip}>
