@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,15 +23,27 @@ func NewUserService() *UserService {
 }
 
 func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.UserResponse, error) {
+	var feishuBoundAt *time.Time
+	if req.FeishuOpenID != "" || req.FeishuUnionID != "" || req.FeishuChatID != "" {
+		now := time.Now()
+		feishuBoundAt = &now
+	}
+
 	user := &entity.User{
-		Username:  req.Username,
-		RealName:  req.RealName,
-		GroupID:   req.GroupID,
-		Remark:    req.Remark,
-		UUID:      uuid.NewString(),
-		Token:     uuid.NewString(),
-		Active:    true,
-		ExpiresAt: req.ExpiresAt,
+		Username:      req.Username,
+		RealName:      req.RealName,
+		GroupID:       req.GroupID,
+		Remark:        req.Remark,
+		FeishuEnabled: req.FeishuEnabled,
+		FeishuEmail:   strings.ToLower(strings.TrimSpace(req.FeishuEmail)),
+		UUID:          uuid.NewString(),
+		Token:         uuid.NewString(),
+		Active:        true,
+		ExpiresAt:     req.ExpiresAt,
+		FeishuOpenID:  req.FeishuOpenID,
+		FeishuUnionID: req.FeishuUnionID,
+		FeishuChatID:  req.FeishuChatID,
+		FeishuBoundAt: feishuBoundAt,
 	}
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, fmt.Errorf("创建用户失败: %w", err)
@@ -56,6 +69,21 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	if req.Remark != nil {
 		user.Remark = *req.Remark
 	}
+	if req.FeishuEnabled != nil {
+		user.FeishuEnabled = *req.FeishuEnabled
+	}
+	if req.FeishuEmail != nil {
+		user.FeishuEmail = strings.ToLower(strings.TrimSpace(*req.FeishuEmail))
+	}
+	if req.FeishuOpenID != nil {
+		user.FeishuOpenID = *req.FeishuOpenID
+	}
+	if req.FeishuUnionID != nil {
+		user.FeishuUnionID = *req.FeishuUnionID
+	}
+	if req.FeishuChatID != nil {
+		user.FeishuChatID = *req.FeishuChatID
+	}
 	if req.Active != nil {
 		user.Active = *req.Active
 	}
@@ -65,6 +93,12 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 			return nil, fmt.Errorf("解析过期时间失败: %w", err)
 		}
 		user.ExpiresAt = expiresAt
+	}
+	if user.FeishuOpenID != "" || user.FeishuUnionID != "" || user.FeishuChatID != "" {
+		now := time.Now()
+		user.FeishuBoundAt = &now
+	} else {
+		user.FeishuBoundAt = nil
 	}
 	if err := s.userRepo.Update(user); err != nil {
 		return nil, err
@@ -126,21 +160,29 @@ func (s *UserService) ResetToken(id uint, baseURL string) (*dto.UserResponse, er
 
 func (s *UserService) toResponse(u *entity.User, baseURL string) *dto.UserResponse {
 	resp := &dto.UserResponse{
-		ID:           u.ID,
-		Username:     u.Username,
-		RealName:     u.RealName,
-		GroupID:      u.GroupID,
-		Active:       u.Active,
-		Remark:       u.Remark,
-		SubscribeURL: fmt.Sprintf("%s/sub/%s", baseURL, u.Token),
-		CreatedAt:    u.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    u.UpdatedAt.Format(time.RFC3339),
+		ID:            u.ID,
+		Username:      u.Username,
+		RealName:      u.RealName,
+		GroupID:       u.GroupID,
+		Active:        u.Active,
+		Remark:        u.Remark,
+		SubscribeURL:  fmt.Sprintf("%s/sub/%s", baseURL, u.Token),
+		FeishuEnabled: u.FeishuEnabled,
+		FeishuEmail:   u.FeishuEmail,
+		FeishuOpenID:  u.FeishuOpenID,
+		FeishuUnionID: u.FeishuUnionID,
+		FeishuChatID:  u.FeishuChatID,
+		CreatedAt:     u.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     u.UpdatedAt.Format(time.RFC3339),
 	}
 	if u.ExpiresAt != nil {
 		resp.ExpiresAt = u.ExpiresAt.Format(time.RFC3339)
 	}
 	if u.Group != nil {
 		resp.GroupName = u.Group.Name
+	}
+	if u.FeishuBoundAt != nil {
+		resp.FeishuBoundAt = u.FeishuBoundAt.Format(time.RFC3339)
 	}
 	return resp
 }

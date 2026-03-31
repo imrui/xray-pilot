@@ -251,6 +251,7 @@ type SystemHandler struct {
 	settingSvc    *service.SettingService
 	diagnosticSvc *service.DiagnosticsService
 	syncSummary   *service.SyncSummaryService
+	feishuSvc     *service.FeishuService
 }
 
 func NewSystemHandler() *SystemHandler {
@@ -258,6 +259,7 @@ func NewSystemHandler() *SystemHandler {
 		settingSvc:    service.NewSettingService(),
 		diagnosticSvc: service.NewDiagnosticsService(),
 		syncSummary:   service.NewSyncSummaryService(),
+		feishuSvc:     service.NewFeishuService(),
 	}
 }
 
@@ -308,4 +310,23 @@ func (h *SystemHandler) GetSyncSummary(c *gin.Context) {
 		return
 	}
 	response.Success(c, summary)
+}
+
+// GetFeishuStatus 返回飞书配置状态
+func (h *SystemHandler) GetFeishuStatus(c *gin.Context) {
+	response.Success(c, h.feishuSvc.GetStatus())
+}
+
+// TestFeishuConfig 检查飞书配置完整度
+func (h *SystemHandler) TestFeishuConfig(c *gin.Context) {
+	status := h.feishuSvc.ValidateConfig()
+	if !status.Enabled {
+		response.Fail(c, 400, "飞书集成当前未启用")
+		return
+	}
+	if !status.Configured {
+		response.Fail(c, 400, "飞书配置不完整："+strings.Join(status.MissingKeys, "、"))
+		return
+	}
+	response.Success(c, status)
 }

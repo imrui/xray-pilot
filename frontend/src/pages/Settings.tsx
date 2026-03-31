@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, CircleAlert, Database, ServerCog, ShieldCheck, Wrench } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Database, Eye, EyeOff, ServerCog, ShieldCheck, Wrench } from 'lucide-react'
 import { systemApi } from '@/lib/api'
 import { Btn, Field, SelectField } from '@/components/ui/Form'
 import { PageHeader, PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Badge } from '@/components/ui/Badge'
 import type { DiagnosticItem } from '@/types'
+import { pushToast } from '@/lib/notify'
 
 const LOG_LEVEL_OPTIONS = [
   { value: 'warning', label: 'warning' },
@@ -22,6 +23,7 @@ function toForm(s: SettingsMap): SettingsMap {
 
 export default function Settings() {
   const qc = useQueryClient()
+  const [secretVisibility, setSecretVisibility] = useState<Record<string, boolean>>({})
 
   const { data: info } = useQuery({
     queryKey: ['system-info'],
@@ -38,6 +40,11 @@ export default function Settings() {
     queryFn: () => systemApi.getDiagnostics().then((r) => r.data.data!),
   })
 
+  const { data: feishuStatus, refetch: refetchFeishuStatus, isFetching: feishuStatusLoading } = useQuery({
+    queryKey: ['system-feishu-status'],
+    queryFn: () => systemApi.getFeishuStatus().then((r) => r.data.data!),
+  })
+
   const [form, setForm] = useState<SettingsMap>({})
   const [saved, setSaved] = useState(false)
 
@@ -48,28 +55,51 @@ export default function Settings() {
   const f = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((p) => ({ ...p, [key]: e.target.value }))
 
+  const toggleSecretVisibility = (key: string) =>
+    setSecretVisibility((prev) => ({ ...prev, [key]: !prev[key] }))
+
   const update = useMutation({
     mutationFn: () => systemApi.updateSettings(form),
     onSuccess: (res) => {
       qc.setQueryData(['system-settings'], res.data.data)
       void qc.invalidateQueries({ queryKey: ['system-diagnostics'] })
+      void qc.invalidateQueries({ queryKey: ['system-feishu-status'] })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     },
   })
 
+  const testFeishu = useMutation({
+    mutationFn: () => systemApi.testFeishuConfig(),
+    onSuccess: (res) => {
+      const status = res.data.data
+      pushToast({
+        title: '飞书配置检查通过',
+        description: status?.webhook_url ? `Webhook 地址：${status.webhook_url}` : '飞书基础配置已就绪。',
+        variant: 'success',
+      })
+      void refetchFeishuStatus()
+    },
+    onError: (e: Error) => {
+      pushToast({
+        title: '飞书配置检查失败',
+        description: e.message,
+        variant: 'warning',
+      })
+      void refetchFeishuStatus()
+    },
+  })
+
   if (isLoading) return <div className="p-6 text-soft">加载中…</div>
+
+  const feishuEnabled = (form['feishu.enabled'] ?? 'false') === 'true'
+  const dirty = JSON.stringify(form) !== JSON.stringify(toForm(settings ?? {}))
 
   return (
     <PageShell>
       <PageHeader
         title="系统设置"
         description="将运行参数、诊断信息和部署建议放在同一页处理，减少部署后期在文档和日志之间来回切换。"
-        actions={
-          <Btn loading={update.isPending} onClick={() => update.mutate()}>
-            保存所有配置
-          </Btn>
-        }
         stats={[
           { label: '服务端口', value: info?.server.port ?? '—' },
           { label: '运行模式', value: info?.server.mode ?? '—' },
@@ -134,6 +164,119 @@ export default function Settings() {
             </div>
           </Section>
 
+          <Section
+            title="飞书机器人"
+            description="飞书集成为可选能力。未配置时，不影响现有订阅链接、订阅页和二维码的正常使用。"
+            actions={
+              <div className="flex items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2">
+                <span className="text-sm font-medium text-soft">启用飞书</span>
+                <Switch
+                  checked={feishuEnabled}
+                  onChange={(next) => setForm((p) => ({ ...p, 'feishu.enabled': next ? 'true' : 'false' }))}
+                />
+              </div>
+            }
+          >
+            <div className="rounded-[18px] border border-[var(--border)] bg-[var(--panel-muted)]">
+              <div className="flex flex-col gap-3 border-b border-[var(--border)] px-4 py-4 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold">启用飞书集成</div>
+                  <p className="text-xs text-soft">关闭时折叠配置区域，且不会启用飞书消息能力；已保存的飞书信息仍会保留。</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Btn variant="secondary" loading={testFeishu.isPending || feishuStatusLoading} onClick={() => testFeishu.mutate()}>
+                    检查配置
+                  </Btn>
+                  {feishuEnabled ? <ChevronDown className="h-4 w-4 text-faint" /> : <ChevronRight className="h-4 w-4 text-faint" />}
+                </div>
+              </div>
+
+              {feishuEnabled && (
+                <div className="space-y-4 p-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <SecretField
+                      label="App ID"
+                      value={form['feishu.app_id'] ?? ''}
+                      onChange={f('feishu.app_id')}
+                      placeholder="cli_xxx"
+                      revealed={Boolean(secretVisibility['feishu.app_id'])}
+                      onToggleReveal={() => toggleSecretVisibility('feishu.app_id')}
+                    />
+                    <SecretField
+                      label="App Secret"
+                      value={form['feishu.app_secret'] ?? ''}
+                      onChange={f('feishu.app_secret')}
+                      placeholder="填写飞书应用密钥"
+                      revealed={Boolean(secretVisibility['feishu.app_secret'])}
+                      onToggleReveal={() => toggleSecretVisibility('feishu.app_secret')}
+                    />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <SecretField
+                      label="Verification Token"
+                      value={form['feishu.verification_token'] ?? ''}
+                      onChange={f('feishu.verification_token')}
+                      placeholder="事件订阅校验 Token"
+                      revealed={Boolean(secretVisibility['feishu.verification_token'])}
+                      onToggleReveal={() => toggleSecretVisibility('feishu.verification_token')}
+                    />
+                    <SecretField
+                      label="Encrypt Key"
+                      value={form['feishu.encrypt_key'] ?? ''}
+                      onChange={f('feishu.encrypt_key')}
+                      placeholder="消息加密 Key（可选）"
+                      revealed={Boolean(secretVisibility['feishu.encrypt_key'])}
+                      onToggleReveal={() => toggleSecretVisibility('feishu.encrypt_key')}
+                    />
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field
+                      label="飞书回调基址"
+                      value={form['feishu.base_url'] ?? ''}
+                      onChange={f('feishu.base_url')}
+                      placeholder="https://your-domain.com"
+                    />
+                    <Field
+                      label="机器人名称"
+                      value={form['feishu.bot_name'] ?? ''}
+                      onChange={f('feishu.bot_name')}
+                      placeholder="xray-pilot"
+                    />
+                  </div>
+                  <div className="rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)] p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold">当前状态</span>
+                      <Badge
+                        label={
+                          !feishuStatus?.enabled
+                            ? '未启用'
+                            : feishuStatus.configured
+                              ? '已就绪'
+                              : '待补全'
+                        }
+                        variant={
+                          !feishuStatus?.enabled
+                            ? 'gray'
+                            : feishuStatus.configured
+                              ? 'green'
+                              : 'yellow'
+                        }
+                      />
+                    </div>
+                    <div className="mt-3 space-y-2 text-sm text-soft">
+                      <p>机器人名称：{feishuStatus?.bot_name || form['feishu.bot_name'] || 'xray-pilot'}</p>
+                      <p>Webhook 地址：{feishuStatus?.webhook_url || '请先填写飞书回调基址'}</p>
+                      {feishuStatus?.enabled && !feishuStatus.configured && (
+                        <p>缺少配置项：{(feishuStatus.missing_keys ?? []).join('、') || '请补全基础配置'}</p>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-soft">建议对外提供固定 HTTPS 地址，后续 webhook 推荐使用：<code>/api/feishu/events</code>。</p>
+                </div>
+              )}
+            </div>
+          </Section>
+
           <Section title="SSH 默认参数" description="这里的默认值会影响节点 SSH 测试、同步和 known_hosts 初始化。">
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="默认端口" type="number" value={form['ssh.default_port'] ?? '22'} onChange={f('ssh.default_port')} />
@@ -152,7 +295,7 @@ export default function Settings() {
           </Section>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
           <SurfaceCard className="p-5">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Wrench className="h-4 w-4 text-[var(--accent)]" />
@@ -166,10 +309,25 @@ export default function Settings() {
           </SurfaceCard>
 
           <SurfaceCard className="p-5">
-            <div className="text-sm font-semibold">保存状态</div>
-            <div className="mt-3 items-center gap-2">
-              <Badge label={saved ? '已保存' : '待保存'} variant={saved ? 'green' : 'gray'} /><br/>
-              <span className="min-w-0 text-sm text-soft">{saved ? '最近一次更新已写入系统配置。' : '修改完成后点击顶部保存按钮提交。'}</span>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold">保存状态</div>
+                <div className="mt-3 items-center gap-2">
+                  <Badge label={saved ? '已保存' : dirty ? '待保存' : '未修改'} variant={saved ? 'green' : dirty ? 'yellow' : 'gray'} /><br/>
+                  <span className="min-w-0 text-sm text-soft">
+                    {saved
+                      ? '最近一次更新已写入系统配置。'
+                      : dirty
+                        ? '当前页面存在未保存修改，可直接在这里提交。'
+                        : '当前没有新的配置改动。'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4">
+              <Btn className="w-full" loading={update.isPending} disabled={!dirty} onClick={() => update.mutate()}>
+                保存所有配置
+              </Btn>
             </div>
           </SurfaceCard>
         </div>
@@ -247,6 +405,65 @@ function DiagnosticCard({ item }: { item: DiagnosticItem }) {
           {item.suggestion && <p className="text-xs leading-5 text-faint">建议：{item.suggestion}</p>}
         </div>
         <Badge label={badgeLabel} variant={badgeVariant} />
+      </div>
+    </div>
+  )
+}
+
+function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative h-6 w-11 rounded-full border transition ${
+        checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-slate-200 dark:border-[var(--border)] dark:bg-white/10'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition ${
+          checked ? 'left-[22px]' : 'left-0.5'
+        }`}
+      />
+    </button>
+  )
+}
+
+function SecretField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  revealed,
+  onToggleReveal,
+}: {
+  label: string
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  placeholder?: string
+  revealed: boolean
+  onToggleReveal: () => void
+}) {
+  return (
+    <div className="flex flex-col space-y-1.5">
+      <label className="text-[12px] font-medium text-soft">{label}</label>
+      <div className="relative">
+        <input
+          type={revealed ? 'text' : 'password'}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 pr-11 text-sm text-[var(--text)] placeholder:text-faint transition-all duration-200 focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+        />
+        <button
+          type="button"
+          onClick={onToggleReveal}
+          className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-faint transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+          aria-label={revealed ? `隐藏${label}` : `显示${label}`}
+        >
+          {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
       </div>
     </div>
   )

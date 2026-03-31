@@ -14,9 +14,11 @@ func RegisterRoutes(r *gin.Engine) {
 	authH := NewAuthHandler()
 	systemH := NewSystemHandler()
 	subH := NewSubscribeHandler()
+	feishuH := NewFeishuHandler()
 
 	// 订阅（无需鉴权）
 	r.GET("/sub/:token", subH.Subscribe)
+	r.POST("/api/feishu/events", feishuH.Events)
 
 	// 登录（无需鉴权）
 	r.POST("/api/auth/login", authH.Login)
@@ -32,6 +34,10 @@ func RegisterRoutes(r *gin.Engine) {
 		api.PATCH("/users/:id/toggle", userH.Toggle)
 		api.POST("/users/:id/reset-uuid", userH.ResetUUID)
 		api.POST("/users/:id/reset-token", userH.ResetToken)
+		api.POST("/users/:id/feishu-push", feishuH.PushUser)
+		api.POST("/users/:id/feishu-bind", feishuH.BindUser)
+		api.POST("/users/:id/feishu-unbind", feishuH.UnbindUser)
+		api.POST("/users/feishu-push", feishuH.PushUsers)
 
 		// 分组管理
 		api.GET("/groups", groupH.List)
@@ -73,6 +79,8 @@ func RegisterRoutes(r *gin.Engine) {
 		api.GET("/system/info", systemH.GetSystemInfo)
 		api.GET("/system/diagnostics", systemH.GetDiagnostics)
 		api.GET("/system/sync-summary", systemH.GetSyncSummary)
+		api.GET("/system/feishu-status", systemH.GetFeishuStatus)
+		api.POST("/system/feishu-test", systemH.TestFeishuConfig)
 		// 运行时配置（KV，可读写）
 		api.GET("/system/settings", systemH.GetSettings)
 		api.PUT("/system/settings", systemH.UpdateSettings)

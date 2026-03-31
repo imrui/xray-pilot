@@ -1,5 +1,5 @@
 import request from './axios'
-import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary } from '@/types'
+import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuPushResult } from '@/types'
 
 // ---- 通用分页参数 ----
 interface PageParams {
@@ -18,6 +18,11 @@ export const userApi = {
     group_id?: number
     expires_at?: string | null
     remark?: string
+    feishu_enabled?: boolean
+    feishu_email?: string
+    feishu_open_id?: string
+    feishu_union_id?: string
+    feishu_chat_id?: string
   }) => request.post<ApiResponse<User>>('/users', data),
 
   update: (id: number, data: {
@@ -26,6 +31,11 @@ export const userApi = {
     active?: boolean
     expires_at?: string | null
     remark?: string
+    feishu_enabled?: boolean
+    feishu_email?: string
+    feishu_open_id?: string
+    feishu_union_id?: string
+    feishu_chat_id?: string
   }) => request.put<ApiResponse<User>>(`/users/${id}`, data),
 
   toggle: (id: number) =>
@@ -39,6 +49,18 @@ export const userApi = {
 
   resetToken: (id: number) =>
     request.post<ApiResponse<User>>(`/users/${id}/reset-token`),
+
+  pushFeishu: (id: number) =>
+    request.post<ApiResponse<FeishuPushResult>>(`/users/${id}/feishu-push`),
+
+  pushFeishuBatch: (user_ids: number[]) =>
+    request.post<ApiResponse<FeishuPushResult>>('/users/feishu-push', { user_ids }),
+
+  bindFeishu: (id: number, email: string) =>
+    request.post<ApiResponse<User>>(`/users/${id}/feishu-bind`, { email }),
+
+  unbindFeishu: (id: number) =>
+    request.post<ApiResponse<User>>(`/users/${id}/feishu-unbind`),
 }
 
 // ---- 分组 API ----
@@ -173,6 +195,12 @@ export const systemApi = {
 
   getSyncSummary: () =>
     request.get<ApiResponse<SyncSummary>>('/system/sync-summary'),
+
+  getFeishuStatus: () =>
+    request.get<ApiResponse<FeishuStatus>>('/system/feishu-status'),
+
+  testFeishuConfig: () =>
+    request.post<ApiResponse<FeishuStatus>>('/system/feishu-test'),
 
   getSettings: () =>
     request.get<ApiResponse<Record<string, string>>>('/system/settings'),

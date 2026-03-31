@@ -41,7 +41,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       {state?.open && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={() => close(false)} />
-          <div className="panel-strong relative w-full max-w-md rounded-[28px]">
+          <div className="panel-strong relative w-full max-w-md overflow-hidden rounded-[28px]">
             <div className="border-b border-[var(--border)] px-6 py-5">
               <div className="flex items-start gap-4">
                 <div className={`mt-0.5 flex h-11 w-11 items-center justify-center rounded-2xl ${state.tone === 'danger' ? 'bg-rose-500/12 text-rose-500' : 'bg-amber-500/12 text-amber-500'}`}>

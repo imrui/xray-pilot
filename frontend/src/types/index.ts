@@ -8,6 +8,13 @@ export interface User {
   expires_at?: string  // ISO 8601，空表示永久有效
   remark: string
   subscribe_url: string
+  feishu_enabled?: boolean
+  feishu_email?: string
+  feishu_open_id?: string
+  feishu_union_id?: string
+  feishu_chat_id?: string
+  feishu_identity_ready?: boolean
+  feishu_bound_at?: string
   created_at: string
   updated_at: string
 }
@@ -120,4 +127,20 @@ export interface SyncSummary {
   failed_count: number
   pending_count: number
   total_affected: number
+}
+
+export interface FeishuStatus {
+  enabled: boolean
+  configured: boolean
+  missing_keys?: string[]
+  webhook_url?: string
+  bot_name?: string
+}
+
+export interface FeishuPushResult {
+  total: number
+  sent: number
+  skipped: number
+  failed: number
+  errors?: string[]
 }

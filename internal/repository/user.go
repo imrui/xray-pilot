@@ -1,6 +1,9 @@
 package repository
 
 import (
+	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/imrui/xray-pilot/internal/entity"
@@ -28,6 +31,63 @@ func (r *UserRepository) FindByToken(token string) (*entity.User, error) {
 	return &user, err
 }
 
+func (r *UserRepository) FindByFeishuIdentity(openID, unionID string) (*entity.User, error) {
+	var user entity.User
+	query := DB.Preload("Group")
+
+	switch {
+	case openID != "" && unionID != "":
+		err := query.Where("feishu_open_id = ? OR feishu_union_id = ?", openID, unionID).Limit(1).Find(&user).Error
+		if err != nil {
+			return nil, err
+		}
+		if user.ID == 0 {
+			return nil, nil
+		}
+		return &user, nil
+	case openID != "":
+		err := query.Where("feishu_open_id = ?", openID).Limit(1).Find(&user).Error
+		if err != nil {
+			return nil, err
+		}
+		if user.ID == 0 {
+			return nil, nil
+		}
+		return &user, nil
+	case unionID != "":
+		err := query.Where("feishu_union_id = ?", unionID).Limit(1).Find(&user).Error
+		if err != nil {
+			return nil, err
+		}
+		if user.ID == 0 {
+			return nil, nil
+		}
+		return &user, nil
+	default:
+		return nil, errors.New("missing feishu identity")
+	}
+}
+
+func (r *UserRepository) FindByFeishuEmail(email string) (*entity.User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return nil, errors.New("missing feishu email")
+	}
+
+	var users []entity.User
+	err := DB.Preload("Group").Where("LOWER(TRIM(feishu_email)) = ?", email).Limit(2).Find(&users).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, errors.New("user not found")
+	}
+	if len(users) > 1 {
+		return nil, fmt.Errorf("multiple users matched feishu email: %s", email)
+	}
+	return &users[0], nil
+}
+
 func (r *UserRepository) List(page, pageSize int) ([]entity.User, int64, error) {
 	var total int64
 	if err := DB.Model(&entity.User{}).Count(&total).Error; err != nil {
@@ -37,6 +97,15 @@ func (r *UserRepository) List(page, pageSize int) ([]entity.User, int64, error) 
 	offset := (page - 1) * pageSize
 	err := DB.Preload("Group").Order("id desc").Offset(offset).Limit(pageSize).Find(&users).Error
 	return users, total, err
+}
+
+func (r *UserRepository) FindByIDs(ids []uint) ([]entity.User, error) {
+	if len(ids) == 0 {
+		return []entity.User{}, nil
+	}
+	var users []entity.User
+	err := DB.Preload("Group").Where("id IN ?", ids).Find(&users).Error
+	return users, err
 }
 
 func (r *UserRepository) Update(user *entity.User) error {

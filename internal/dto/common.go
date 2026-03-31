@@ -32,3 +32,21 @@ type SyncSummaryResponse struct {
 	PendingCount  int  `json:"pending_count"`
 	TotalAffected int  `json:"total_affected"`
 }
+
+// FeishuStatusResponse 飞书配置状态摘要
+type FeishuStatusResponse struct {
+	Enabled     bool     `json:"enabled"`
+	Configured  bool     `json:"configured"`
+	MissingKeys []string `json:"missing_keys,omitempty"`
+	WebhookURL  string   `json:"webhook_url,omitempty"`
+	BotName     string   `json:"bot_name,omitempty"`
+}
+
+// FeishuPushResponse 飞书推送结果统计
+type FeishuPushResponse struct {
+	Total   int      `json:"total"`
+	Sent    int      `json:"sent"`
+	Skipped int      `json:"skipped"`
+	Failed  int      `json:"failed"`
+	Errors  []string `json:"errors,omitempty"`
+}

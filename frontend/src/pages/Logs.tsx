@@ -92,12 +92,6 @@ export default function Logs() {
       <PageHeader
         title="操作日志"
         description="集中查看同步、健康检测和系统动作。日志页保持偏冷静的信息密度，方便快速定位失败动作和耗时异常。"
-        actions={
-          <Btn variant="secondary" loading={isFetching} onClick={() => void refetch()}>
-            <RefreshCcw className="h-4 w-4" />
-            立即刷新
-          </Btn>
-        }
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -125,7 +119,7 @@ export default function Logs() {
           </div>
         </SurfaceCard>
 
-        <SurfaceCard className="p-5">
+        <SurfaceCard className="p-5 xl:sticky xl:top-6 xl:self-start">
           <div className="space-y-3">
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
               <div className="flex items-center gap-2 text-sm font-semibold">
@@ -140,8 +134,14 @@ export default function Logs() {
                 自动刷新
               </div>
               <p className="mt-2 text-sm leading-6 text-soft">页面默认每 10 秒拉取一次最新日志，适合在同步节点、测试 SSH 或排查订阅问题时并排观察。</p>
-              <div className="mt-3 inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 py-1 text-xs font-medium text-soft">
-                刷新周期：10s
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div className="inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 py-1 text-xs font-medium text-soft">
+                  刷新周期：10s
+                </div>
+                <Btn variant="secondary" loading={isFetching} onClick={() => void refetch()}>
+                  <RefreshCcw className="h-4 w-4" />
+                  立即刷新
+                </Btn>
               </div>
             </div>
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">

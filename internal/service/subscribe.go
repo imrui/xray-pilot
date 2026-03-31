@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,6 +66,7 @@ func (s *SubscribeService) GenerateSubscription(token string) (string, error) {
 			return "", fmt.Errorf("查询节点失败: %w", err)
 		}
 	}
+	sortNodesByName(nodes)
 
 	var links []string
 	for _, node := range nodes {
@@ -304,6 +306,7 @@ func (s *SubscribeService) GetSubscribePageDataWithBaseURL(token, baseURL string
 	if err != nil || len(nodes) == 0 {
 		nodes, _ = s.nodeRepo.FindHealthyByGroupID(*user.GroupID, false)
 	}
+	sortNodesByName(nodes)
 
 	for _, node := range nodes {
 		node := node
@@ -350,6 +353,7 @@ func (s *SubscribeService) GenerateClash(token string) (string, error) {
 	if err != nil || len(nodes) == 0 {
 		nodes, _ = s.nodeRepo.FindHealthyByGroupID(*user.GroupID, false)
 	}
+	sortNodesByName(nodes)
 
 	var proxies []string
 	for _, node := range nodes {
@@ -371,6 +375,17 @@ func (s *SubscribeService) GenerateClash(token string) (string, error) {
 		return "proxies: []\n", nil
 	}
 	return "proxies:\n" + strings.Join(proxies, ""), nil
+}
+
+func sortNodesByName(nodes []entity.Node) {
+	sort.SliceStable(nodes, func(i, j int) bool {
+		left := strings.ToLower(strings.TrimSpace(nodes[i].Name))
+		right := strings.ToLower(strings.TrimSpace(nodes[j].Name))
+		if left == right {
+			return nodes[i].ID < nodes[j].ID
+		}
+		return left < right
+	})
 }
 
 // buildClashProxy 根据协议生成 Clash proxy YAML 条目

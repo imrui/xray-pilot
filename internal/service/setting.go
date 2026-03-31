@@ -17,6 +17,13 @@ const (
 	KeySSHKnownHostsPath        = "ssh.known_hosts_path"
 	KeySubscriptionBaseURL      = "subscription.base_url"
 	KeySubscriptionRemarkFormat = "subscription.remark_format"
+	KeyFeishuEnabled            = "feishu.enabled"
+	KeyFeishuAppID              = "feishu.app_id"
+	KeyFeishuAppSecret          = "feishu.app_secret"
+	KeyFeishuVerificationToken  = "feishu.verification_token"
+	KeyFeishuEncryptKey         = "feishu.encrypt_key"
+	KeyFeishuBaseURL            = "feishu.base_url"
+	KeyFeishuBotName            = "feishu.bot_name"
 	KeyXrayLogAccess            = "xray.log_access"
 	KeyXrayLogError             = "xray.log_error"
 	KeyXrayLogLevel             = "xray.log_level"
@@ -32,6 +39,13 @@ var settingDefaults = map[string]string{
 	KeySSHKnownHostsPath:        "/var/lib/xray-pilot/known_hosts",
 	KeySubscriptionBaseURL:      "",
 	KeySubscriptionRemarkFormat: "{node_name} ({username}) [{protocol} - {transport}]",
+	KeyFeishuEnabled:            "false",
+	KeyFeishuAppID:              "",
+	KeyFeishuAppSecret:          "",
+	KeyFeishuVerificationToken:  "",
+	KeyFeishuEncryptKey:         "",
+	KeyFeishuBaseURL:            "",
+	KeyFeishuBotName:            "xray-pilot",
 	KeyXrayLogAccess:            "none",
 	KeyXrayLogError:             "/var/log/xray/error.log",
 	KeyXrayLogLevel:             "warning",

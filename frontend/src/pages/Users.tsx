@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, Search } from 'lucide-react'
+import { Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, Search, Send } from 'lucide-react'
 import { userApi, groupApi } from '@/lib/api'
-import type { User } from '@/types'
+import type { FeishuPushResult, User } from '@/types'
 import { Badge } from '@/components/ui/Badge'
 import { Field, SelectField, Btn, FieldGroup } from '@/components/ui/Form'
 import { QRModal } from '@/components/ui/QRModal'
@@ -10,6 +10,7 @@ import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 10
@@ -21,6 +22,11 @@ interface FormState {
   group_id: string
   expires_at: string
   remark: string
+  feishu_enabled: string
+  feishu_email: string
+  feishu_open_id: string
+  feishu_union_id: string
+  feishu_chat_id: string
 }
 
 const emptyForm = (): FormState => ({
@@ -29,7 +35,67 @@ const emptyForm = (): FormState => ({
   group_id: '',
   expires_at: '',
   remark: '',
+  feishu_enabled: 'false',
+  feishu_email: '',
+  feishu_open_id: '',
+  feishu_union_id: '',
+  feishu_chat_id: '',
 })
+
+function isFeishuBound(user: User) {
+  return Boolean(user.feishu_open_id || user.feishu_chat_id || user.feishu_union_id)
+}
+
+function isFeishuMessagingEnabled(user: User) {
+  return Boolean(user.feishu_enabled) && isFeishuBound(user)
+}
+
+function isFeishuAuthorized(user: User) {
+  return Boolean(user.feishu_enabled && user.feishu_email)
+}
+
+function getFeishuEmailMeta(user: User) {
+  const email = user.feishu_email?.trim() || ''
+  const bound = isFeishuBound(user)
+
+  return {
+    emailLabel: email,
+    emailClassName: email
+      ? bound
+        ? 'text-[var(--text)]'
+        : 'text-orange-600 dark:text-orange-400'
+      : 'text-soft',
+    tooltipContent: email
+      ? bound
+        ? (
+            <span className="block space-y-1 whitespace-nowrap">
+              <span className="block">
+                <span className="font-medium text-emerald-600 dark:text-emerald-400">已绑定</span>
+                <span className="text-[var(--text)]">，点击可发送飞书订阅</span>
+              </span>
+              <span className="block">Open ID: {user.feishu_open_id ? 'ok' : '—'}</span>
+              <span className="block">Union ID: {user.feishu_union_id ? 'ok' : '—'}</span>
+            </span>
+          )
+        : <span className="block whitespace-nowrap font-medium text-orange-600 dark:text-orange-400">待绑定</span>
+      : null,
+  }
+}
+
+function maskIdentifier(value?: string) {
+  if (!value) return '—'
+  if (value.length <= 12) return value
+  return `${value.slice(0, 6)}...${value.slice(-4)}`
+}
+
+function describeFeishuPush(result: FeishuPushResult) {
+  const parts = [
+    `发送 ${result.sent}`,
+    `跳过 ${result.skipped}`,
+    `失败 ${result.failed}`,
+  ]
+  return parts.join(' · ')
+}
 
 function toApiDateTime(value: string) {
   if (!value) return null
@@ -111,6 +177,11 @@ export default function Users() {
           group_id: groupId ?? null,
           expires_at: expiresAt,
           remark: form.remark,
+          feishu_enabled: form.feishu_enabled === 'true',
+          feishu_email: form.feishu_email,
+          feishu_open_id: form.feishu_open_id,
+          feishu_union_id: form.feishu_union_id,
+          feishu_chat_id: form.feishu_chat_id,
         })
       }
       return userApi.create({
@@ -119,6 +190,11 @@ export default function Users() {
         group_id: groupId,
         expires_at: expiresAt,
         remark: form.remark,
+        feishu_enabled: form.feishu_enabled === 'true',
+        feishu_email: form.feishu_email,
+        feishu_open_id: form.feishu_open_id,
+        feishu_union_id: form.feishu_union_id,
+        feishu_chat_id: form.feishu_chat_id,
       })
     },
     onSuccess: () => {
@@ -129,8 +205,44 @@ export default function Users() {
   })
 
   const toggle = useMutation({ mutationFn: (id: number) => userApi.toggle(id), onSuccess: invalidate })
+  const toggleFeishuEnabled = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      userApi.update(id, { feishu_enabled: enabled }),
+    onSuccess: (_, variables) => {
+      invalidate()
+      pushToast({
+        title: variables.enabled ? '飞书消息已开启' : '飞书消息已关闭',
+        description: variables.enabled ? '该用户后续可接收飞书消息。' : '该用户将暂停飞书消息能力，但绑定信息会保留。',
+        variant: 'success',
+      })
+    },
+  })
   const remove = useMutation({ mutationFn: (id: number) => userApi.remove(id), onSuccess: invalidate })
   const resetToken = useMutation({ mutationFn: (id: number) => userApi.resetToken(id), onSuccess: invalidate })
+  const pushFeishuSingle = useMutation({
+    mutationFn: (id: number) => userApi.pushFeishu(id),
+    onSuccess: (res) => {
+      const result = res.data.data
+      if (!result) return
+      pushToast({
+        title: '飞书订阅已处理',
+        description: describeFeishuPush(result),
+        variant: result.failed > 0 ? 'warning' : 'success',
+      })
+    },
+  })
+  const pushFeishuBatch = useMutation({
+    mutationFn: (userIDs: number[]) => userApi.pushFeishuBatch(userIDs),
+    onSuccess: (res) => {
+      const result = res.data.data
+      if (!result) return
+      pushToast({
+        title: '批量飞书推送已完成',
+        description: describeFeishuPush(result),
+        variant: result.failed > 0 ? 'warning' : 'success',
+      })
+    },
+  })
 
   const openCreate = () => {
     const next = emptyForm()
@@ -147,6 +259,11 @@ export default function Users() {
       group_id: String(u.group_id ?? ''),
       expires_at: toDateTimeLocalValue(u.expires_at),
       remark: u.remark,
+      feishu_enabled: u.feishu_enabled ? 'true' : 'false',
+      feishu_email: u.feishu_email ?? '',
+      feishu_open_id: u.feishu_open_id ?? '',
+      feishu_union_id: u.feishu_union_id ?? '',
+      feishu_chat_id: u.feishu_chat_id ?? '',
     }
     setForm(next)
     setInitialForm(next)
@@ -178,6 +295,7 @@ export default function Users() {
         keyword === '' ||
         u.username.toLowerCase().includes(keyword) ||
         u.real_name.toLowerCase().includes(keyword) ||
+        (u.feishu_email ?? '').toLowerCase().includes(keyword) ||
         (u.group_name ?? '').toLowerCase().includes(keyword)
 
       const matchesStatus =
@@ -205,6 +323,7 @@ export default function Users() {
     })
 
   const selectedUsers = filteredUsers.filter((u) => selectedIds.includes(u.id))
+  const selectedBoundUsers = selectedUsers.filter(isFeishuMessagingEnabled)
 
   const runBulk = async (runner: (u: User) => Promise<unknown>) => {
     await Promise.all(selectedUsers.map(runner))
@@ -251,6 +370,17 @@ export default function Users() {
     toggle.mutate(user.id)
   }
 
+  const confirmAndPushFeishu = async (user: User) => {
+    const ok = await confirm({
+      title: `给 ${user.username} 发送飞书订阅？`,
+      description: '会通过当前绑定的飞书身份把订阅信息推送给该用户。',
+      confirmText: '确认发送',
+      cancelText: '取消',
+    })
+    if (!ok) return
+    pushFeishuSingle.mutate(user.id)
+  }
+
   return (
     <PageShell className="space-y-6">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -260,7 +390,7 @@ export default function Users() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索用户名、邮箱..."
+              placeholder="搜索用户名、飞书邮箱..."
               className="h-11 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] pl-10 pr-3 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
             />
           </label>
@@ -311,6 +441,16 @@ export default function Users() {
             <div className="flex flex-wrap gap-2">
               <Btn variant="secondary" onClick={() => runBulk((u) => userApi.resetToken(u.id))}>批量重置订阅</Btn>
               <Btn variant="secondary" onClick={() => void handleBulkToggle()}>批量切换启用</Btn>
+              {selectedBoundUsers.length > 0 && (
+                <Btn
+                  variant="secondary"
+                  loading={pushFeishuBatch.isPending}
+                  onClick={() => pushFeishuBatch.mutate(selectedBoundUsers.map((u) => u.id))}
+                >
+                  <Send className="h-4 w-4" />
+                  批量发送飞书订阅
+                </Btn>
+              )}
               <Btn
                 variant="danger"
                 onClick={async () => {
@@ -334,7 +474,7 @@ export default function Users() {
 
       <SurfaceCard className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1024px] text-left text-sm">
+          <table className="w-full min-w-[1140px] text-left text-sm">
             <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
               <tr>
                 <th className="w-10 px-4 py-3">
@@ -350,18 +490,19 @@ export default function Users() {
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">到期时间</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">启用</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">飞书消息</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">飞书邮箱</th>
                 <th className="px-4 py-3 text-right text-[11px] font-medium uppercase tracking-[0.12em] text-faint">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={8} className="px-4 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-soft">暂无用户数据</td>
+                  <td colSpan={8} className="px-4 py-10 text-center text-soft">暂无用户数据</td>
                 </tr>
               ) : (
                 filteredUsers.map((u) => (
@@ -392,10 +533,39 @@ export default function Users() {
                       )}
                     </td>
                     <td className="px-4 py-3.5">
-                      <Badge label={u.active ? '正常' : '已禁用'} variant={u.active ? 'green' : 'red'} />
+                      <Switch checked={u.active} onChange={() => void toggleUserActive(u)} />
                     </td>
                     <td className="px-4 py-3.5">
-                      <Switch checked={u.active} onChange={() => void toggleUserActive(u)} />
+                      <Switch
+                        checked={Boolean(u.feishu_enabled)}
+                        onChange={(next) => toggleFeishuEnabled.mutate({ id: u.id, enabled: next })}
+                      />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {(() => {
+                        const feishu = getFeishuEmailMeta(u)
+                        if (!feishu.emailLabel) return null
+
+                        const emailNode = isFeishuMessagingEnabled(u) ? (
+                          <button
+                            type="button"
+                            onClick={() => void confirmAndPushFeishu(u)}
+                            className={`inline-block max-w-[220px] truncate text-left text-xs underline-offset-2 transition hover:underline ${feishu.emailClassName}`}
+                          >
+                            {feishu.emailLabel}
+                          </button>
+                        ) : (
+                          <span className={`inline-block max-w-[220px] truncate text-xs ${feishu.emailClassName}`}>
+                            {feishu.emailLabel}
+                          </span>
+                        )
+
+                        return feishu.tooltipContent ? (
+                          <Tooltip content={feishu.tooltipContent} side="right" className="whitespace-nowrap">
+                            {emailNode}
+                          </Tooltip>
+                        ) : emailNode
+                      })()}
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center justify-end gap-2">
@@ -431,6 +601,12 @@ export default function Users() {
                         </button>
                         <ActionMenu
                           items={[
+                            ...(isFeishuMessagingEnabled(u)
+                              ? [{
+                                  label: '发送飞书订阅',
+                                  onSelect: () => void confirmAndPushFeishu(u),
+                                }]
+                              : []),
                             {
                               label: '重置订阅链接',
                               onSelect: async () => {
@@ -546,6 +722,101 @@ export default function Users() {
             <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="例如：测试账号 / 临时用户" />
           </FieldGroup>
 
+          <FieldGroup title="飞书绑定" description="飞书绑定是可选能力。关闭时不会推送飞书消息，但已保存的飞书信息会保留。">
+            <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2.5">
+              <div>
+                <div className="text-[12px] font-medium text-soft">启用飞书消息</div>
+                <div className="mt-1 text-xs text-soft">关闭时不推送飞书消息，但已绑定信息会保留。</div>
+              </div>
+              <Switch
+                checked={form.feishu_enabled === 'true'}
+                onChange={(next) => setForm((p) => ({ ...p, feishu_enabled: next ? 'true' : 'false' }))}
+              />
+            </div>
+            {form.feishu_enabled === 'true' && (
+              <div className="space-y-4">
+                <Field label="飞书邮箱" value={form.feishu_email} onChange={f('feishu_email')} placeholder="name@company.com" />
+                {drawer.user ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Btn
+                      variant="secondary"
+                      onClick={() => {
+                        setErr('')
+                        userApi.bindFeishu(drawer.user!.id, form.feishu_email)
+                          .then((res) => {
+                            const patch = res.data.data
+                            if (!patch) return
+                            const nextUser = {
+                              ...drawer.user!,
+                              ...patch,
+                            } as User
+                            pushToast({
+                              title: nextUser.feishu_identity_ready ? '飞书绑定成功' : '飞书邮箱已校验',
+                              description: nextUser.feishu_identity_ready
+                                ? `Open ID ${maskIdentifier(nextUser.feishu_open_id)} · Union ID ${maskIdentifier(nextUser.feishu_union_id)}`
+                                : `${nextUser.username} 已授权飞书邮箱，等待首次私聊机器人完成身份绑定。`,
+                              variant: 'success',
+                            })
+                            openEdit(nextUser)
+                            invalidate()
+                          })
+                          .catch((e: Error) => setErr(e.message))
+                      }}
+                      disabled={!form.feishu_email}
+                    >
+                      <Send className="h-4 w-4" />
+                      {isFeishuAuthorized(drawer.user) ? '重新绑定' : '绑定飞书用户'}
+                    </Btn>
+                    {isFeishuAuthorized(drawer.user) && (
+                      <Btn
+                        variant="secondary"
+                        onClick={() => {
+                          setErr('')
+                          userApi.unbindFeishu(drawer.user!.id)
+                            .then((res) => {
+                              const patch = res.data.data
+                              if (!patch) return
+                              const nextUser = {
+                                ...drawer.user!,
+                                ...patch,
+                              } as User
+                              pushToast({
+                                title: '飞书绑定已清除',
+                                description: `${nextUser.username} 的飞书绑定信息已移除。`,
+                                variant: 'success',
+                              })
+                              openEdit(nextUser)
+                              invalidate()
+                            })
+                            .catch((e: Error) => setErr(e.message))
+                        }}
+                      >
+                        清除绑定
+                      </Btn>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-soft">请先保存用户，再执行飞书绑定。</p>
+                )}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="Feishu Open ID" value={form.feishu_open_id} readOnly placeholder="绑定后自动写入" />
+                  <Field label="Feishu Union ID" value={form.feishu_union_id} readOnly placeholder="绑定后自动写入" />
+                </div>
+                <Field label="Feishu Chat ID" value={form.feishu_chat_id} readOnly placeholder="如有可用值会自动写入" />
+                {drawer.user && (
+                  <p className="text-xs text-soft">
+                    当前状态：
+                    {isFeishuMessagingEnabled(drawer.user)
+                      ? ` 已完成身份绑定${drawer.user.feishu_bound_at ? `，最近更新时间 ${new Date(drawer.user.feishu_bound_at).toLocaleString('zh-CN')}` : ''}`
+                      : isFeishuAuthorized(drawer.user)
+                        ? ' 已授权飞书邮箱，等待首次私聊完成身份绑定'
+                        : ' 未绑定飞书'}
+                  </p>
+                )}
+              </div>
+            )}
+          </FieldGroup>
+
           {drawer.user && (
             <FieldGroup title="快捷动作" description="把高频动作前置，不需要先关闭编辑抽屉。">
               <div className="flex flex-wrap gap-2">
@@ -566,6 +837,16 @@ export default function Users() {
                   <ExternalLink className="h-4 w-4" />
                   打开订阅页
                 </a>
+                {isFeishuMessagingEnabled(drawer.user!) && (
+                  <Btn
+                    variant="secondary"
+                    loading={pushFeishuSingle.isPending}
+                    onClick={() => void confirmAndPushFeishu(drawer.user!)}
+                  >
+                    <Send className="h-4 w-4" />
+                    发送飞书订阅
+                  </Btn>
+                )}
                 <Btn
                   variant="secondary"
                   onClick={async () => {
