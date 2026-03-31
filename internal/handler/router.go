@@ -72,6 +72,7 @@ func RegisterRoutes(r *gin.Engine) {
 		// 系统信息（只读）
 		api.GET("/system/info", systemH.GetSystemInfo)
 		api.GET("/system/diagnostics", systemH.GetDiagnostics)
+		api.GET("/system/sync-summary", systemH.GetSyncSummary)
 		// 运行时配置（KV，可读写）
 		api.GET("/system/settings", systemH.GetSettings)
 		api.PUT("/system/settings", systemH.UpdateSettings)

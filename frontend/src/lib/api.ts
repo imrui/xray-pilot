@@ -1,5 +1,5 @@
 import request from './axios'
-import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult } from '@/types'
+import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary } from '@/types'
 
 // ---- 通用分页参数 ----
 interface PageParams {
@@ -170,6 +170,9 @@ export const systemApi = {
 
   getDiagnostics: () =>
     request.get<ApiResponse<DiagnosticsResult>>('/system/diagnostics'),
+
+  getSyncSummary: () =>
+    request.get<ApiResponse<SyncSummary>>('/system/sync-summary'),
 
   getSettings: () =>
     request.get<ApiResponse<Record<string, string>>>('/system/settings'),

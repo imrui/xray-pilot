@@ -131,7 +131,7 @@ export default function Nodes() {
         title: '批量同步已完成',
         description: summary
           ? `总计 ${summary.total} 个节点，成功 ${summary.success} 个，失败 ${summary.failed} 个。`
-          : '漂移节点已完成同步。',
+          : '待处理节点已完成同步。',
         variant: summary?.failed ? 'warning' : 'success',
       })
       invalidate()
@@ -277,7 +277,7 @@ export default function Nodes() {
         <div className="flex items-center gap-2">
           <Btn variant="secondary" loading={syncDrifted.isPending} onClick={() => syncDrifted.mutate()}>
             <RefreshCw className="h-4 w-4" />
-            同步漂移节点
+            同步待处理节点
           </Btn>
           <Btn onClick={openCreate}>
             <Plus className="h-4 w-4" />

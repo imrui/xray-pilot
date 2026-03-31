@@ -32,12 +32,12 @@ func NewSyncService() *SyncService {
 
 // SyncResult 单节点同步结果
 type SyncResult struct {
-	NodeID        uint
-	Name          string
-	Success       bool
-	Error         string
-	InboundCount  int      // 成功生成的 inbound 数量
-	Warnings      []string // inbound 生成警告（某个协议失败但整体继续）
+	NodeID       uint
+	Name         string
+	Success      bool
+	Error        string
+	InboundCount int      // 成功生成的 inbound 数量
+	Warnings     []string // inbound 生成警告（某个协议失败但整体继续）
 }
 
 // SyncNode 同步单个节点：生成多协议配置 → 推送 → 重载 xray → 更新状态
@@ -100,7 +100,7 @@ func (s *SyncService) SyncAll() []SyncResult {
 	return results
 }
 
-// SyncDrifted 仅同步状态为 drifted 或 failed 的节点
+// SyncDrifted 同步状态为 drifted、failed 或 pending 的节点
 func (s *SyncService) SyncDrifted() []SyncResult {
 	nodes, err := s.nodeRepo.GetDriftedNodes()
 	if err != nil {

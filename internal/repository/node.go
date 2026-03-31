@@ -64,10 +64,42 @@ func (r *NodeRepository) UpdateSyncStatus(id uint, status entity.SyncStatus, has
 func (r *NodeRepository) GetDriftedNodes() ([]entity.Node, error) {
 	var nodes []entity.Node
 	err := DB.Where("sync_status IN ? AND active = ?",
-		[]entity.SyncStatus{entity.SyncStatusDrifted, entity.SyncStatusFailed},
+		[]entity.SyncStatus{entity.SyncStatusDrifted, entity.SyncStatusFailed, entity.SyncStatusPending},
 		true,
 	).Find(&nodes).Error
 	return nodes, err
+}
+
+func (r *NodeRepository) CountSyncStatuses() (map[entity.SyncStatus]int64, error) {
+	rows, err := DB.Model(&entity.Node{}).
+		Select("sync_status, COUNT(*) AS total").
+		Where("active = ?", true).
+		Group("sync_status").
+		Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := map[entity.SyncStatus]int64{
+		entity.SyncStatusDrifted: 0,
+		entity.SyncStatusFailed:  0,
+		entity.SyncStatusPending: 0,
+		entity.SyncStatusSynced:  0,
+	}
+
+	for rows.Next() {
+		var (
+			status string
+			total  int64
+		)
+		if scanErr := rows.Scan(&status, &total); scanErr != nil {
+			return nil, scanErr
+		}
+		counts[entity.SyncStatus(status)] = total
+	}
+
+	return counts, rows.Err()
 }
 
 // BatchUpdateSyncStatus 批量更新节点同步状态

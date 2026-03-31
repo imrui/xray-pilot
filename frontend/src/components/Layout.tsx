@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import {
@@ -25,6 +26,8 @@ import { useThemeStore } from '@/store/theme'
 import { GitHubMark } from '@/components/icons/GitHubMark'
 import { Logo } from '@/components/icons/Logo'
 import { APP_VERSION } from '@/lib/version'
+import { systemApi } from '@/lib/api'
+import { SyncReminderBanner } from '@/components/SyncReminderBanner'
 
 const navGroups = [
   {
@@ -61,6 +64,13 @@ export default function Layout() {
   const { theme, toggleTheme } = useThemeStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const { data: syncSummary } = useQuery({
+    queryKey: ['sync-summary'],
+    queryFn: () => systemApi.getSyncSummary().then((r) => r.data.data!),
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  })
 
   const handleLogout = () => {
     logout()
@@ -295,6 +305,7 @@ export default function Layout() {
 
             <div className="flex-1 px-4 py-4 md:px-6 md:py-5 lg:min-h-0 lg:overflow-y-auto">
               <div className="min-h-full">
+                {syncSummary && <SyncReminderBanner summary={syncSummary} />}
                 <Outlet />
               </div>
             </div>

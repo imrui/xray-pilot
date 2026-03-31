@@ -113,3 +113,11 @@ export interface DiagnosticsResult {
   }
   items: DiagnosticItem[]
 }
+
+export interface SyncSummary {
+  needs_sync: boolean
+  drifted_count: number
+  failed_count: number
+  pending_count: number
+  total_affected: number
+}

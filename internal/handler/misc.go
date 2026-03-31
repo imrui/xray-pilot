@@ -250,12 +250,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 type SystemHandler struct {
 	settingSvc    *service.SettingService
 	diagnosticSvc *service.DiagnosticsService
+	syncSummary   *service.SyncSummaryService
 }
 
 func NewSystemHandler() *SystemHandler {
 	return &SystemHandler{
 		settingSvc:    service.NewSettingService(),
 		diagnosticSvc: service.NewDiagnosticsService(),
+		syncSummary:   service.NewSyncSummaryService(),
 	}
 }
 
@@ -296,4 +298,14 @@ func (h *SystemHandler) UpdateSettings(c *gin.Context) {
 // GetDiagnostics 返回部署诊断结果
 func (h *SystemHandler) GetDiagnostics(c *gin.Context) {
 	response.Success(c, h.diagnosticSvc.Run())
+}
+
+// GetSyncSummary 返回全局待同步摘要
+func (h *SystemHandler) GetSyncSummary(c *gin.Context) {
+	summary, err := h.syncSummary.GetSyncSummary()
+	if err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.Success(c, summary)
 }
