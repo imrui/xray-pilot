@@ -23,6 +23,12 @@ const statusMeta: Record<SyncStatus, { label: string; variant: 'green' | 'yellow
   pending: { label: '待同步', variant: 'gray', tip: '节点尚未同步，请点击同步按钮' },
 }
 
+const unconfiguredStatusMeta = {
+  label: '未配置协议',
+  variant: 'gray' as const,
+  tip: '当前节点未绑定任何协议，无法生成可用代理配置。请先为节点配置至少一个协议。',
+}
+
 interface FormState {
   name: string
   region: string
@@ -221,18 +227,20 @@ export default function Nodes() {
     setForm((prev) => ({ ...prev, [k]: e.target.value }))
 
   const filteredNodes = useMemo(() => {
-    return (data?.list ?? []).filter((n) => {
-      const keyword = search.trim().toLowerCase()
-      const matchesKeyword =
-        keyword === '' ||
-        n.name.toLowerCase().includes(keyword) ||
-        n.ip.toLowerCase().includes(keyword) ||
-        n.domain.toLowerCase().includes(keyword) ||
-        n.region.toLowerCase().includes(keyword)
-      const matchesStatus = statusFilter === 'all' || n.sync_status === statusFilter
-      const matchesRegion = regionFilter === 'all' || n.region === regionFilter
-      return matchesKeyword && matchesStatus && matchesRegion
-    })
+    return [...(data?.list ?? [])]
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
+      .filter((n) => {
+        const keyword = search.trim().toLowerCase()
+        const matchesKeyword =
+          keyword === '' ||
+          n.name.toLowerCase().includes(keyword) ||
+          n.ip.toLowerCase().includes(keyword) ||
+          n.domain.toLowerCase().includes(keyword) ||
+          n.region.toLowerCase().includes(keyword)
+        const matchesStatus = statusFilter === 'all' || n.sync_status === statusFilter
+        const matchesRegion = regionFilter === 'all' || n.region === regionFilter
+        return matchesKeyword && matchesStatus && matchesRegion
+      })
   }, [data?.list, search, statusFilter, regionFilter])
 
   const allVisibleSelected = filteredNodes.length > 0 && filteredNodes.every((n) => selectedIds.includes(n.id))
@@ -282,13 +290,25 @@ export default function Nodes() {
     )
   }
 
-  const renderProtocolCell = (node: Node) => {
-    const matchedProfiles = (nodeKeysByNodeId[node.id] ?? [])
+  const getNodeKeys = (nodeId: number) => nodeKeysByNodeId[nodeId] ?? []
+  const getConfiguredProfiles = (nodeId: number) =>
+    getNodeKeys(nodeId)
       .map((key) => activeProfileMap.get(key.profile_id))
       .filter((item): item is InboundProfile => Boolean(item))
 
+  const renderProtocolCell = (node: Node) => {
+    const matchedProfiles = getConfiguredProfiles(node.id)
+
     if (matchedProfiles.length === 0) {
-      return <span className="text-soft">—</span>
+      return (
+        <button
+          type="button"
+          onClick={() => setProtocolNode(node)}
+          className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-2.5 text-xs font-medium text-soft transition hover:bg-[var(--panel-strong)] hover:text-[var(--text)]"
+        >
+          未配置
+        </button>
+      )
     }
 
     const [firstProfile, ...restProfiles] = matchedProfiles
@@ -475,19 +495,28 @@ export default function Nodes() {
                       />
                     </td>
                     <td className="px-4 py-3.5">
-                      <div className="font-semibold">{n.name}</div>
-                      <div className="text-xs text-soft">{n.region || '未设置地区'}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{n.name}</span>
+                        <span className="text-xs text-faint">#{n.id}</span>
+                      </div>
+                      <div className="text-xs text-soft">
+                        {n.region || '--'}
+                      </div>
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="font-medium text-[var(--text)]">{n.ip}</div>
                       <div className="text-xs text-soft">{n.domain || '—'}</div>
                     </td>
                     <td className="px-4 py-3.5">
-                      <Tooltip content={(statusMeta[n.sync_status] ?? statusMeta.pending).tip} side="right" className="max-w-[220px] whitespace-normal">
+                      <Tooltip
+                        content={(getConfiguredProfiles(n.id).length === 0 ? unconfiguredStatusMeta : (statusMeta[n.sync_status] ?? statusMeta.pending)).tip}
+                        side="right"
+                        className="max-w-[220px] whitespace-normal"
+                      >
                         <span tabIndex={0} className="inline-flex">
                           <Badge
-                            label={(statusMeta[n.sync_status] ?? statusMeta.pending).label}
-                            variant={(statusMeta[n.sync_status] ?? statusMeta.pending).variant}
+                            label={(getConfiguredProfiles(n.id).length === 0 ? unconfiguredStatusMeta : (statusMeta[n.sync_status] ?? statusMeta.pending)).label}
+                            variant={(getConfiguredProfiles(n.id).length === 0 ? unconfiguredStatusMeta : (statusMeta[n.sync_status] ?? statusMeta.pending)).variant}
                           />
                         </span>
                       </Tooltip>
@@ -518,11 +547,12 @@ export default function Nodes() {
                         <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => sync.mutate(n.id)}
+                            disabled={getConfiguredProfiles(n.id).length === 0}
                             className={`inline-flex h-9 items-center gap-1 rounded-md border px-3 text-xs font-medium transition ${
                               n.sync_status === 'failed'
                                 ? 'border-amber-500/40 bg-amber-500/12 text-amber-300 hover:bg-amber-500/18'
                                 : 'border-[var(--border)] bg-[var(--panel-strong)] text-[var(--accent)] hover:bg-[var(--panel-muted)]'
-                            }`}
+                            } ${getConfiguredProfiles(n.id).length === 0 ? 'cursor-not-allowed opacity-45 hover:bg-inherit' : ''}`}
                           >
                             <RefreshCw className={`h-3.5 w-3.5${sync.isPending && sync.variables === n.id ? ' animate-spin' : ''}`} />
                             同步
@@ -797,10 +827,22 @@ function NodeProtocolsModal({
   onPreview: () => void
   onClose: () => void
 }) {
+  const confirm = useConfirm()
+  const qc = useQueryClient()
   const { data: nodeKeys, isLoading, error } = useQuery({
     queryKey: ['nodeKeysQuickView', node.id],
     queryFn: () => nodeApi.getKeys(node.id).then((r) => r.data.data ?? []),
     retry: false,
+  })
+  const removeKey = useMutation({
+    mutationFn: (profileId: number) => nodeApi.deleteKey(node.id, profileId),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['nodes'] }),
+        qc.invalidateQueries({ queryKey: ['node-keys-for-list'] }),
+        qc.invalidateQueries({ queryKey: ['nodeKeysQuickView', node.id] }),
+      ])
+    },
   })
 
   const profileMap = new Map(profiles.map((profile) => [profile.id, profile]))
@@ -826,8 +868,15 @@ function NodeProtocolsModal({
     >
       <div className="space-y-4">
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4 text-sm text-soft">
-          <div className="font-medium text-[var(--text)]">{node.name}</div>
-          <div className="mt-1">{node.ip}{node.domain ? ` / ${node.domain}` : ''}</div>
+          <div className="font-medium text-[var(--text)]">
+            <span className="text-faint">#{node.id}</span>
+            <span className="mx-2">{node.name}</span>
+          </div>
+          <div className="mt-1">
+            {node.ip}
+            <span className="mx-2 text-faint">·</span>
+            {node.domain || '--'}
+          </div>
         </div>
         {isLoading && <p className="py-8 text-center text-sm text-soft">加载中…</p>}
         {error && <p className="rounded-2xl border border-rose-500/20 bg-rose-500/8 p-4 text-sm text-rose-400">{(error as Error).message}</p>}
@@ -840,15 +889,39 @@ function NodeProtocolsModal({
           <div className="space-y-3">
             {boundProfiles.map(({ key, profile }) => (
               <div key={profile.id} className="rounded-2xl border border-[var(--border)] bg-[var(--panel-strong)] p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="font-semibold">{profile.name}</div>
-                  <Badge label={profile.protocol} variant="blue" />
-                  {key.locked && <Badge label="已锁定" variant="yellow" />}
-                </div>
-                <div className="mt-2 grid gap-2 text-xs text-soft md:grid-cols-3">
-                  <div>端口 {profile.port}</div>
-                  <div>模板 {profile.active ? '启用中' : '已停用'}</div>
-                  <div>更新时间 {new Date(key.updated_at).toLocaleString('zh-CN')}</div>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-semibold">
+                        <span className="text-faint">#{profile.id}</span>
+                        <span className="mx-2">{profile.name}</span>
+                      </div>
+                      <Badge label={profile.protocol} variant="blue" />
+                      {key.locked && <Badge label="已锁定" variant="yellow" />}
+                    </div>
+                    <div className="mt-2 grid gap-2 text-xs text-soft md:grid-cols-3">
+                      <div>端口 {profile.port}</div>
+                      <div>模板 {profile.active ? '启用中' : '已停用'}</div>
+                      <div>更新时间 {new Date(key.updated_at).toLocaleString('zh-CN')}</div>
+                    </div>
+                  </div>
+                  <Btn
+                    variant="secondary"
+                    disabled={key.locked || removeKey.isPending}
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: `移除节点协议「${profile.name}」？`,
+                        description: key.locked ? '当前协议已锁定，需先解锁后才能移除。' : '移除后该协议将不再参与节点配置生成，节点会重新进入待同步状态。',
+                        confirmText: '移除协议',
+                        cancelText: '取消',
+                        tone: 'danger',
+                      })
+                      if (!ok || key.locked) return
+                      removeKey.mutate(profile.id)
+                    }}
+                  >
+                    移除协议
+                  </Btn>
                 </div>
                 <pre className="mt-3 overflow-x-auto rounded-xl border border-[var(--border)] bg-slate-950/90 p-3 text-[11px] leading-5 text-slate-100">
                   {formatKeySettingsPreview(key.settings)}

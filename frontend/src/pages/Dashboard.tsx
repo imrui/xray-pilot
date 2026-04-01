@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Activity, AlertTriangle, Link2, RefreshCcw, Server, Users } from 'lucide-react'
-import { logApi, nodeApi, userApi } from '@/lib/api'
-import type { Node, SyncLog } from '@/types'
+import { logApi, nodeApi, profileApi, userApi } from '@/lib/api'
+import type { InboundProfile, Node, NodeKey, SyncLog } from '@/types'
 import { Btn } from '@/components/ui/Form'
 import { Badge } from '@/components/ui/Badge'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
@@ -100,6 +100,24 @@ export default function Dashboard() {
     queryKey: ['dashboard-nodes'],
     queryFn: () => nodeApi.list({ page: 1, page_size: 200 }).then((r) => r.data.data!),
   })
+  const { data: profilesData } = useQuery({
+    queryKey: ['dashboard-profiles-all'],
+    queryFn: () => profileApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data!),
+  })
+  const { data: nodeKeysByNodeId = {} } = useQuery({
+    queryKey: ['dashboard-node-keys', nodesQuery.data?.list?.map((node) => node.id).join(',') ?? ''],
+    queryFn: async () => {
+      const nodes = nodesQuery.data?.list ?? []
+      const entries = await Promise.all(
+        nodes.map(async (node) => {
+          const res = await nodeApi.getKeys(node.id)
+          return [node.id, res.data.data ?? []] as const
+        }),
+      )
+      return Object.fromEntries(entries) as Record<number, NodeKey[]>
+    },
+    enabled: (nodesQuery.data?.list?.length ?? 0) > 0,
+  })
 
   const logsQuery = useQuery({
     queryKey: ['dashboard-logs'],
@@ -109,21 +127,31 @@ export default function Dashboard() {
   const users = usersQuery.data?.list ?? []
   const nodes = nodesQuery.data?.list ?? []
   const logs = logsQuery.data?.list ?? []
+  const activeProfiles = (profilesData?.list ?? []).filter((profile: InboundProfile) => profile.active)
+  const activeProfileIDs = new Set(activeProfiles.map((profile) => profile.id))
+  const serviceReadyNodes = useMemo(
+    () => nodes.filter((node) => (nodeKeysByNodeId[node.id] ?? []).some((key) => activeProfileIDs.has(key.profile_id))),
+    [nodes, nodeKeysByNodeId, activeProfileIDs],
+  )
+  const sortedServiceReadyNodes = useMemo(
+    () => [...serviceReadyNodes].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })),
+    [serviceReadyNodes],
+  )
 
   const activeUsers = useMemo(() => users.filter((u) => u.active).length, [users])
-  const healthyNodes = useMemo(() => nodes.filter((n) => n.last_check_ok).length, [nodes])
+  const healthyNodes = useMemo(() => serviceReadyNodes.filter((n) => n.last_check_ok).length, [serviceReadyNodes])
   const nodeLinks = useMemo(() => users.filter((u) => !!u.subscribe_url).length, [users])
-  const unhealthyNodes = useMemo(() => nodes.filter((n) => n.last_check_at && !n.last_check_ok), [nodes])
+  const unhealthyNodes = useMemo(() => serviceReadyNodes.filter((n) => n.last_check_at && !n.last_check_ok), [serviceReadyNodes])
 
   return (
     <PageShell className="space-y-5">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="节点总数" value={nodes.length} change={nodes.length ? `${healthyNodes}/${nodes.length} 健康` : '暂无节点'} icon={Server} />
+        <StatCard title="节点总数" value={nodes.length} change={serviceReadyNodes.length ? `${healthyNodes}/${serviceReadyNodes.length} 健康` : '暂无可用节点'} icon={Server} />
         <StatCard title="活跃用户" value={activeUsers} change={users.length ? `${users.length} 用户总数` : '暂无用户'} icon={Users} />
         <StatCard title="订阅链接" value={nodeLinks} change={nodeLinks ? '已生成订阅分发' : '暂无订阅'} icon={Link2} />
         <StatCard
           title="健康节点"
-          value={nodes.length ? `${healthyNodes}/${nodes.length}` : 0}
+          value={serviceReadyNodes.length ? `${healthyNodes}/${serviceReadyNodes.length}` : 0}
           change={unhealthyNodes.length ? `${unhealthyNodes.length} 个节点异常` : '所有已检测节点正常'}
           changeTone={unhealthyNodes.length ? 'negative' : 'positive'}
           icon={Activity}
@@ -168,10 +196,10 @@ export default function Dashboard() {
             </Btn>
           </div>
           <div className="flex-1 overflow-auto">
-            {nodes.length === 0 ? (
-              <div className="px-5 py-10 text-sm text-soft">暂无节点数据</div>
+            {sortedServiceReadyNodes.length === 0 ? (
+              <div className="px-5 py-10 text-sm text-soft">暂无可用节点数据</div>
             ) : (
-              nodes.map((node) => <NodeHealthRow key={node.id} node={node} />)
+              sortedServiceReadyNodes.map((node) => <NodeHealthRow key={node.id} node={node} />)
             )}
           </div>
         </SurfaceCard>

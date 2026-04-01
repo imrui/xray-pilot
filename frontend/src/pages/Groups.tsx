@@ -177,26 +177,33 @@ export default function Groups() {
     },
     {
       key: 'name',
-      label: '分组',
+      label: '名称',
       render: (g: Group) => (
         <div className="space-y-1.5">
-          <div className="font-semibold">{g.name}</div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Tooltip
-              content={
-                g.node_ids.length > 0
-                  ? <GroupNodesTooltip names={g.node_ids.map((id) => nodeNameMap.get(id)).filter((name): name is string => Boolean(name))} />
-                  : '当前分组没有关联节点'
-              }
-              side="right"
-              className="max-w-[320px] whitespace-normal"
-            >
-              <span className="inline-flex">
-                <Badge label={`${g.node_count} 个节点`} variant="blue" />
-              </span>
-            </Tooltip>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">{g.name}</span>
+            <span className="text-xs text-faint">#{g.id}</span>
           </div>
         </div>
+      ),
+    },
+    {
+      key: 'node_count',
+      label: '节点数',
+      render: (g: Group) => (
+        <Tooltip
+          content={
+            g.node_ids.length > 0
+              ? <GroupNodesTooltip names={g.node_ids.map((id) => nodeNameMap.get(id)).filter((name): name is string => Boolean(name))} />
+              : '当前分组没有关联节点'
+          }
+          side="right"
+          className="max-w-[320px] whitespace-normal"
+        >
+          <span className="inline-flex">
+            <Badge label={`${g.node_count} 个节点`} variant="blue" />
+          </span>
+        </Tooltip>
       ),
     },
     {

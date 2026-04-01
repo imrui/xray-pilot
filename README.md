@@ -120,6 +120,25 @@ Manual installation steps:
 4. Copy [`config.yaml.example`](./config.yaml.example) to `config.yaml` and adjust the values.
 5. Start the service with `./xray-pilot`.
 
+### Node bootstrap
+
+For fresh nodes, use [`scripts/node-bootstrap.sh`](./scripts/node-bootstrap.sh) to prepare SSH access, install Xray, and optionally enable BBR before adding the node to the panel.
+
+Typical flow:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/scripts/node-bootstrap.sh | sudo bash
+```
+
+The script supports interactive public-key input, or you can provide `AUTHORIZED_KEYS` up front for non-interactive usage:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/scripts/node-bootstrap.sh | \
+sudo AUTHORIZED_KEYS=$'ssh-ed25519 AAAA... admin@main\nssh-ed25519 AAAA... root@main' bash
+```
+
+The script creates a timestamped backup of `sshd_config` before changing `PermitRootLogin`.
+
 ## Upgrade
 
 Existing Linux installations can be upgraded by re-running the installer:

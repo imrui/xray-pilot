@@ -105,6 +105,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     queryKey: ['nodes-all'],
     queryFn: () => nodeApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data?.list ?? []),
   })
+  const sortedNodes = [...(nodes ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
 
   const { data: currentKey, isFetching: loadingKey, refetch: refetchKey } = useQuery({
     queryKey: ['nodeKey', nodeId, profile.id],
@@ -206,7 +207,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
             label="目标节点"
             value={nodeId}
             onChange={setNodeId}
-            options={(nodes ?? []).map((n) => ({ value: n.id, label: `${n.name} (${n.ip})` }))}
+            options={sortedNodes.map((n) => ({ value: n.id, label: `${n.name} (${n.ip})` }))}
             placeholder="选择节点"
           />
         </FieldGroup>
@@ -418,11 +419,22 @@ export default function Profiles() {
     },
     {
       key: 'name',
-      label: '协议配置',
+      label: '名称',
       render: (p: InboundProfile) => (
         <div className="space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
             <span className="font-semibold">{p.name}</span>
+            <span className="text-xs text-faint">#{p.id}</span>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'meta',
+      label: '类型',
+      render: (p: InboundProfile) => (
+        <div className="space-y-1.5">
+          <div>
             <Badge label={protocolOptions.find((o) => o.value === p.protocol)?.label ?? p.protocol} variant={protocolBadge[p.protocol as Protocol] ?? 'gray'} />
           </div>
           <div className="text-xs text-soft">监听端口 {p.port}</div>

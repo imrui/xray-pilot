@@ -4,9 +4,22 @@ import (
 	"time"
 
 	"github.com/imrui/xray-pilot/internal/entity"
+	"gorm.io/gorm"
 )
 
 type NodeRepository struct{}
+
+func nodesWithActiveProtocolsScope(db *gorm.DB) *gorm.DB {
+	return db.Where(
+		`EXISTS (
+			SELECT 1
+			FROM node_profile_keys npk
+			JOIN inbound_profiles ip ON ip.id = npk.profile_id
+			WHERE npk.node_id = nodes.id AND ip.active = ?
+		)`,
+		true,
+	)
+}
 
 func NewNodeRepository() *NodeRepository {
 	return &NodeRepository{}
@@ -63,15 +76,17 @@ func (r *NodeRepository) UpdateSyncStatus(id uint, status entity.SyncStatus, has
 // GetDriftedNodes 查询需要同步的节点（drifted 或 failed）
 func (r *NodeRepository) GetDriftedNodes() ([]entity.Node, error) {
 	var nodes []entity.Node
-	err := DB.Where("sync_status IN ? AND active = ?",
-		[]entity.SyncStatus{entity.SyncStatusDrifted, entity.SyncStatusFailed, entity.SyncStatusPending},
-		true,
-	).Find(&nodes).Error
+	err := nodesWithActiveProtocolsScope(DB).
+		Where("sync_status IN ? AND active = ?",
+			[]entity.SyncStatus{entity.SyncStatusDrifted, entity.SyncStatusFailed, entity.SyncStatusPending},
+			true,
+		).
+		Find(&nodes).Error
 	return nodes, err
 }
 
 func (r *NodeRepository) CountSyncStatuses() (map[entity.SyncStatus]int64, error) {
-	rows, err := DB.Model(&entity.Node{}).
+	rows, err := nodesWithActiveProtocolsScope(DB.Model(&entity.Node{})).
 		Select("sync_status, COUNT(*) AS total").
 		Where("active = ?", true).
 		Group("sync_status").

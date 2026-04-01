@@ -40,6 +40,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 	if driftInterval > 0 {
 		go s.runLoop(ctx, "drift_check",
 			time.Duration(driftInterval)*time.Second,
+			0,
 			s.runDriftCheck,
 		)
 	}
@@ -47,14 +48,31 @@ func (s *Scheduler) Start(ctx context.Context) {
 	if healthInterval > 0 {
 		go s.runLoop(ctx, "health_check",
 			time.Duration(healthInterval)*time.Second,
+			15*time.Second,
 			s.runHealthCheck,
 		)
 	}
 }
 
 // runLoop 通用定时循环，启动时不立即执行（等待第一个 tick），ctx 取消时退出
-func (s *Scheduler) runLoop(ctx context.Context, name string, interval time.Duration, task func()) {
-	s.log.Info("定时任务已启动", zap.String("task", name), zap.Duration("interval", interval))
+func (s *Scheduler) runLoop(ctx context.Context, name string, interval time.Duration, initialDelay time.Duration, task func()) {
+	s.log.Info("定时任务已启动",
+		zap.String("task", name),
+		zap.Duration("interval", interval),
+		zap.Duration("initial_delay", initialDelay),
+	)
+
+	if initialDelay > 0 {
+		timer := time.NewTimer(initialDelay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			s.log.Info("定时任务已停止", zap.String("task", name))
+			return
+		case <-timer.C:
+		}
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -144,11 +145,37 @@ func (c *Client) UploadContent(content, remotePath string) error {
 
 // ReadRemoteFile 读取远端文件内容（stderr 重定向至 /dev/null，防止错误信息污染文件内容 hash）
 func (c *Client) ReadRemoteFile(remotePath string) (string, error) {
-	out, err := c.Run(fmt.Sprintf("cat %s 2>/dev/null", remotePath))
+	sess, err := c.client.NewSession()
 	if err != nil {
-		return "", fmt.Errorf("读取远端文件失败 (%s): %w", remotePath, err)
+		return "", fmt.Errorf("创建 SSH 会话失败: %w", err)
 	}
-	return out, nil
+	defer sess.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	sess.Stdout = &stdout
+	sess.Stderr = &stderr
+
+	quotedPath := shellQuote(remotePath)
+	cmd := fmt.Sprintf("sh -lc 'test -s %s && base64 < %s | tr -d \"\\n\"'", quotedPath, quotedPath)
+	if err := sess.Run(cmd); err != nil {
+		return "", fmt.Errorf("读取远端文件失败 (%s): %w\nstderr: %s", remotePath, err, strings.TrimSpace(stderr.String()))
+	}
+
+	encoded := strings.TrimSpace(stdout.String())
+	if encoded == "" {
+		return "", fmt.Errorf("读取远端文件失败 (%s): 远端内容为空", remotePath)
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("读取远端文件失败 (%s): base64 解码失败: %w", remotePath, err)
+	}
+	if len(decoded) == 0 {
+		return "", fmt.Errorf("读取远端文件失败 (%s): 解码后内容为空", remotePath)
+	}
+
+	return string(decoded), nil
 }
 
 // ReloadXray 重载 Xray 服务（systemctl 优先，回退 service）
@@ -312,4 +339,8 @@ func buildTOFUCallback(path string) (ssh.HostKeyCallback, error) {
 		}
 		return nil
 	}, nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }

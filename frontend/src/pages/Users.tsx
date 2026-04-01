@@ -521,8 +521,13 @@ export default function Users() {
                       />
                     </td>
                     <td className="px-4 py-3.5">
-                      <div className="font-semibold">{u.username}</div>
-                      <div className="text-xs text-soft">{u.real_name || '—'}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{u.username}</span>
+                        <span className="text-xs text-faint">#{u.id}</span>
+                      </div>
+                      <div className="text-xs text-soft">
+                        {u.real_name || '--'}
+                      </div>
                     </td>
                     <td className="px-4 py-3.5">
                       {u.group_name ? <Badge label={u.group_name} variant="blue" /> : <span className="text-xs text-soft">未分组</span>}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -19,6 +20,8 @@ type SyncService struct {
 	profileRepo *repository.InboundProfileRepository
 	settingSvc  *SettingService
 }
+
+var errNodeNoProtocols = errors.New("节点未绑定协议，无法生成可用配置")
 
 func NewSyncService() *SyncService {
 	return &SyncService{
@@ -114,8 +117,9 @@ func (s *SyncService) SyncDrifted() []SyncResult {
 	return results
 }
 
-// CheckDrift 重新生成期望配置，与远端文件比对；若不一致则标记漂移
-// 使用"生成对比"而非"存储 hash 对比"，避免 xray 规范化 JSON 或 SSH stderr 混入导致假阳性
+// CheckDrift 重新生成期望配置，区分“控制面配置已变化”和“远端配置漂移”：
+//   - 若当前期望 hash 与数据库记录的已同步 hash 不一致，说明源数据已变化，节点需要重新同步
+//   - 若当前期望 hash 与数据库记录一致，再读取远端文件；只有远端 hash 不一致才判定为远端漂移
 func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 	node, err := s.nodeRepo.FindByID(nodeID)
 	if err != nil {
@@ -131,23 +135,64 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 		return false, fmt.Errorf("生成期望配置失败: %w", err)
 	}
 
+	expectedHash := xray.ConfigHash(expectedContent)
+	if expectedHash != node.ConfigHash {
+		_ = s.nodeRepo.UpdateSyncStatus(nodeID, entity.SyncStatusDrifted, "")
+		if node.SyncStatus != entity.SyncStatusDrifted {
+			s.logRepo.Record(
+				"drift_check",
+				fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
+				false,
+				fmt.Sprintf("配置源已变化，节点需重新同步: last=%s expected=%s", shortHash(node.ConfigHash), expectedHash[:8]),
+				0,
+			)
+		}
+		return true, nil
+	}
+
 	params := s.sshParams(node)
 	remoteContent, err := xray.ReadRemoteConfig(params)
 	if err != nil {
-		return false, fmt.Errorf("读取远端配置失败: %w", err)
-	}
-
-	expectedHash := xray.ConfigHash(expectedContent)
-	remoteHash := xray.ConfigHash(remoteContent)
-	if expectedHash != remoteHash {
-		_ = s.nodeRepo.UpdateSyncStatus(nodeID, entity.SyncStatusDrifted, "")
 		s.logRepo.Record(
 			"drift_check",
 			fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
 			false,
-			fmt.Sprintf("配置漂移: expected=%s remote=%s", expectedHash[:8], remoteHash[:8]),
+			fmt.Sprintf("远端配置读取异常: %v", err),
 			0,
 		)
+		return false, fmt.Errorf("读取远端配置失败: %w", err)
+	}
+	remoteContent = strings.TrimSpace(remoteContent)
+	if remoteContent == "" {
+		s.logRepo.Record(
+			"drift_check",
+			fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
+			false,
+			"远端配置读取异常: 内容为空",
+			0,
+		)
+		return false, fmt.Errorf("远端配置为空")
+	}
+
+	remoteHash := xray.ConfigHash(remoteContent)
+	zap.L().Debug("漂移检测读取远端配置",
+		zap.String("node", node.Name),
+		zap.Uint("nodeID", node.ID),
+		zap.Int("remote_bytes", len(remoteContent)),
+		zap.String("expected_hash", shortHash(expectedHash)),
+		zap.String("remote_hash", shortHash(remoteHash)),
+	)
+	if expectedHash != remoteHash {
+		_ = s.nodeRepo.UpdateSyncStatus(nodeID, entity.SyncStatusDrifted, "")
+		if node.SyncStatus != entity.SyncStatusDrifted {
+			s.logRepo.Record(
+				"drift_check",
+				fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
+				false,
+				fmt.Sprintf("远端配置漂移: expected=%s remote=%s", expectedHash[:8], remoteHash[:8]),
+				0,
+			)
+		}
 		return true, nil
 	}
 	if node.SyncStatus != entity.SyncStatusSynced || node.ConfigHash != expectedHash {
@@ -186,6 +231,9 @@ func (s *SyncService) buildConfig(node *entity.Node) (string, []string, error) {
 	profileKeys, err := s.profileRepo.FindActiveKeysForNode(node.ID)
 	if err != nil {
 		return "", nil, fmt.Errorf("查询节点协议配置失败: %w", err)
+	}
+	if len(profileKeys) == 0 {
+		return "", nil, errNodeNoProtocols
 	}
 
 	// 查询节点对应分组内的激活用户
@@ -282,4 +330,14 @@ func (s *SyncService) failNode(node *entity.Node, errMsg string, elapsedMs int64
 		errMsg,
 		elapsedMs,
 	)
+}
+
+func shortHash(value string) string {
+	if len(value) >= 8 {
+		return value[:8]
+	}
+	if value == "" {
+		return "none"
+	}
+	return value
 }
