@@ -137,6 +137,9 @@ export const nodeApi = {
   upsertKey: (nodeId: number, profileId: number, settings: string) =>
     request.put<ApiResponse<NodeKey>>(`/nodes/${nodeId}/keys/${profileId}`, { settings }),
 
+  setKeyLock: (nodeId: number, profileId: number, locked: boolean) =>
+    request.patch<ApiResponse<null>>(`/nodes/${nodeId}/keys/${profileId}/lock`, { locked }),
+
   deleteKey: (nodeId: number, profileId: number) =>
     request.delete<ApiResponse<null>>(`/nodes/${nodeId}/keys/${profileId}`),
 

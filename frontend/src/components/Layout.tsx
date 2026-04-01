@@ -35,16 +35,16 @@ const navGroups = [
     items: [{ path: '/dashboard', label: '仪表总览', subtitle: '系统概览与快捷操作', icon: LayoutDashboard }],
   },
   {
+    title: '用户订阅',
+    items: [{ path: '/users', label: '用户管理', subtitle: '管理用户与订阅权限', icon: Users }],
+  },
+  {
     title: '资源管理',
     items: [
       { path: '/nodes', label: '节点管理', subtitle: '管理服务节点与配置同步', icon: Server },
       { path: '/profiles', label: '协议配置', subtitle: '维护协议模板与节点密钥', icon: Shield },
       { path: '/groups', label: '分组管理', subtitle: '管理节点分组和策略映射', icon: Layers },
     ],
-  },
-  {
-    title: '用户订阅',
-    items: [{ path: '/users', label: '用户管理', subtitle: '管理用户与订阅权限', icon: Users }],
   },
   {
     title: '运维工具',
@@ -166,7 +166,7 @@ export default function Layout() {
 
       <div className="flex min-h-screen w-full lg:h-full">
         <aside className={cn('hidden shrink-0 border-r border-[var(--border)] bg-[var(--sidebar)] transition-all duration-200 lg:flex lg:h-full lg:flex-col', sidebarWidth)}>
-          <div className="flex h-14 items-center gap-3 border-b border-[var(--border)] px-4">
+          <div className="flex h-16 items-center gap-3 border-b border-[var(--border)] px-4">
             <div className="flex h-9 w-9 items-center justify-center text-[var(--accent)]">
               <Logo size={32} className="text-[var(--accent)]" />
             </div>
@@ -215,7 +215,7 @@ export default function Layout() {
           <div className="border-t border-[var(--border)] p-3">
             {!collapsed && (
               <div className="px-1 pb-2 text-[11px] uppercase tracking-[0.12em] text-faint">
-                Version {APP_VERSION}
+                © 2026 Xray Pilot. {APP_VERSION}
               </div>
             )}
             <button
@@ -233,12 +233,12 @@ export default function Layout() {
 
         <main className="min-w-0 flex-1 lg:h-full">
           <div className="flex min-h-screen flex-col lg:h-full lg:min-h-0">
-            <header className="hidden h-14 items-center justify-between border-b border-[var(--border)] bg-[color:var(--panel-strong)]/92 px-6 backdrop-blur-xl lg:flex">
-              <div className="leading-tight">
+            <header className="hidden h-16 items-center justify-between border-b border-[var(--border)] bg-[color:var(--panel-strong)]/92 px-6 backdrop-blur-xl lg:flex">
+              <div className="flex flex-col justify-center leading-tight">
                 <div className="text-base font-semibold tracking-[-0.03em]">{currentView}</div>
                 <div className="mt-0.5 text-xs text-faint">{currentSubTitle}</div>
               </div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex h-full items-center gap-2.5">
                 <label className="relative hidden lg:block">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
                   <input

@@ -26,6 +26,7 @@ type NodeProfileKey struct {
 	Profile   *InboundProfile `gorm:"foreignKey:ProfileID"`
 	// Settings JSON 序列化的节点密钥材料，具体结构见 pkg/types（RealityKeyMaterial / TLSCertMaterial）
 	Settings  string `gorm:"type:text"`
+	Locked    bool   `gorm:"default:false"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

@@ -75,6 +75,7 @@ export default function Nodes() {
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm())
   const [err, setErr] = useState('')
   const [previewNode, setPreviewNode] = useState<Node | null>(null)
+  const [protocolNode, setProtocolNode] = useState<Node | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'synced' | 'drifted' | 'failed' | 'pending'>('all')
   const [regionFilter, setRegionFilter] = useState<string>('all')
@@ -87,6 +88,20 @@ export default function Nodes() {
   const { data: profilesData } = useQuery({
     queryKey: ['profiles-for-nodes'],
     queryFn: () => profileApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data!),
+  })
+  const { data: nodeKeysByNodeId = {} } = useQuery({
+    queryKey: ['node-keys-for-list', data?.list?.map((node) => node.id).join(',') ?? ''],
+    queryFn: async () => {
+      const nodes = data?.list ?? []
+      const entries = await Promise.all(
+        nodes.map(async (node) => {
+          const res = await nodeApi.getKeys(node.id)
+          return [node.id, res.data.data ?? []] as const
+        }),
+      )
+      return Object.fromEntries(entries) as Record<number, NodeKey[]>
+    },
+    enabled: (data?.list?.length ?? 0) > 0,
   })
 
   const regions = useMemo(() => {
@@ -233,6 +248,84 @@ export default function Nodes() {
     })
 
   const selectedNodes = filteredNodes.filter((n) => selectedIds.includes(n.id))
+  const activeProfiles = (profilesData?.list ?? []).filter((item) => item.active)
+  const activeProfileMap = new Map(activeProfiles.map((profile) => [profile.id, profile]))
+
+  const renderGroupCell = (groupNames?: string[]) => {
+    if (!groupNames || groupNames.length === 0) return <span className="text-soft">—</span>
+
+    const visible = groupNames.slice(0, 2)
+    const hiddenCount = groupNames.length - visible.length
+
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {visible.map((groupName) => (
+          <Badge key={groupName} label={groupName} variant="blue" />
+        ))}
+        {hiddenCount > 0 && (
+          <Tooltip
+            content={
+              <div className="space-y-1">
+                {groupNames.map((groupName) => (
+                  <div key={groupName}>{groupName}</div>
+                ))}
+              </div>
+            }
+            className="max-w-[240px] whitespace-normal"
+          >
+            <span tabIndex={0} className="inline-flex">
+              <Badge label={`+${hiddenCount}`} variant="gray" />
+            </span>
+          </Tooltip>
+        )}
+      </div>
+    )
+  }
+
+  const renderProtocolCell = (node: Node) => {
+    const matchedProfiles = (nodeKeysByNodeId[node.id] ?? [])
+      .map((key) => activeProfileMap.get(key.profile_id))
+      .filter((item): item is InboundProfile => Boolean(item))
+
+    if (matchedProfiles.length === 0) {
+      return <span className="text-soft">—</span>
+    }
+
+    const [firstProfile, ...restProfiles] = matchedProfiles
+
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setProtocolNode(node)}
+          className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+        >
+          {firstProfile.name}
+        </button>
+        {restProfiles.length > 0 && (
+          <Tooltip
+            side="right"
+            content={
+              <div className="space-y-1">
+                {matchedProfiles.map((profile) => (
+                  <div key={profile.id}>{profile.name}</div>
+                ))}
+              </div>
+            }
+            className="max-w-[240px] whitespace-normal"
+          >
+            <button
+              type="button"
+              onClick={() => setProtocolNode(node)}
+              className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+            >
+              +{restProfiles.length}
+            </button>
+          </Tooltip>
+        )}
+      </div>
+    )
+  }
 
   return (
     <PageShell className="space-y-6">
@@ -337,7 +430,7 @@ export default function Nodes() {
 
       <SurfaceCard className="overflow-visible">
         <div className="overflow-x-auto overflow-y-visible">
-          <table className="w-full min-w-[1330px] text-left text-sm">
+          <table className="w-full min-w-[1380px] text-left text-sm">
             <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
               <tr>
                 <th className="w-10 px-4 py-3">
@@ -353,10 +446,10 @@ export default function Nodes() {
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">连接地址</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">在线用户</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">Xray 版本</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">用户 / Xray</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">协议</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">最后同步</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">启用</th>
                 <th className="px-4 py-3 text-right text-[11px] font-medium uppercase tracking-[0.12em] text-faint">操作</th>
               </tr>
             </thead>
@@ -400,22 +493,26 @@ export default function Nodes() {
                       </Tooltip>
                     </td>
                     <td className="px-4 py-3.5">
-                      {n.group_names && n.group_names.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {n.group_names.map((groupName) => (
-                            <Badge key={groupName} label={groupName} variant="blue" />
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-soft">—</span>
-                      )}
+                      {renderGroupCell(n.group_names)}
                     </td>
-                    <td className="px-4 py-3.5">{n.online_user_count}</td>
-                    <td className="px-4 py-3.5 text-soft">{n.xray_version || '—'}</td>
-                    <td className="px-4 py-3.5 text-soft">{n.last_sync_at ? new Date(n.last_sync_at).toLocaleString('zh-CN') : '—'}</td>
+                    <td className="px-4 py-3.5">
+                      <div className="font-medium text-[var(--text)]">{n.online_user_count} 人</div>
+                      <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-soft">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            n.xray_version ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-500'
+                          }`}
+                        />
+                        <span>{n.xray_version ? `Xray ${n.xray_version}` : 'Xray —'}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {renderProtocolCell(n)}
+                    </td>
                     <td className="px-4 py-3.5">
                       <Switch checked={n.active} onChange={() => toggle.mutate(n.id)} />
                     </td>
+                    <td className="px-4 py-3.5 text-soft">{n.last_sync_at ? new Date(n.last_sync_at).toLocaleString('zh-CN') : '—'}</td>
                     <td className="px-4 py-3.5">
                       <div className="flex flex-col items-end gap-2">
                         <div className="flex items-center justify-end gap-2">
@@ -579,8 +676,19 @@ export default function Nodes() {
       {previewNode && (
         <PreviewConfigModal
           node={previewNode}
-          activeProfiles={(profilesData?.list ?? []).filter((item) => item.active)}
+          activeProfiles={activeProfiles}
           onClose={() => setPreviewNode(null)}
+        />
+      )}
+      {protocolNode && (
+        <NodeProtocolsModal
+          node={protocolNode}
+          profiles={profilesData?.list ?? []}
+          onPreview={() => {
+            setPreviewNode(protocolNode)
+            setProtocolNode(null)
+          }}
+          onClose={() => setProtocolNode(null)}
         />
       )}
     </PageShell>
@@ -675,5 +783,109 @@ function ProtocolSummary({ nodeKeys, activeProfiles }: { nodeKeys: NodeKey[]; ac
         <Badge key={profile.id} label={profile.name} variant="blue" />
       ))}
     </div>
+  )
+}
+
+function NodeProtocolsModal({
+  node,
+  profiles,
+  onPreview,
+  onClose,
+}: {
+  node: Node
+  profiles: InboundProfile[]
+  onPreview: () => void
+  onClose: () => void
+}) {
+  const { data: nodeKeys, isLoading, error } = useQuery({
+    queryKey: ['nodeKeysQuickView', node.id],
+    queryFn: () => nodeApi.getKeys(node.id).then((r) => r.data.data ?? []),
+    retry: false,
+  })
+
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]))
+  const boundProfiles = (nodeKeys ?? [])
+    .map((key) => ({ key, profile: profileMap.get(key.profile_id) }))
+    .filter((item): item is { key: NodeKey; profile: InboundProfile } => Boolean(item.profile))
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`节点协议概览 · ${node.name}`}
+      size="lg"
+      footer={
+        <div className="flex items-center gap-2">
+          <Btn variant="secondary" onClick={onClose}>关闭</Btn>
+          <Btn variant="secondary" onClick={onPreview}>
+            <FileCode className="h-4 w-4" />
+            查看完整配置
+          </Btn>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4 text-sm text-soft">
+          <div className="font-medium text-[var(--text)]">{node.name}</div>
+          <div className="mt-1">{node.ip}{node.domain ? ` / ${node.domain}` : ''}</div>
+        </div>
+        {isLoading && <p className="py-8 text-center text-sm text-soft">加载中…</p>}
+        {error && <p className="rounded-2xl border border-rose-500/20 bg-rose-500/8 p-4 text-sm text-rose-400">{(error as Error).message}</p>}
+        {!isLoading && !error && boundProfiles.length === 0 && (
+          <p className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4 text-sm text-soft">
+            当前节点未绑定任何协议，可继续通过协议配置页面补充节点密钥。
+          </p>
+        )}
+        {!isLoading && !error && boundProfiles.length > 0 && (
+          <div className="space-y-3">
+            {boundProfiles.map(({ key, profile }) => (
+              <div key={profile.id} className="rounded-2xl border border-[var(--border)] bg-[var(--panel-strong)] p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="font-semibold">{profile.name}</div>
+                  <Badge label={profile.protocol} variant="blue" />
+                  {key.locked && <Badge label="已锁定" variant="yellow" />}
+                </div>
+                <div className="mt-2 grid gap-2 text-xs text-soft md:grid-cols-3">
+                  <div>端口 {profile.port}</div>
+                  <div>模板 {profile.active ? '启用中' : '已停用'}</div>
+                  <div>更新时间 {new Date(key.updated_at).toLocaleString('zh-CN')}</div>
+                </div>
+                <pre className="mt-3 overflow-x-auto rounded-xl border border-[var(--border)] bg-slate-950/90 p-3 text-[11px] leading-5 text-slate-100">
+                  {formatKeySettingsPreview(key.settings)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+function formatKeySettingsPreview(settings: unknown) {
+  try {
+    const parsed = typeof settings === 'string' ? JSON.parse(settings) : settings
+    const text = JSON.stringify(redactSensitiveSettings(parsed), null, 2)
+    if (text.length <= 280) return text
+    return `${text.slice(0, 280)}\n...`
+  } catch {
+    return '当前节点协议参数无法预览'
+  }
+}
+
+function redactSensitiveSettings(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redactSensitiveSettings)
+  }
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+
+  const sensitiveKeys = new Set(['private_key', 'password', 'cert_key', 'certificate_key'])
+  return Object.fromEntries(
+    Object.entries(value).map(([key, innerValue]) => [
+      key,
+      sensitiveKeys.has(key) ? '***' : redactSensitiveSettings(innerValue),
+    ]),
   )
 }

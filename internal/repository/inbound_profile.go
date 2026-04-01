@@ -81,12 +81,29 @@ func (r *InboundProfileRepository) UpsertKey(key *entity.NodeProfileKey) error {
 		// 不存在则创建
 		return DB.Create(key).Error
 	}
+	if existing.Locked {
+		return ErrNodeKeyLocked
+	}
 	existing.Settings = key.Settings
 	return DB.Save(&existing).Error
 }
 
 // DeleteKey 删除节点密钥
 func (r *InboundProfileRepository) DeleteKey(nodeID, profileID uint) error {
+	var existing entity.NodeProfileKey
+	if err := DB.Where("node_id = ? AND profile_id = ?", nodeID, profileID).First(&existing).Error; err != nil {
+		return err
+	}
+	if existing.Locked {
+		return ErrNodeKeyLocked
+	}
 	return DB.Where("node_id = ? AND profile_id = ?", nodeID, profileID).
 		Delete(&entity.NodeProfileKey{}).Error
+}
+
+// SetKeyLocked 更新节点协议锁定状态
+func (r *InboundProfileRepository) SetKeyLocked(nodeID, profileID uint, locked bool) error {
+	return DB.Model(&entity.NodeProfileKey{}).
+		Where("node_id = ? AND profile_id = ?", nodeID, profileID).
+		Update("locked", locked).Error
 }

@@ -127,6 +127,9 @@ func (s *ProfileService) UpsertNodeKey(nodeID, profileID uint, req *dto.UpsertNo
 		Settings:  settingsJSON,
 	}
 	if err := s.profileRepo.UpsertKey(key); err != nil {
+		if errors.Is(err, repository.ErrNodeKeyLocked) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("保存节点密钥失败: %w", err)
 	}
 	_ = s.nodeRepo.MarkAllDrifted()
@@ -149,6 +152,9 @@ func (s *ProfileService) GetNodeKeys(nodeID uint) ([]dto.NodeKeyResponse, error)
 // DeleteNodeKey 删除节点与协议的关联密钥
 func (s *ProfileService) DeleteNodeKey(nodeID, profileID uint) error {
 	if err := s.profileRepo.DeleteKey(nodeID, profileID); err != nil {
+		if errors.Is(err, repository.ErrNodeKeyLocked) {
+			return err
+		}
 		return err
 	}
 	return s.nodeRepo.MarkAllDrifted()
@@ -199,10 +205,32 @@ func (s *ProfileService) KeygenForNode(nodeID, profileID uint) (*dto.NodeKeyResp
 		Settings:  string(settingsJSON),
 	}
 	if err := s.profileRepo.UpsertKey(key); err != nil {
+		if errors.Is(err, repository.ErrNodeKeyLocked) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("保存节点密钥失败: %w", err)
 	}
 	_ = s.nodeRepo.MarkAllDrifted()
 	return toNodeKeyResponse(key), nil
+}
+
+// SetNodeKeyLocked 更新节点协议锁定状态
+func (s *ProfileService) SetNodeKeyLocked(nodeID, profileID uint, locked bool) error {
+	keys, err := s.profileRepo.FindKeysForNode(nodeID)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, key := range keys {
+		if key.ProfileID == profileID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.New("节点协议不存在，请先保存节点密钥")
+	}
+	return s.profileRepo.SetKeyLocked(nodeID, profileID, locked)
 }
 
 // ---- 内部工具 ----
@@ -236,6 +264,7 @@ func toNodeKeyResponse(k *entity.NodeProfileKey) *dto.NodeKeyResponse {
 		NodeID:    k.NodeID,
 		ProfileID: k.ProfileID,
 		Settings:  settings,
+		Locked:    k.Locked,
 		CreatedAt: k.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: k.UpdatedAt.Format(time.RFC3339),
 	}

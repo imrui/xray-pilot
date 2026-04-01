@@ -11,6 +11,7 @@ import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { Tooltip } from '@/components/ui/Tooltip'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -28,6 +29,18 @@ function truncateDescription(text: string, limit = DESCRIPTION_PREVIEW_LIMIT) {
   const normalized = text.trim()
   if (normalized.length <= limit) return normalized
   return `${normalized.slice(0, limit)}...`
+}
+
+function GroupNodesTooltip({ names }: { names: string[] }) {
+  return (
+    <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
+      {names.map((name) => (
+        <div key={name} className="whitespace-nowrap">
+          {name}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
@@ -150,6 +163,7 @@ export default function Groups() {
     })
 
   const selectedGroups = filteredGroups.filter((g) => selectedIds.includes(g.id))
+  const nodeNameMap = new Map((allNodes ?? []).map((node) => [node.id, node.name]))
 
   const columns = [
     {
@@ -168,10 +182,27 @@ export default function Groups() {
         <div className="space-y-1.5">
           <div className="font-semibold">{g.name}</div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge label={`${g.node_count} 个节点`} variant="blue" />
+            <Tooltip
+              content={
+                g.node_ids.length > 0
+                  ? <GroupNodesTooltip names={g.node_ids.map((id) => nodeNameMap.get(id)).filter((name): name is string => Boolean(name))} />
+                  : '当前分组没有关联节点'
+              }
+              side="right"
+              className="max-w-[320px] whitespace-normal"
+            >
+              <span className="inline-flex">
+                <Badge label={`${g.node_count} 个节点`} variant="blue" />
+              </span>
+            </Tooltip>
           </div>
         </div>
       ),
+    },
+    {
+      key: 'active',
+      label: '状态',
+      render: (g: Group) => <Switch checked={g.active} onChange={(next) => toggle.mutate({ id: g.id, active: next })} />,
     },
     {
       key: 'description',
@@ -180,19 +211,13 @@ export default function Groups() {
         const text = g.description?.trim() || '未填写描述'
         const preview = truncateDescription(text)
         return (
-          <span
-            title={text}
-            className="block max-w-[280px] truncate text-xs text-soft"
-          >
-            {preview}
-          </span>
+          <Tooltip content={text} side="right" className="max-w-[320px] whitespace-normal">
+            <span className="block max-w-[280px] truncate text-xs text-soft">
+              {preview}
+            </span>
+          </Tooltip>
         )
       },
-    },
-    {
-      key: 'active',
-      label: '状态',
-      render: (g: Group) => <Switch checked={g.active} onChange={(next) => toggle.mutate({ id: g.id, active: next })} />,
     },
     {
       key: 'actions',

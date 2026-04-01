@@ -40,11 +40,17 @@ type UpsertNodeKeyRequest struct {
 	Settings json.RawMessage `json:"settings" binding:"required"` // JSON 对象: RealityKeyMaterial / TLSCertMaterial
 }
 
+// ToggleNodeKeyLockRequest 更新节点协议锁定状态
+type ToggleNodeKeyLockRequest struct {
+	Locked bool `json:"locked"`
+}
+
 // NodeKeyResponse 节点密钥材料响应（编辑场景返回可直接修改的 settings）
 type NodeKeyResponse struct {
 	NodeID    uint            `json:"node_id"`
 	ProfileID uint            `json:"profile_id"`
 	Settings  json.RawMessage `json:"settings"` // 返回 JSON 对象；Reality private_key 已解密
+	Locked    bool            `json:"locked"`
 	CreatedAt string          `json:"created_at"`
 	UpdatedAt string          `json:"updated_at"`
 }

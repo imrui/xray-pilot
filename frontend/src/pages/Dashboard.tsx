@@ -49,20 +49,42 @@ function logIcon(log: SyncLog) {
   return <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-500/10 text-rose-400"><AlertTriangle className="h-4 w-4" /></div>
 }
 
+function syncBadge(node: Node) {
+  switch (node.sync_status) {
+    case 'synced':
+      return <Badge label="已同步" variant="green" />
+    case 'failed':
+      return <Badge label="同步失败" variant="red" />
+    case 'drifted':
+    case 'pending':
+    default:
+      return <Badge label="待同步" variant="yellow" />
+  }
+}
+
 function NodeHealthRow({ node }: { node: Node }) {
   const ok = node.last_check_ok
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
-      <div className="flex items-center gap-3">
-        <div className={`h-2.5 w-2.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-        <span className="text-sm font-medium">{node.name}</span>
+    <div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-3">
+          <div className={`h-2.5 w-2.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+          <span className="text-sm font-medium">{node.name}</span>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-soft">
+          <span>{node.online_user_count} 人</span>
+          <span className="text-faint">|</span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${node.xray_version ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-500'}`} />
+            <span>{node.xray_version ? `Xray ${node.xray_version}` : 'Xray —'}</span>
+          </span>
+        </div>
       </div>
-      <div className="flex items-center gap-2">
-        {ok ? (
-          <span className="font-mono text-xs text-soft">{node.last_latency_ms ? `${node.last_latency_ms}ms` : '—'}</span>
-        ) : (
-          <Badge label="异常" variant="red" />
-        )}
+      <div className="flex min-w-[74px] flex-col items-end gap-2">
+        <span className="font-mono text-xs text-soft">{ok && node.last_latency_ms ? `${node.last_latency_ms}ms` : '—'}</span>
+        <div className="scale-[0.9] origin-right">
+          {syncBadge(node)}
+        </div>
       </div>
     </div>
   )
@@ -94,7 +116,7 @@ export default function Dashboard() {
   const unhealthyNodes = useMemo(() => nodes.filter((n) => n.last_check_at && !n.last_check_ok), [nodes])
 
   return (
-    <PageShell className="space-y-6">
+    <PageShell className="space-y-5">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard title="节点总数" value={nodes.length} change={nodes.length ? `${healthyNodes}/${nodes.length} 健康` : '暂无节点'} icon={Server} />
         <StatCard title="活跃用户" value={activeUsers} change={users.length ? `${users.length} 用户总数` : '暂无用户'} icon={Users} />
@@ -108,8 +130,8 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="grid gap-6 xl:min-h-[calc(100vh-19rem)] xl:grid-cols-[minmax(0,1fr)_520px]">
-        <SurfaceCard className="flex h-full min-h-[420px] flex-col overflow-hidden">
+      <div className="grid gap-5 xl:min-h-[calc(100vh-24rem)] xl:grid-cols-[minmax(0,1fr)_520px]">
+        <SurfaceCard className="flex h-full min-h-[360px] flex-col overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
             <h3 className="text-lg font-semibold">最近操作</h3>
             <a href="/logs" className="text-sm text-[var(--accent)] transition hover:opacity-80">查看全部</a>
@@ -119,22 +141,25 @@ export default function Dashboard() {
               <div className="px-5 py-10 text-sm text-soft">暂无日志记录</div>
             ) : (
               logs.map((log) => (
-                <div key={log.id} className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
-                  <div className="flex items-center gap-3">
+                <div key={log.id} className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
+                  <div className="min-w-0 flex items-start gap-3">
                     {logIcon(log)}
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-sm font-semibold">{log.action}</div>
-                      <div className="mt-1 text-sm text-soft">{log.target || log.message || '系统事件'}</div>
+                      <div className="mt-1 text-sm text-soft">{log.message || log.target || '系统事件'}</div>
                     </div>
                   </div>
-                  <div className="text-xs text-faint">{new Date(log.created_at).toLocaleString('zh-CN')}</div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-xs text-faint">{new Date(log.created_at).toLocaleString('zh-CN')}</div>
+                    <div className="mt-1 text-xs text-faint">{log.target || '系统事件'}</div>
+                  </div>
                 </div>
               ))
             )}
           </div>
         </SurfaceCard>
 
-        <SurfaceCard className="flex h-full min-h-[420px] flex-col overflow-hidden">
+        <SurfaceCard className="flex h-full min-h-[360px] flex-col overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
             <h3 className="text-lg font-semibold">节点健康</h3>
             <Btn variant="ghost" onClick={() => void nodesQuery.refetch()}>

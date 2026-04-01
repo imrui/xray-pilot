@@ -106,7 +106,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     queryFn: () => nodeApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data?.list ?? []),
   })
 
-  const { isFetching: loadingKey } = useQuery({
+  const { data: currentKey, isFetching: loadingKey, refetch: refetchKey } = useQuery({
     queryKey: ['nodeKey', nodeId, profile.id],
     queryFn: async () => {
       const res = await nodeApi.getKeys(Number(nodeId))
@@ -122,12 +122,15 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     enabled: !!nodeId,
   })
 
+  const keyLocked = currentKey?.locked ?? false
+
   const save = useMutation({
     mutationFn: () => nodeApi.upsertKey(Number(nodeId), profile.id, settings),
     onSuccess: () => {
       setMsg('已保存')
       setMsgType('ok')
       qc.invalidateQueries({ queryKey: ['nodes'] })
+      void refetchKey()
     },
     onError: (e: Error) => {
       setMsg(`保存失败: ${e.message}`)
@@ -137,18 +140,21 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
 
   const keygen = useMutation({
     mutationFn: async () => {
-      const res = await nodeApi.keygen()
-      const keys = res.data.data
-      if (!keys) throw new Error('密钥生成失败')
-      return JSON.stringify(
-        {
-          private_key: keys.private_key,
-          public_key: keys.public_key,
-          short_ids: generateShortIds(6),
-        },
-        null,
-        2,
-      )
+      if (profile.protocol === 'vless-reality') {
+        const res = await nodeApi.keygen()
+        const keys = res.data.data
+        if (!keys) throw new Error('密钥生成失败')
+        return JSON.stringify(
+          {
+            private_key: keys.private_key,
+            public_key: keys.public_key,
+            short_ids: generateShortIds(6),
+          },
+          null,
+          2,
+        )
+      }
+      return stringifySettings(profile.settings)
     },
     onSuccess: (nextSettings) => {
       setSettings(nextSettings)
@@ -167,16 +173,29 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     setMsgType('ok')
   }
 
+  const lockToggle = useMutation({
+    mutationFn: (locked: boolean) => nodeApi.setKeyLock(Number(nodeId), profile.id, locked),
+    onSuccess: async (_, locked) => {
+      setMsg(locked ? '已锁定该节点协议' : '已解除锁定')
+      setMsgType('ok')
+      await refetchKey()
+    },
+    onError: (e: Error) => {
+      setMsg(`操作失败: ${e.message}`)
+      setMsgType('err')
+    },
+  })
+
   return (
     <Drawer
       open
       onClose={onClose}
       title={`配置节点密钥 · ${profile.name}`}
-      description="先选择目标节点，再生成或覆写该节点对应协议的密钥材料。"
+      description="先选择目标节点，再生成或覆写该节点对应协议的密钥材料；锁定入口也在这里。"
       footer={
         <>
           <Btn variant="secondary" onClick={onClose}>关闭</Btn>
-          <Btn loading={save.isPending} onClick={() => save.mutate()} disabled={!nodeId || !settings}>保存密钥</Btn>
+          <Btn loading={save.isPending} onClick={() => save.mutate()} disabled={!nodeId || !settings || keyLocked}>保存密钥</Btn>
         </>
       }
       width="lg"
@@ -192,23 +211,45 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
           />
         </FieldGroup>
 
-        <FieldGroup title="密钥参数" description="支持一键生成、模板填充和手动编辑。保存空对象 `{}` 表示该节点继承协议默认参数。">
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-soft">{loadingKey ? '正在加载当前密钥…' : '保持 JSON 结构正确后再保存；只保存后该协议才会绑定到当前节点。'}</div>
-            <div className="flex gap-2">
+        <FieldGroup title="密钥参数与锁定" description="支持一键生成、模板填充、锁定和手动编辑。保存空对象 `{}` 表示该节点继承协议默认参数。">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1 text-xs text-soft">
+              <div>{loadingKey ? '正在加载当前密钥…' : '保持 JSON 结构正确后再保存；只保存后该协议才会绑定到当前节点。'}</div>
+              {nodeId && (
+                <div className={keyLocked ? 'text-amber-500' : ''}>
+                  {currentKey
+                    ? keyLocked
+                      ? '当前节点协议已锁定，需先解锁才能修改、删除或重新生成。'
+                      : '当前节点协议未锁定，可按需调整。'
+                    : '当前节点尚未保存此协议密钥，保存后可进一步锁定。'}
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {currentKey && (
+                <Btn
+                  variant="secondary"
+                  loading={lockToggle.isPending}
+                  onClick={() => lockToggle.mutate(!keyLocked)}
+                  disabled={!nodeId}
+                >
+                  {keyLocked ? '解除锁定' : '锁定协议'}
+                </Btn>
+              )}
               {profile.protocol === 'vless-reality' && (
-                <Btn variant="secondary" loading={keygen.isPending} onClick={() => keygen.mutate()} disabled={!nodeId}>
+                <Btn variant="secondary" loading={keygen.isPending} onClick={() => keygen.mutate()} disabled={!nodeId || keyLocked}>
                   <Sparkles className="h-4 w-4" />
                   一键生成
                 </Btn>
               )}
-              <Btn variant="secondary" onClick={fillTemplate}>填充模板</Btn>
+              <Btn variant="secondary" onClick={fillTemplate} disabled={!nodeId || keyLocked}>填充模板</Btn>
             </div>
           </div>
           <textarea
             value={settings}
             onChange={(e) => setSettings(e.target.value)}
             rows={12}
+            disabled={keyLocked}
             className="min-h-[260px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
             placeholder='{"private_key": "...", "public_key": "...", "short_ids": ["..."]}'
           />
@@ -410,7 +451,7 @@ export default function Profiles() {
             className="inline-flex h-9 items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-semibold text-[var(--accent)] transition hover:bg-[var(--panel-muted)]"
           >
             <KeyRound className="h-3.5 w-3.5" />
-            配置密钥
+            密钥 / 锁定
           </button>
           <ActionMenu
             items={[

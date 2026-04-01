@@ -63,6 +63,7 @@ func RegisterRoutes(r *gin.Engine) {
 		api.GET("/nodes/:id/keys", profileH.GetNodeKeys)
 		api.POST("/nodes/:id/keys/:profile_id/keygen", profileH.KeygenNodeKey)
 		api.PUT("/nodes/:id/keys/:profile_id", profileH.UpsertNodeKey)
+		api.PATCH("/nodes/:id/keys/:profile_id/lock", profileH.ToggleNodeKeyLock)
 		api.DELETE("/nodes/:id/keys/:profile_id", profileH.DeleteNodeKey)
 
 		// 协议接入配置（InboundProfile）

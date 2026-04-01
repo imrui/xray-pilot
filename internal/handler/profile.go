@@ -133,6 +133,30 @@ func (h *ProfileHandler) DeleteNodeKey(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// ToggleNodeKeyLock 更新节点协议锁定状态
+func (h *ProfileHandler) ToggleNodeKeyLock(c *gin.Context) {
+	nodeID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的节点ID")
+		return
+	}
+	profileID, err := strconv.ParseUint(c.Param("profile_id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的协议配置ID")
+		return
+	}
+	var req dto.ToggleNodeKeyLockRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := h.svc.SetNodeKeyLocked(uint(nodeID), uint(profileID), req.Locked); err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
 // KeygenNodeKey 为节点+协议自动生成并存储密钥对（仅支持 vless-reality）
 func (h *ProfileHandler) KeygenNodeKey(c *gin.Context) {
 	nodeID, err := strconv.ParseUint(c.Param("id"), 10, 64)
