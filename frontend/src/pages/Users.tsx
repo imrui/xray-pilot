@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, Search, Send } from 'lucide-react'
+import { ChevronDown, ChevronUp, Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, RefreshCw, Search, Send, Unplug } from 'lucide-react'
 import { userApi, groupApi } from '@/lib/api'
 import type { FeishuPushResult, User } from '@/types'
 import { Badge } from '@/components/ui/Badge'
@@ -147,6 +147,7 @@ export default function Users() {
   const [groupFilter, setGroupFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [copiedUserId, setCopiedUserId] = useState<number | null>(null)
+  const [showFeishuDetails, setShowFeishuDetails] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['users', page, pageSize],
@@ -173,6 +174,7 @@ export default function Users() {
       const expiresAt = toApiDateTime(form.expires_at)
       if (drawer.user) {
         return userApi.update(drawer.user.id, {
+          username: form.username,
           real_name: form.real_name,
           group_id: groupId ?? null,
           expires_at: expiresAt,
@@ -249,6 +251,7 @@ export default function Users() {
     setForm(next)
     setInitialForm(next)
     setErr('')
+    setShowFeishuDetails(false)
     setDrawer({ open: true })
   }
 
@@ -268,6 +271,7 @@ export default function Users() {
     setForm(next)
     setInitialForm(next)
     setErr('')
+    setShowFeishuDetails(false)
     setDrawer({ open: true, user: u })
   }
 
@@ -697,19 +701,11 @@ export default function Users() {
         }
       >
         <div className="space-y-4">
-          <FieldGroup title="基础信息" description="用户标识、展示名称和所属分组。">
-            {!drawer.user && (
-              <div className="space-y-1.5">
-                <Field label="用户名 *" value={form.username} onChange={f('username')} placeholder="如：alice01" />
-                <p className="text-xs text-soft">建议使用字母和数字组合；该名称会展示在客户端订阅信息中。</p>
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <Field label="真实姓名" value={form.real_name} onChange={f('real_name')} placeholder="如：张三 / 测试账号" />
-              <p className="text-xs text-soft">仅用于后台显示与运维识别，不会出现在客户端。</p>
-            </div>
+          <FieldGroup title="基础信息" description="用户标识、后台识别与订阅分组。">
+            <Field label="用户名（客户端显示） *" value={form.username} onChange={f('username')} placeholder="如：alice01" />
+            <Field label="真实姓名（后台识别）" value={form.real_name} onChange={f('real_name')} placeholder="后台识别用，可留空" />
             <SelectField
-              label="所属分组"
+              label="订阅分组"
               value={form.group_id}
               onChange={(v) => setForm((p) => ({ ...p, group_id: v }))}
               options={groupOptions}
@@ -719,14 +715,14 @@ export default function Users() {
 
           <FieldGroup title="订阅策略" description="有效期为空时视为永久有效。">
             <Field label="过期时间" type="datetime-local" value={form.expires_at} onChange={f('expires_at')} />
-            <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="例如：测试账号 / 临时用户" />
+            <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="可选备注" />
           </FieldGroup>
 
-          <FieldGroup title="飞书绑定" description="飞书绑定是可选能力。关闭时不会推送飞书消息，但已保存的飞书信息会保留。">
+          <FieldGroup title="飞书消息" description="可选能力。关闭后不发送飞书消息，但绑定信息会保留。">
             <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2.5">
               <div>
                 <div className="text-[12px] font-medium text-soft">启用飞书消息</div>
-                <div className="mt-1 text-xs text-soft">关闭时不推送飞书消息，但已绑定信息会保留。</div>
+                <div className="mt-1 text-xs text-soft">开启后支持机器人识别和后台主动推送。</div>
               </div>
               <Switch
                 checked={form.feishu_enabled === 'true'}
@@ -765,44 +761,61 @@ export default function Users() {
                       disabled={!form.feishu_email}
                     >
                       <Send className="h-4 w-4" />
-                      {isFeishuAuthorized(drawer.user) ? '重新绑定' : '绑定飞书用户'}
+                      检测飞书邮箱
                     </Btn>
-                    {isFeishuAuthorized(drawer.user) && (
-                      <Btn
-                        variant="secondary"
-                        onClick={() => {
-                          setErr('')
-                          userApi.unbindFeishu(drawer.user!.id)
-                            .then((res) => {
-                              const patch = res.data.data
-                              if (!patch) return
-                              const nextUser = {
-                                ...drawer.user!,
-                                ...patch,
-                              } as User
-                              pushToast({
-                                title: '飞书绑定已清除',
-                                description: `${nextUser.username} 的飞书绑定信息已移除。`,
-                                variant: 'success',
-                              })
-                              openEdit(nextUser)
-                              invalidate()
-                            })
-                            .catch((e: Error) => setErr(e.message))
-                        }}
-                      >
-                        清除绑定
-                      </Btn>
-                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-soft">请先保存用户，再执行飞书绑定。</p>
                 )}
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="Feishu Open ID" value={form.feishu_open_id} readOnly placeholder="绑定后自动写入" />
-                  <Field label="Feishu Union ID" value={form.feishu_union_id} readOnly placeholder="绑定后自动写入" />
+                <div className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)]">
+                  <button
+                    type="button"
+                    onClick={() => setShowFeishuDetails((prev) => !prev)}
+                    className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-[var(--text)]"
+                  >
+                    <span>查看绑定详情</span>
+                    {showFeishuDetails ? <ChevronUp className="h-4 w-4 text-soft" /> : <ChevronDown className="h-4 w-4 text-soft" />}
+                  </button>
+                  {showFeishuDetails && (
+                    <div className="space-y-4 border-t border-[var(--border)] p-3">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="Feishu Open ID" value={form.feishu_open_id} onChange={f('feishu_open_id')} placeholder="可手动填写" />
+                        <Field label="Feishu Union ID" value={form.feishu_union_id} onChange={f('feishu_union_id')} placeholder="可手动填写" />
+                      </div>
+                      <Field label="Feishu Chat ID" value={form.feishu_chat_id} onChange={f('feishu_chat_id')} placeholder="可手动填写" />
+                      {drawer.user && isFeishuAuthorized(drawer.user) && (
+                        <div className="flex justify-start">
+                          <Btn
+                            variant="secondary"
+                            onClick={() => {
+                              setErr('')
+                              userApi.unbindFeishu(drawer.user!.id)
+                                .then((res) => {
+                                  const patch = res.data.data
+                                  if (!patch) return
+                                  const nextUser = {
+                                    ...drawer.user!,
+                                    ...patch,
+                                  } as User
+                                  pushToast({
+                                    title: '飞书绑定已清除',
+                                    description: `${nextUser.username} 的飞书身份信息已移除。`,
+                                    variant: 'success',
+                                  })
+                                  openEdit(nextUser)
+                                  invalidate()
+                                })
+                                .catch((e: Error) => setErr(e.message))
+                            }}
+                          >
+                            <Unplug className="h-4 w-4" />
+                            清除飞书身份
+                          </Btn>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <Field label="Feishu Chat ID" value={form.feishu_chat_id} readOnly placeholder="如有可用值会自动写入" />
                 {drawer.user && (
                   <p className="text-xs text-soft">
                     当前状态：
@@ -859,6 +872,7 @@ export default function Users() {
                     if (ok) resetToken.mutate(drawer.user!.id)
                   }}
                 >
+                  <RefreshCw className="h-4 w-4" />
                   重置订阅链接
                 </Btn>
               </div>

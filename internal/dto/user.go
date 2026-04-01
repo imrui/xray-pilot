@@ -21,6 +21,7 @@ type CreateUserRequest struct {
 
 // UpdateUserRequest 更新订阅用户请求
 type UpdateUserRequest struct {
+	Username      *string         `json:"username"`
 	RealName      *string         `json:"real_name"`
 	GroupID       json.RawMessage `json:"group_id"`
 	Active        *bool           `json:"active"`

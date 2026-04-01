@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,13 @@ import (
 
 type FeishuHandler struct {
 	svc *service.FeishuService
+}
+
+var feishuEventDeduper = struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}{
+	seen: make(map[string]time.Time),
 }
 
 func NewFeishuHandler() *FeishuHandler {
@@ -35,6 +43,7 @@ type feishuEventRequest struct {
 	Header struct {
 		EventType string `json:"event_type"`
 		Token     string `json:"token"`
+		EventID   string `json:"event_id"`
 	} `json:"header"`
 	Event struct {
 		Sender struct {
@@ -115,6 +124,12 @@ func (h *FeishuHandler) Events(c *gin.Context) {
 		return
 	}
 
+	eventID := strings.TrimSpace(req.Header.EventID)
+	if eventID != "" && isDuplicateFeishuEvent(eventID) {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "duplicate ignored"})
+		return
+	}
+
 	var content struct {
 		Text string `json:"text"`
 	}
@@ -125,26 +140,44 @@ func (h *FeishuHandler) Events(c *gin.Context) {
 
 	keyword := strings.TrimSpace(strings.ToLower(content.Text))
 	h.svc.RecordWebhookDebug(openID, unionID, keyword)
-
-	switch keyword {
-	case "帮助", "help":
-		_ = h.svc.SendHelpMessage(openID)
-	case "订阅", "链接", "二维码":
-		user, err := h.svc.ResolveAuthorizedUser(openID, unionID)
-		if err != nil || user == nil {
-			_ = h.svc.SendUnboundMessage(openID)
-			break
-		}
-		if !user.FeishuEnabled {
-			_ = h.svc.SendTextMessageForUser(openID, h.svc.BuildDisabledText())
-			break
-		}
-		_ = h.svc.SendSubscriptionMessage(openID, user)
-	default:
-		_ = h.svc.SendHelpMessage(openID)
-	}
-
 	c.JSON(http.StatusOK, gin.H{"code": 0})
+
+	go func(openID, unionID, keyword string) {
+		switch keyword {
+		case "帮助", "help":
+			_ = h.svc.SendHelpMessage(openID)
+		case "订阅", "链接", "二维码":
+			user, err := h.svc.ResolveAuthorizedUser(openID, unionID)
+			if err != nil || user == nil {
+				_ = h.svc.SendUnboundMessage(openID)
+				return
+			}
+			if !user.FeishuEnabled {
+				_ = h.svc.SendTextMessageForUser(openID, h.svc.BuildDisabledText())
+				return
+			}
+			_ = h.svc.SendSubscriptionMessage(openID, user)
+		default:
+			_ = h.svc.SendHelpMessage(openID)
+		}
+	}(openID, unionID, keyword)
+}
+
+func isDuplicateFeishuEvent(eventID string) bool {
+	now := time.Now()
+	feishuEventDeduper.mu.Lock()
+	defer feishuEventDeduper.mu.Unlock()
+
+	for id, ts := range feishuEventDeduper.seen {
+		if now.Sub(ts) > 10*time.Minute {
+			delete(feishuEventDeduper.seen, id)
+		}
+	}
+	if _, exists := feishuEventDeduper.seen[eventID]; exists {
+		return true
+	}
+	feishuEventDeduper.seen[eventID] = now
+	return false
 }
 
 func (h *FeishuHandler) PushUser(c *gin.Context) {

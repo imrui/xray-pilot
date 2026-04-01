@@ -18,7 +18,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 const statusMeta: Record<SyncStatus, { label: string; variant: 'green' | 'yellow' | 'red' | 'gray'; tip: string }> = {
   synced: { label: '已同步', variant: 'green', tip: '配置已是最新' },
-  drifted: { label: '配置漂移', variant: 'yellow', tip: '配置已变更，需要重新同步' },
+  drifted: { label: '待同步', variant: 'yellow', tip: '检测到配置变更或远端配置不一致，建议重新同步' },
   failed: { label: '同步失败', variant: 'red', tip: '同步失败，建议先测试 SSH 连通性' },
   pending: { label: '待同步', variant: 'gray', tip: '节点尚未同步，请点击同步按钮' },
 }
@@ -256,7 +256,7 @@ export default function Nodes() {
             >
               <option value="all">全部状态</option>
               <option value="synced">已同步</option>
-              <option value="drifted">配置漂移</option>
+              <option value="drifted">待同步</option>
               <option value="failed">同步失败</option>
               <option value="pending">待同步</option>
             </select>
@@ -335,9 +335,9 @@ export default function Nodes() {
         </SurfaceCard>
       )}
 
-      <SurfaceCard className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1240px] text-left text-sm">
+      <SurfaceCard className="overflow-visible">
+        <div className="overflow-x-auto overflow-y-visible">
+          <table className="w-full min-w-[1330px] text-left text-sm">
             <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
               <tr>
                 <th className="w-10 px-4 py-3">
@@ -354,6 +354,7 @@ export default function Nodes() {
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">在线用户</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">Xray 版本</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">最后同步</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">启用</th>
                 <th className="px-4 py-3 text-right text-[11px] font-medium uppercase tracking-[0.12em] text-faint">操作</th>
@@ -362,11 +363,11 @@ export default function Nodes() {
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={10} className="px-4 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredNodes.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
+                  <td colSpan={10} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
                 </tr>
               ) : (
                 filteredNodes.map((n) => (
@@ -389,7 +390,7 @@ export default function Nodes() {
                       <div className="text-xs text-soft">{n.domain || '—'}</div>
                     </td>
                     <td className="px-4 py-3.5">
-                      <Tooltip content={(statusMeta[n.sync_status] ?? statusMeta.pending).tip}>
+                      <Tooltip content={(statusMeta[n.sync_status] ?? statusMeta.pending).tip} side="right" className="max-w-[220px] whitespace-normal">
                         <span tabIndex={0} className="inline-flex">
                           <Badge
                             label={(statusMeta[n.sync_status] ?? statusMeta.pending).label}
@@ -410,6 +411,7 @@ export default function Nodes() {
                       )}
                     </td>
                     <td className="px-4 py-3.5">{n.online_user_count}</td>
+                    <td className="px-4 py-3.5 text-soft">{n.xray_version || '—'}</td>
                     <td className="px-4 py-3.5 text-soft">{n.last_sync_at ? new Date(n.last_sync_at).toLocaleString('zh-CN') : '—'}</td>
                     <td className="px-4 py-3.5">
                       <Switch checked={n.active} onChange={() => toggle.mutate(n.id)} />

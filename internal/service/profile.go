@@ -18,10 +18,14 @@ import (
 // ProfileService 协议接入配置管理服务
 type ProfileService struct {
 	profileRepo *repository.InboundProfileRepository
+	nodeRepo    *repository.NodeRepository
 }
 
 func NewProfileService() *ProfileService {
-	return &ProfileService{profileRepo: repository.NewInboundProfileRepository()}
+	return &ProfileService{
+		profileRepo: repository.NewInboundProfileRepository(),
+		nodeRepo:    repository.NewNodeRepository(),
+	}
 }
 
 func (s *ProfileService) Create(req *dto.CreateProfileRequest) (*dto.ProfileResponse, error) {
@@ -40,6 +44,7 @@ func (s *ProfileService) Create(req *dto.CreateProfileRequest) (*dto.ProfileResp
 	if err := s.profileRepo.Create(p); err != nil {
 		return nil, fmt.Errorf("创建协议配置失败: %w", err)
 	}
+	_ = s.nodeRepo.MarkAllDrifted()
 	return toProfileResponse(p), nil
 }
 
@@ -69,11 +74,15 @@ func (s *ProfileService) Update(id uint, req *dto.UpdateProfileRequest) (*dto.Pr
 	if err := s.profileRepo.Update(p); err != nil {
 		return nil, err
 	}
+	_ = s.nodeRepo.MarkAllDrifted()
 	return toProfileResponse(p), nil
 }
 
 func (s *ProfileService) Delete(id uint) error {
-	return s.profileRepo.Delete(id)
+	if err := s.profileRepo.Delete(id); err != nil {
+		return err
+	}
+	return s.nodeRepo.MarkAllDrifted()
 }
 
 func (s *ProfileService) List(page, pageSize int) ([]dto.ProfileResponse, int64, error) {
@@ -120,6 +129,7 @@ func (s *ProfileService) UpsertNodeKey(nodeID, profileID uint, req *dto.UpsertNo
 	if err := s.profileRepo.UpsertKey(key); err != nil {
 		return nil, fmt.Errorf("保存节点密钥失败: %w", err)
 	}
+	_ = s.nodeRepo.MarkAllDrifted()
 	return toNodeKeyResponse(key), nil
 }
 
@@ -138,7 +148,10 @@ func (s *ProfileService) GetNodeKeys(nodeID uint) ([]dto.NodeKeyResponse, error)
 
 // DeleteNodeKey 删除节点与协议的关联密钥
 func (s *ProfileService) DeleteNodeKey(nodeID, profileID uint) error {
-	return s.profileRepo.DeleteKey(nodeID, profileID)
+	if err := s.profileRepo.DeleteKey(nodeID, profileID); err != nil {
+		return err
+	}
+	return s.nodeRepo.MarkAllDrifted()
 }
 
 // KeygenForNode 为节点+协议自动生成并存储密钥对（仅支持 vless-reality）
@@ -188,6 +201,7 @@ func (s *ProfileService) KeygenForNode(nodeID, profileID uint) (*dto.NodeKeyResp
 	if err := s.profileRepo.UpsertKey(key); err != nil {
 		return nil, fmt.Errorf("保存节点密钥失败: %w", err)
 	}
+	_ = s.nodeRepo.MarkAllDrifted()
 	return toNodeKeyResponse(key), nil
 }
 

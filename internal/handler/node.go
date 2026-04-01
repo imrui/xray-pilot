@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/repository"
@@ -251,5 +252,18 @@ func (h *NodeHandler) TestSSH(c *gin.Context) {
 	}
 
 	_ = h.nodeRepo.UpdateLastCheck(node.ID, true, latencyMs)
+	client, connErr := xssh.Connect(xssh.Config{
+		Host:           node.IP,
+		Port:           sshPort,
+		User:           sshUser,
+		KeyPath:        keyPath,
+		KnownHostsPath: h.setting.Get(service.KeySSHKnownHostsPath),
+	})
+	if connErr == nil {
+		if version, versionErr := client.GetXrayVersion(); versionErr == nil {
+			_ = h.nodeRepo.UpdateXrayStatus(node.ID, true, version)
+		}
+		client.Close()
+	}
 	response.Success(c, gin.H{"ok": true, "latency_ms": latencyMs})
 }

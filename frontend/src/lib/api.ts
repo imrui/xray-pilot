@@ -26,6 +26,7 @@ export const userApi = {
   }) => request.post<ApiResponse<User>>('/users', data),
 
   update: (id: number, data: {
+    username?: string
     real_name?: string
     group_id?: number | null
     active?: boolean

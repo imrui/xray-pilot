@@ -16,10 +16,14 @@ import (
 
 type UserService struct {
 	userRepo *repository.UserRepository
+	nodeRepo *repository.NodeRepository
 }
 
 func NewUserService() *UserService {
-	return &UserService{userRepo: repository.NewUserRepository()}
+	return &UserService{
+		userRepo: repository.NewUserRepository(),
+		nodeRepo: repository.NewNodeRepository(),
+	}
 }
 
 func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.UserResponse, error) {
@@ -48,6 +52,7 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, fmt.Errorf("创建用户失败: %w", err)
 	}
+	_ = s.nodeRepo.MarkAllDrifted()
 	return s.toResponse(user, baseURL), nil
 }
 
@@ -56,6 +61,17 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	if err != nil {
 		return nil, errors.New("用户不存在")
 	}
+	shouldMarkSync := false
+	if req.Username != nil {
+		username := strings.TrimSpace(*req.Username)
+		if username == "" {
+			return nil, fmt.Errorf("用户名不能为空")
+		}
+		if user.Username != username {
+			shouldMarkSync = true
+		}
+		user.Username = username
+	}
 	if req.RealName != nil {
 		user.RealName = *req.RealName
 	}
@@ -63,6 +79,9 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		groupID, err := parseOptionalUint(req.GroupID)
 		if err != nil {
 			return nil, fmt.Errorf("解析分组失败: %w", err)
+		}
+		if (user.GroupID == nil) != (groupID == nil) || (user.GroupID != nil && groupID != nil && *user.GroupID != *groupID) {
+			shouldMarkSync = true
 		}
 		user.GroupID = groupID
 	}
@@ -85,12 +104,18 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		user.FeishuChatID = *req.FeishuChatID
 	}
 	if req.Active != nil {
+		if user.Active != *req.Active {
+			shouldMarkSync = true
+		}
 		user.Active = *req.Active
 	}
 	if req.ExpiresAt != nil {
 		expiresAt, err := parseOptionalTime(req.ExpiresAt)
 		if err != nil {
 			return nil, fmt.Errorf("解析过期时间失败: %w", err)
+		}
+		if (user.ExpiresAt == nil) != (expiresAt == nil) || (user.ExpiresAt != nil && expiresAt != nil && !user.ExpiresAt.Equal(*expiresAt)) {
+			shouldMarkSync = true
 		}
 		user.ExpiresAt = expiresAt
 	}
@@ -103,11 +128,17 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	if err := s.userRepo.Update(user); err != nil {
 		return nil, err
 	}
+	if shouldMarkSync {
+		_ = s.nodeRepo.MarkAllDrifted()
+	}
 	return s.toResponse(user, baseURL), nil
 }
 
 func (s *UserService) Delete(id uint) error {
-	return s.userRepo.Delete(id)
+	if err := s.userRepo.Delete(id); err != nil {
+		return err
+	}
+	return s.nodeRepo.MarkAllDrifted()
 }
 
 func (s *UserService) ToggleActive(id uint) error {
@@ -115,7 +146,10 @@ func (s *UserService) ToggleActive(id uint) error {
 	if err != nil {
 		return errors.New("用户不存在")
 	}
-	return s.userRepo.UpdateActive(id, !user.Active)
+	if err := s.userRepo.UpdateActive(id, !user.Active); err != nil {
+		return err
+	}
+	return s.nodeRepo.MarkAllDrifted()
 }
 
 func (s *UserService) List(page, pageSize int, baseURL string) ([]dto.UserResponse, int64, error) {
@@ -141,6 +175,7 @@ func (s *UserService) ResetUUID(id uint, baseURL string) (*dto.UserResponse, err
 		return nil, fmt.Errorf("重置 UUID 失败: %w", err)
 	}
 	user.UUID = newUUID
+	_ = s.nodeRepo.MarkAllDrifted()
 	return s.toResponse(user, baseURL), nil
 }
 
