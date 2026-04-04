@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, PencilLine, Plus, Sparkles } from 'lucide-react'
 import { nodeApi, profileApi } from '@/lib/api'
@@ -96,7 +96,8 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (next: bool
 
 function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose: () => void }) {
   const [nodeId, setNodeId] = useState('')
-  const [settings, setSettings] = useState('')
+  const [loadedSettingsByNode, setLoadedSettingsByNode] = useState<Record<string, string>>({})
+  const [draftSettingsByNode, setDraftSettingsByNode] = useState<Record<string, string>>({})
   const [msg, setMsg] = useState('')
   const [msgType, setMsgType] = useState<'ok' | 'err'>('ok')
   const qc = useQueryClient()
@@ -106,6 +107,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     queryFn: () => nodeApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data?.list ?? []),
   })
   const sortedNodes = [...(nodes ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
+  const selectedKey = nodeId ? `${profile.id}:${nodeId}` : ''
 
   const { data: currentKey, isFetching: loadingKey, refetch: refetchKey } = useQuery({
     queryKey: ['nodeKey', nodeId, profile.id],
@@ -113,23 +115,34 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
       const res = await nodeApi.getKeys(Number(nodeId))
       const keys = res.data.data ?? []
       const key = keys.find((k) => k.profile_id === profile.id)
-      if (key) {
-        setSettings(stringifySettings(key.settings))
-      } else {
-        setSettings('')
-      }
       return key ?? null
     },
     enabled: !!nodeId,
   })
 
+  useEffect(() => {
+    if (!selectedKey || loadingKey) return
+    const next = currentKey ? stringifySettings(currentKey.settings) : ''
+    setLoadedSettingsByNode((prev) => (prev[selectedKey] === next ? prev : { ...prev, [selectedKey]: next }))
+  }, [currentKey, loadingKey, selectedKey])
+
+  const currentSettings = selectedKey ? (draftSettingsByNode[selectedKey] ?? loadedSettingsByNode[selectedKey] ?? '') : ''
+
   const keyLocked = currentKey?.locked ?? false
 
   const save = useMutation({
-    mutationFn: () => nodeApi.upsertKey(Number(nodeId), profile.id, settings),
+    mutationFn: () => nodeApi.upsertKey(Number(nodeId), profile.id, currentSettings),
     onSuccess: () => {
       setMsg('已保存')
       setMsgType('ok')
+      if (selectedKey) {
+        setLoadedSettingsByNode((prev) => ({ ...prev, [selectedKey]: currentSettings }))
+        setDraftSettingsByNode((prev) => {
+          const next = { ...prev }
+          delete next[selectedKey]
+          return next
+        })
+      }
       qc.invalidateQueries({ queryKey: ['nodes'] })
       void refetchKey()
     },
@@ -158,7 +171,9 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
       return stringifySettings(profile.settings)
     },
     onSuccess: (nextSettings) => {
-      setSettings(nextSettings)
+      if (selectedKey) {
+        setDraftSettingsByNode((prev) => ({ ...prev, [selectedKey]: nextSettings }))
+      }
       setMsg('密钥已生成')
       setMsgType('ok')
     },
@@ -169,7 +184,9 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
   })
 
   const fillTemplate = () => {
-    setSettings(stringifySettings(profile.settings))
+    if (selectedKey) {
+      setDraftSettingsByNode((prev) => ({ ...prev, [selectedKey]: stringifySettings(profile.settings) }))
+    }
     setMsg('已填入协议默认配置')
     setMsgType('ok')
   }
@@ -196,7 +213,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
       footer={
         <>
           <Btn variant="secondary" onClick={onClose}>关闭</Btn>
-          <Btn loading={save.isPending} onClick={() => save.mutate()} disabled={!nodeId || !settings || keyLocked}>保存密钥</Btn>
+          <Btn loading={save.isPending} onClick={() => save.mutate()} disabled={!nodeId || !currentSettings || keyLocked}>保存密钥</Btn>
         </>
       }
       width="lg"
@@ -247,8 +264,12 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
             </div>
           </div>
           <textarea
-            value={settings}
-            onChange={(e) => setSettings(e.target.value)}
+            value={currentSettings}
+            onChange={(e) => {
+              if (!selectedKey) return
+              const nextValue = e.target.value
+              setDraftSettingsByNode((prev) => ({ ...prev, [selectedKey]: nextValue }))
+            }}
             rows={12}
             disabled={keyLocked}
             className="min-h-[260px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"

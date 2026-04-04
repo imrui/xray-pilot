@@ -15,7 +15,7 @@ export const userApi = {
   create: (data: {
     username: string
     real_name?: string
-    group_id?: number
+    group_ids?: number[]
     expires_at?: string | null
     remark?: string
     feishu_enabled?: boolean
@@ -28,7 +28,7 @@ export const userApi = {
   update: (id: number, data: {
     username?: string
     real_name?: string
-    group_id?: number | null
+    group_ids?: number[] | null
     active?: boolean
     expires_at?: string | null
     remark?: string

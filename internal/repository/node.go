@@ -177,18 +177,26 @@ func (r *NodeRepository) MarkAllDrifted() error {
 		Update("sync_status", entity.SyncStatusDrifted).Error
 }
 
-// FindHealthyByGroupID 查询分组内 Active=true AND LastCheckOK=true 的节点（用于订阅生成）
+// FindHealthyByGroupIDs 查询分组集合内的可用节点。
 // 若 lastCheckOKFilter=false 则不过滤 LastCheckOK（允许返回未经检测的节点）
-func (r *NodeRepository) FindHealthyByGroupID(groupID uint, lastCheckOKFilter bool) ([]entity.Node, error) {
+func (r *NodeRepository) FindHealthyByGroupIDs(groupIDs []uint, lastCheckOKFilter bool) ([]entity.Node, error) {
 	var nodes []entity.Node
+	if len(groupIDs) == 0 {
+		return nodes, nil
+	}
 	query := DB.Where(
 		"active = ? AND id IN (?)",
 		true,
-		DB.Table("group_nodes").Select("node_id").Where("group_id = ?", groupID),
+		DB.Table("group_nodes").Select("DISTINCT node_id").Where("group_id IN ?", groupIDs),
 	)
 	if lastCheckOKFilter {
 		query = query.Where("last_check_ok = ?", true)
 	}
 	err := query.Order("id asc").Find(&nodes).Error
 	return nodes, err
+}
+
+// FindHealthyByGroupID 向后兼容单分组查询。
+func (r *NodeRepository) FindHealthyByGroupID(groupID uint, lastCheckOKFilter bool) ([]entity.Node, error) {
+	return r.FindHealthyByGroupIDs([]uint{groupID}, lastCheckOKFilter)
 }

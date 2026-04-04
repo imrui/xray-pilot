@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp, Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, RefreshCw, Search, Send, Unplug } from 'lucide-react'
+import { CalendarDays, ChevronDown, ChevronUp, Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, RefreshCw, Search, Send, Unplug, X } from 'lucide-react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { userApi, groupApi } from '@/lib/api'
 import type { FeishuPushResult, User } from '@/types'
 import { Badge } from '@/components/ui/Badge'
-import { Field, SelectField, Btn, FieldGroup } from '@/components/ui/Form'
+import { Field, Btn, FieldGroup } from '@/components/ui/Form'
 import { QRModal } from '@/components/ui/QRModal'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
@@ -19,7 +20,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 interface FormState {
   username: string
   real_name: string
-  group_id: string
+  group_ids: string[]
   expires_at: string
   remark: string
   feishu_enabled: string
@@ -32,7 +33,7 @@ interface FormState {
 const emptyForm = (): FormState => ({
   username: '',
   real_name: '',
-  group_id: '',
+  group_ids: [],
   expires_at: '',
   remark: '',
   feishu_enabled: 'false',
@@ -112,6 +113,361 @@ function toDateTimeLocalValue(value?: string) {
   return local.toISOString().slice(0, 16)
 }
 
+function splitDateTimeLocalValue(value: string) {
+  if (!value) return { date: '', time: '' }
+  const [date = '', time = ''] = value.split('T')
+  return { date, time: time.slice(0, 5) }
+}
+
+function joinDateTimeLocalValue(date: string, time: string) {
+  if (!date) return ''
+  return `${date}T${time || '00:00'}`
+}
+
+function formatDateTimeLocalDisplay(value: string) {
+  if (!value) return '永久有效'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.replace('T', ' ')
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).replace(/\//g, '/')
+}
+
+function isLocalDateTimeExpired(value: string) {
+  if (!value) return false
+  const date = new Date(value)
+  return !Number.isNaN(date.getTime()) && date.getTime() < Date.now()
+}
+
+function openNativePicker(input: HTMLInputElement | null) {
+  if (!input) return
+  input.focus()
+  ;(input as HTMLInputElement & { showPicker?: () => void }).showPicker?.()
+}
+
+function renderUserGroups(user: User) {
+  const groups = user.groups ?? []
+  if (groups.length === 0) return <span className="text-xs text-soft">未分组</span>
+
+  const visible = groups.slice(0, 2)
+  const hiddenCount = groups.length - visible.length
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {visible.map((group) => (
+        <Badge key={group.id} label={group.name} variant="blue" />
+      ))}
+      {hiddenCount > 0 && (
+        <Tooltip
+          side="right"
+          content={
+            <div className="max-h-48 space-y-1 overflow-y-auto">
+              {groups.map((group) => (
+                <div key={group.id}>{group.name}</div>
+              ))}
+            </div>
+          }
+        >
+          <span className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-xs text-soft">
+            +{hiddenCount}
+          </span>
+        </Tooltip>
+      )}
+    </div>
+  )
+}
+
+function GroupMultiSelect({
+  options,
+  selectedValues,
+  onChange,
+}: {
+  options: Array<{ value: number; label: string }>
+  selectedValues: string[]
+  onChange: (next: string[]) => void
+}) {
+  const selectedOptions = options.filter((option) => selectedValues.includes(String(option.value)))
+  const visible = selectedOptions.slice(0, 2)
+  const hiddenCount = selectedOptions.length - visible.length
+
+  return (
+    <DropdownMenu.Root modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          className="flex min-h-11 w-full items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-left text-sm text-[var(--text)] transition hover:bg-[var(--panel-muted)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+        >
+          <div className="flex min-h-6 flex-1 flex-wrap items-center gap-1.5">
+            {selectedOptions.length === 0 ? (
+              <span className="text-soft">选择一个或多个分组</span>
+            ) : (
+              <>
+                {visible.map((option) => (
+                  <Badge key={option.value} label={option.label} variant="blue" />
+                ))}
+                {hiddenCount > 0 && (
+                  <span className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-2 text-xs text-soft">
+                    +{hiddenCount}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+          <div className="ml-3 flex items-center gap-1.5">
+            {selectedOptions.length > 0 && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onChange([])
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onChange([])
+                }}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-faint transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                aria-label="清空已选分组"
+              >
+                <X className="h-4 w-4" />
+              </span>
+            )}
+            <ChevronDown className="h-4 w-4 shrink-0 text-faint" />
+          </div>
+        </button>
+      </DropdownMenu.Trigger>
+
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          sideOffset={8}
+          align="start"
+          className="z-50 w-[var(--radix-dropdown-menu-trigger-width)] max-w-[min(32rem,90vw)] rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] p-2 shadow-[var(--shadow-soft)]"
+        >
+          <div className="flex items-center justify-between px-2 py-1">
+            <div className="text-xs text-soft">已选 {selectedOptions.length} 个分组</div>
+            {selectedOptions.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+              >
+                <X className="h-3.5 w-3.5" />
+                清空
+              </button>
+            )}
+          </div>
+          <div className="mt-1 max-h-64 overflow-y-auto">
+            {options.length === 0 ? (
+              <div className="px-2 py-3 text-sm text-soft">暂无可选分组</div>
+            ) : (
+              options.map((option) => {
+                const checked = selectedValues.includes(String(option.value))
+                return (
+                  <DropdownMenu.CheckboxItem
+                    key={option.value}
+                    checked={checked}
+                    onSelect={(event) => event.preventDefault()}
+                    onCheckedChange={(nextChecked) => {
+                      const nextValue = String(option.value)
+                      onChange(
+                        nextChecked
+                          ? [...selectedValues, nextValue]
+                          : selectedValues.filter((value) => value !== nextValue),
+                      )
+                    }}
+                    className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm text-[var(--text)] outline-none transition hover:bg-[var(--panel-muted)] data-[highlighted]:bg-[var(--panel-muted)]"
+                  >
+                    <span>{option.label}</span>
+                    <span className={`h-4 w-4 rounded border ${checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-transparent'}`} />
+                  </DropdownMenu.CheckboxItem>
+                )
+              })
+            )}
+          </div>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
+
+function ExpiryDateTimeField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (next: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [draftValue, setDraftValue] = useState(value)
+  const dateInputRef = useRef<HTMLInputElement | null>(null)
+  const timeInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!open) setDraftValue(value)
+  }, [open, value])
+
+  const originalValue = value
+  const currentDisplay = formatDateTimeLocalDisplay(value)
+  const currentExpired = isLocalDateTimeExpired(value)
+  const draftExpired = isLocalDateTimeExpired(draftValue)
+  const { date: draftDate, time: draftTime } = splitDateTimeLocalValue(draftValue)
+
+  const applyToday = () => {
+    const now = new Date()
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+    setDraftValue(local)
+  }
+
+  const resetDraft = () => setDraftValue(originalValue)
+
+  return (
+    <div className="flex flex-col space-y-1.5">
+      <label className="text-[12px] font-medium text-soft">{label}</label>
+
+      <DropdownMenu.Root modal={false} open={open} onOpenChange={setOpen}>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            className={`flex h-10 w-full items-center justify-between rounded-md border bg-[var(--panel-strong)] px-3 text-left text-sm transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)] ${
+              currentExpired
+                ? 'border-rose-300 text-rose-500 focus:border-rose-400'
+                : 'border-[var(--border)] text-[var(--text)] focus:border-[var(--accent)]'
+            }`}
+          >
+            <span className={value ? '' : 'text-faint'}>{currentDisplay}</span>
+            <span className="ml-3 flex items-center gap-1">
+              {value && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onChange('')
+                    setDraftValue('')
+                    setOpen(false)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onChange('')
+                    setDraftValue('')
+                    setOpen(false)
+                  }}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-faint transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                  aria-label="清空过期时间"
+                >
+                  <X className="h-4 w-4" />
+                </span>
+              )}
+              <CalendarDays className="h-4 w-4 shrink-0 text-faint" />
+            </span>
+          </button>
+        </DropdownMenu.Trigger>
+
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            sideOffset={8}
+            align="start"
+            onCloseAutoFocus={(event) => event.preventDefault()}
+            className="z-50 w-[min(28rem,calc(100vw-2rem))] rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] p-3 shadow-[var(--shadow-soft)]"
+          >
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-[1.45fr_1fr]">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-medium text-soft">日期</span>
+                  <button
+                    type="button"
+                    onClick={() => openNativePicker(dateInputRef.current)}
+                    className="relative h-10 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] text-left transition hover:border-[var(--accent)]/40 focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+                  >
+                    <input
+                      ref={dateInputRef}
+                      type="date"
+                      value={draftDate}
+                      onChange={(event) => setDraftValue(joinDateTimeLocalValue(event.target.value, draftTime))}
+                      onClick={() => openNativePicker(dateInputRef.current)}
+                      onFocus={() => openNativePicker(dateInputRef.current)}
+                      className="h-full w-full cursor-pointer rounded-md bg-transparent px-3 text-sm text-[var(--text)] outline-none"
+                    />
+                  </button>
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-medium text-soft">时间</span>
+                  <button
+                    type="button"
+                    onClick={() => openNativePicker(timeInputRef.current)}
+                    className="relative h-10 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] text-left transition hover:border-[var(--accent)]/40 focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+                  >
+                    <input
+                      ref={timeInputRef}
+                      type="time"
+                      step={60}
+                      value={draftTime}
+                      onChange={(event) => setDraftValue(joinDateTimeLocalValue(draftDate, event.target.value))}
+                      onClick={() => openNativePicker(timeInputRef.current)}
+                      onFocus={() => openNativePicker(timeInputRef.current)}
+                      className="h-full w-full cursor-pointer rounded-md bg-transparent px-3 text-sm text-[var(--text)] outline-none"
+                    />
+                  </button>
+                </label>
+              </div>
+
+              <div className={`text-xs ${draftExpired ? 'text-rose-500' : 'text-soft'}`}>
+                {draftValue
+                  ? draftExpired
+                    ? '该时间早于当前时间，保存后用户会被视为已过期。'
+                    : `当前选择：${formatDateTimeLocalDisplay(draftValue)}`
+                  : '未设置过期时间时，用户将保持永久有效。'}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] pt-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={resetDraft}
+                    className="inline-flex h-9 items-center rounded-md px-3 text-sm text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                  >
+                    重置
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyToday}
+                    className="inline-flex h-9 items-center rounded-md px-3 text-sm text-[var(--accent)] transition hover:bg-[var(--panel-muted)]"
+                  >
+                    今天
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(draftValue)
+                    setOpen(false)
+                  }}
+                  className="inline-flex h-9 items-center rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 text-sm font-medium text-white transition hover:bg-[var(--accent-strong)]"
+                >
+                  确定
+                </button>
+              </div>
+            </div>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </div>
+  )
+}
+
 function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
   return (
     <button
@@ -159,7 +515,11 @@ export default function Users() {
     queryFn: () => groupApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data?.list ?? []),
   })
 
-  const groupOptions = (groups ?? []).map((g) => ({ value: g.id, label: g.name }))
+  const sortedGroups = useMemo(
+    () => [...(groups ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })),
+    [groups],
+  )
+  const groupOptions = sortedGroups.map((g) => ({ value: g.id, label: g.name }))
   const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] })
 
   useEffect(() => {
@@ -170,13 +530,13 @@ export default function Users() {
 
   const save = useMutation({
     mutationFn: () => {
-      const groupId = form.group_id ? Number(form.group_id) : undefined
+      const groupIds = form.group_ids.map(Number).filter((value) => !Number.isNaN(value))
       const expiresAt = toApiDateTime(form.expires_at)
       if (drawer.user) {
         return userApi.update(drawer.user.id, {
           username: form.username,
           real_name: form.real_name,
-          group_id: groupId ?? null,
+          group_ids: groupIds,
           expires_at: expiresAt,
           remark: form.remark,
           feishu_enabled: form.feishu_enabled === 'true',
@@ -189,7 +549,7 @@ export default function Users() {
       return userApi.create({
         username: form.username,
         real_name: form.real_name,
-        group_id: groupId,
+        group_ids: groupIds,
         expires_at: expiresAt,
         remark: form.remark,
         feishu_enabled: form.feishu_enabled === 'true',
@@ -259,7 +619,7 @@ export default function Users() {
     const next = {
       username: u.username,
       real_name: u.real_name,
-      group_id: String(u.group_id ?? ''),
+      group_ids: (u.group_ids ?? []).map(String),
       expires_at: toDateTimeLocalValue(u.expires_at),
       remark: u.remark,
       feishu_enabled: u.feishu_enabled ? 'true' : 'false',
@@ -300,7 +660,7 @@ export default function Users() {
         u.username.toLowerCase().includes(keyword) ||
         u.real_name.toLowerCase().includes(keyword) ||
         (u.feishu_email ?? '').toLowerCase().includes(keyword) ||
-        (u.group_name ?? '').toLowerCase().includes(keyword)
+        (u.group_names ?? []).join(' ').toLowerCase().includes(keyword)
 
       const matchesStatus =
         statusFilter === 'all' ||
@@ -308,7 +668,7 @@ export default function Users() {
         (statusFilter === 'inactive' && !u.active) ||
         (statusFilter === 'expired' && isExpired(u))
 
-      const matchesGroup = groupFilter === 'all' || String(u.group_id ?? '') === groupFilter
+      const matchesGroup = groupFilter === 'all' || (u.group_ids ?? []).some((id) => String(id) === groupFilter)
 
       return matchesKeyword && matchesStatus && matchesGroup
     })
@@ -530,12 +890,12 @@ export default function Users() {
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
-                      {u.group_name ? <Badge label={u.group_name} variant="blue" /> : <span className="text-xs text-soft">未分组</span>}
+                      {renderUserGroups(u)}
                     </td>
                     <td className="px-4 py-3.5">
                       {u.expires_at ? (
                         <span className={isExpired(u) ? 'text-rose-400' : 'text-soft'}>
-                          {new Date(u.expires_at).toLocaleDateString('zh-CN')}
+                          {formatDateTimeLocalDisplay(toDateTimeLocalValue(u.expires_at))}
                         </span>
                       ) : (
                         <span className="text-soft">永久</span>
@@ -709,17 +1069,23 @@ export default function Users() {
           <FieldGroup title="基础信息" description="用户标识、后台识别与订阅分组。">
             <Field label="用户名（客户端显示） *" value={form.username} onChange={f('username')} placeholder="如：alice01" />
             <Field label="真实姓名（后台识别）" value={form.real_name} onChange={f('real_name')} placeholder="后台识别用，可留空" />
-            <SelectField
-              label="订阅分组"
-              value={form.group_id}
-              onChange={(v) => setForm((p) => ({ ...p, group_id: v }))}
-              options={groupOptions}
-              placeholder="不分组"
-            />
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-[var(--text)]">订阅分组</div>
+              <GroupMultiSelect
+                options={groupOptions}
+                selectedValues={form.group_ids}
+                onChange={(next) => setForm((prev) => ({ ...prev, group_ids: Array.from(new Set(next)).sort() }))}
+              />
+              <div className="text-xs text-soft">用户可以同时属于多个分组，将获得这些分组下节点的合集。</div>
+            </div>
           </FieldGroup>
 
           <FieldGroup title="订阅策略" description="有效期为空时视为永久有效。">
-            <Field label="过期时间" type="datetime-local" value={form.expires_at} onChange={f('expires_at')} />
+            <ExpiryDateTimeField
+              label="过期时间"
+              value={form.expires_at}
+              onChange={(next) => setForm((prev) => ({ ...prev, expires_at: next }))}
+            />
             <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="可选备注" />
           </FieldGroup>
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -51,17 +52,18 @@ func (s *SubscribeService) GenerateSubscription(token string) (string, error) {
 	if user.ExpiresAt != nil && user.ExpiresAt.Before(time.Now()) {
 		return "", errors.New("订阅已过期")
 	}
-	if user.GroupID == nil {
+	groupIDs := userGroupIDs(user.Groups)
+	if len(groupIDs) == 0 {
 		return base64.StdEncoding.EncodeToString([]byte("")), nil
 	}
 
 	// 优先返回健康节点，无健康节点时降级返回全部激活节点
-	nodes, err := s.nodeRepo.FindHealthyByGroupID(*user.GroupID, true)
+	nodes, err := s.nodeRepo.FindHealthyByGroupIDs(groupIDs, true)
 	if err != nil {
 		return "", fmt.Errorf("查询节点失败: %w", err)
 	}
 	if len(nodes) == 0 {
-		nodes, err = s.nodeRepo.FindHealthyByGroupID(*user.GroupID, false)
+		nodes, err = s.nodeRepo.FindHealthyByGroupIDs(groupIDs, false)
 		if err != nil {
 			return "", fmt.Errorf("查询节点失败: %w", err)
 		}
@@ -298,13 +300,14 @@ func (s *SubscribeService) GetSubscribePageDataWithBaseURL(token, baseURL string
 		AltSubURL: altURL,
 	}
 
-	if user.GroupID == nil {
+	groupIDs := userGroupIDs(user.Groups)
+	if len(groupIDs) == 0 {
 		return data, nil
 	}
 
-	nodes, err := s.nodeRepo.FindHealthyByGroupID(*user.GroupID, true)
+	nodes, err := s.nodeRepo.FindHealthyByGroupIDs(groupIDs, true)
 	if err != nil || len(nodes) == 0 {
-		nodes, _ = s.nodeRepo.FindHealthyByGroupID(*user.GroupID, false)
+		nodes, _ = s.nodeRepo.FindHealthyByGroupIDs(groupIDs, false)
 	}
 	sortNodesByName(nodes)
 
@@ -345,13 +348,14 @@ func (s *SubscribeService) GenerateClash(token string) (string, error) {
 	if user.ExpiresAt != nil && user.ExpiresAt.Before(time.Now()) {
 		return "", errors.New("订阅已过期")
 	}
-	if user.GroupID == nil {
+	groupIDs := userGroupIDs(user.Groups)
+	if len(groupIDs) == 0 {
 		return "proxies: []\n", nil
 	}
 
-	nodes, err := s.nodeRepo.FindHealthyByGroupID(*user.GroupID, true)
+	nodes, err := s.nodeRepo.FindHealthyByGroupIDs(groupIDs, true)
 	if err != nil || len(nodes) == 0 {
-		nodes, _ = s.nodeRepo.FindHealthyByGroupID(*user.GroupID, false)
+		nodes, _ = s.nodeRepo.FindHealthyByGroupIDs(groupIDs, false)
 	}
 	sortNodesByName(nodes)
 
@@ -386,6 +390,18 @@ func sortNodesByName(nodes []entity.Node) {
 		}
 		return left < right
 	})
+}
+
+func userGroupIDs(groups []entity.Group) []uint {
+	if len(groups) == 0 {
+		return nil
+	}
+	ids := make([]uint, 0, len(groups))
+	for _, group := range groups {
+		ids = append(ids, group.ID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return slices.Compact(ids)
 }
 
 // buildClashProxy 根据协议生成 Clash proxy YAML 条目

@@ -8,10 +8,10 @@ type User struct {
 	ID            uint   `gorm:"primaryKey"`
 	Username      string `gorm:"uniqueIndex;not null"`
 	RealName      string
-	UUID          string `gorm:"uniqueIndex;not null"` // VLESS UUID
-	Token         string `gorm:"uniqueIndex;not null"` // 订阅 Token
-	GroupID       *uint
-	Group         *Group     `gorm:"foreignKey:GroupID"`
+	UUID          string     `gorm:"uniqueIndex;not null"` // VLESS UUID
+	Token         string     `gorm:"uniqueIndex;not null"` // 订阅 Token
+	LegacyGroupID *uint      `gorm:"column:group_id"`
+	Groups        []Group    `gorm:"many2many:user_groups"`
 	Active        bool       `gorm:"default:true"`
 	ExpiresAt     *time.Time // nil 表示永久有效
 	Remark        string
@@ -23,4 +23,9 @@ type User struct {
 	FeishuBoundAt *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+type UserGroup struct {
+	UserID  uint `gorm:"primaryKey"`
+	GroupID uint `gorm:"primaryKey"`
 }

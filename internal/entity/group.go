@@ -9,6 +9,7 @@ type Group struct {
 	Description string
 	Active      bool   `gorm:"default:true"`
 	Nodes       []Node `gorm:"many2many:group_nodes"`
+	Users       []User `gorm:"many2many:user_groups"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

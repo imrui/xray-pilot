@@ -2,8 +2,9 @@ export interface User {
   id: number
   username: string
   real_name: string
-  group_id?: number
-  group_name?: string
+  group_ids?: number[]
+  group_names?: string[]
+  groups?: Array<{ id: number; name: string }>
   active: boolean
   expires_at?: string  // ISO 8601，空表示永久有效
   remark: string

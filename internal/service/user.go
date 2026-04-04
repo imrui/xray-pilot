@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/entity"
@@ -34,9 +36,8 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 	}
 
 	user := &entity.User{
-		Username:      req.Username,
+		Username:      strings.TrimSpace(req.Username),
 		RealName:      req.RealName,
-		GroupID:       req.GroupID,
 		Remark:        req.Remark,
 		FeishuEnabled: req.FeishuEnabled,
 		FeishuEmail:   strings.ToLower(strings.TrimSpace(req.FeishuEmail)),
@@ -49,11 +50,27 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 		FeishuChatID:  req.FeishuChatID,
 		FeishuBoundAt: feishuBoundAt,
 	}
-	if err := s.userRepo.Create(user); err != nil {
-		return nil, fmt.Errorf("创建用户失败: %w", err)
+	if user.Username == "" {
+		return nil, errors.New("用户名不能为空")
+	}
+	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(user).Error; err != nil {
+			return fmt.Errorf("创建用户失败: %w", err)
+		}
+		if err := s.userRepo.ReplaceGroupsTx(tx, user, req.GroupIDs); err != nil {
+			return fmt.Errorf("保存用户分组失败: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	created, err := s.userRepo.FindByID(user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("读取用户失败: %w", err)
 	}
 	_ = s.nodeRepo.MarkAllDrifted()
-	return s.toResponse(user, baseURL), nil
+	return s.toResponse(created, baseURL), nil
 }
 
 func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string) (*dto.UserResponse, error) {
@@ -75,15 +92,15 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	if req.RealName != nil {
 		user.RealName = *req.RealName
 	}
-	if req.GroupID != nil {
-		groupID, err := parseOptionalUint(req.GroupID)
+	if req.GroupIDs != nil {
+		groupIDs, err := parseOptionalUintSlice(req.GroupIDs)
 		if err != nil {
 			return nil, fmt.Errorf("解析分组失败: %w", err)
 		}
-		if (user.GroupID == nil) != (groupID == nil) || (user.GroupID != nil && groupID != nil && *user.GroupID != *groupID) {
+		currentGroupIDs := extractGroupIDs(user.Groups)
+		if !slices.Equal(currentGroupIDs, groupIDs) {
 			shouldMarkSync = true
 		}
-		user.GroupID = groupID
 	}
 	if req.Remark != nil {
 		user.Remark = *req.Remark
@@ -125,13 +142,31 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	} else {
 		user.FeishuBoundAt = nil
 	}
-	if err := s.userRepo.Update(user); err != nil {
+	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
+		if req.GroupIDs != nil {
+			groupIDs, err := parseOptionalUintSlice(req.GroupIDs)
+			if err != nil {
+				return fmt.Errorf("解析分组失败: %w", err)
+			}
+			if err := s.userRepo.ReplaceGroupsTx(tx, user, groupIDs); err != nil {
+				return fmt.Errorf("更新用户分组失败: %w", err)
+			}
+		}
+		if err := tx.Save(user).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return nil, err
+	}
+	updated, err := s.userRepo.FindByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("读取用户失败: %w", err)
 	}
 	if shouldMarkSync {
 		_ = s.nodeRepo.MarkAllDrifted()
 	}
-	return s.toResponse(user, baseURL), nil
+	return s.toResponse(updated, baseURL), nil
 }
 
 func (s *UserService) Delete(id uint) error {
@@ -194,11 +229,23 @@ func (s *UserService) ResetToken(id uint, baseURL string) (*dto.UserResponse, er
 }
 
 func (s *UserService) toResponse(u *entity.User, baseURL string) *dto.UserResponse {
+	groupIDs := extractGroupIDs(u.Groups)
+	groupNames := extractGroupNames(u.Groups)
+	groups := make([]dto.UserGroupSummary, 0, len(u.Groups))
+	for _, group := range u.Groups {
+		groups = append(groups, dto.UserGroupSummary{
+			ID:   group.ID,
+			Name: group.Name,
+		})
+	}
+
 	resp := &dto.UserResponse{
 		ID:            u.ID,
 		Username:      u.Username,
 		RealName:      u.RealName,
-		GroupID:       u.GroupID,
+		GroupIDs:      groupIDs,
+		GroupNames:    groupNames,
+		Groups:        groups,
 		Active:        u.Active,
 		Remark:        u.Remark,
 		SubscribeURL:  fmt.Sprintf("%s/sub/%s", baseURL, u.Token),
@@ -213,24 +260,21 @@ func (s *UserService) toResponse(u *entity.User, baseURL string) *dto.UserRespon
 	if u.ExpiresAt != nil {
 		resp.ExpiresAt = u.ExpiresAt.Format(time.RFC3339)
 	}
-	if u.Group != nil {
-		resp.GroupName = u.Group.Name
-	}
 	if u.FeishuBoundAt != nil {
 		resp.FeishuBoundAt = u.FeishuBoundAt.Format(time.RFC3339)
 	}
 	return resp
 }
 
-func parseOptionalUint(raw json.RawMessage) (*uint, error) {
+func parseOptionalUintSlice(raw json.RawMessage) ([]uint, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
-	var value uint
-	if err := json.Unmarshal(raw, &value); err != nil {
+	var values []uint
+	if err := json.Unmarshal(raw, &values); err != nil {
 		return nil, err
 	}
-	return &value, nil
+	return uniqueSortedIDs(values), nil
 }
 
 func parseOptionalTime(raw json.RawMessage) (*time.Time, error) {
@@ -258,4 +302,36 @@ func parseOptionalTime(raw json.RawMessage) (*time.Time, error) {
 		}
 	}
 	return nil, fmt.Errorf("unsupported time format: %s", value)
+}
+
+func extractGroupIDs(groups []entity.Group) []uint {
+	if len(groups) == 0 {
+		return nil
+	}
+	ids := make([]uint, 0, len(groups))
+	for _, group := range groups {
+		ids = append(ids, group.ID)
+	}
+	return uniqueSortedIDs(ids)
+}
+
+func extractGroupNames(groups []entity.Group) []string {
+	if len(groups) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(groups))
+	for _, group := range groups {
+		names = append(names, group.Name)
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
+func uniqueSortedIDs(ids []uint) []uint {
+	if len(ids) == 0 {
+		return nil
+	}
+	cloned := append([]uint(nil), ids...)
+	slices.Sort(cloned)
+	return slices.Compact(cloned)
 }
