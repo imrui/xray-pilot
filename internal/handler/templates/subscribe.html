@@ -75,9 +75,13 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .btn{min-height:34px;padding:0 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--text-soft);display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;white-space:nowrap}
 .btn:hover{background:var(--panel-muted);border-color:var(--border-strong);color:var(--text)}
 .btn-icon{width:34px;padding:0}
+.alt-list{display:flex;flex-direction:column;gap:8px}
 .alt-row{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-muted);transition:border-color .15s ease,background-color .15s ease}
 .alt-row:hover{border-color:var(--border-strong);background:var(--panel)}
 .alt-info{flex:1;min-width:0}
+.alt-label-row{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap}
+.alt-label{font-size:13px;font-weight:600;color:var(--text)}
+.alt-hint{font-size:11px;color:var(--text-faint)}
 .empty{padding:18px 0;text-align:center;color:var(--text-faint);font-size:13px}
 .modal-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);z-index:100}
 .modal{position:relative;width:min(100%,360px);padding:22px;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-card)}
@@ -241,20 +245,28 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 
   <section class="card">
     <div class="section-kicker">备用订阅链接</div>
-    <p class="section-subtitle">如客户端无法自动识别，请使用以下链接</p>
-    <div class="alt-row">
-      <div class="alt-info">
-        <div class="alt-link" title="{{.AltSubURL}}">{{.AltSubURL}}</div>
+    <p class="section-subtitle">如客户端无法自动识别，请按使用的客户端类型选择对应链接</p>
+    <div class="alt-list">
+      {{range .SubLinks}}
+      <div class="alt-row">
+        <div class="alt-info">
+          <div class="alt-label-row">
+            <span class="alt-label">{{.Label}}</span>
+            <span class="alt-hint">{{.Hint}}</span>
+          </div>
+          <div class="alt-link" title="{{.URL}}">{{.URL}}</div>
+        </div>
+        <div class="alt-actions">
+          <button class="btn copy-btn" data-copy="{{.URL}}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            复制
+          </button>
+          <button class="btn btn-icon qr-btn" title="二维码" data-name="{{.Label}} 订阅" data-region="{{.Hint}}" data-link="{{.URL}}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+          </button>
+        </div>
       </div>
-      <div class="alt-actions">
-        <button class="btn copy-btn" data-copy="{{.AltSubURL}}">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-          复制
-        </button>
-        <button class="btn btn-icon qr-btn" title="二维码" data-name="备用订阅链接" data-region="" data-link="{{.AltSubURL}}">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
-        </button>
-      </div>
+      {{end}}
     </div>
   </section>
 </main>

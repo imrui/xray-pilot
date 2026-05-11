@@ -250,8 +250,17 @@ type SubscribePageData struct {
 	Active    bool
 	ExpiresAt *time.Time
 	Nodes     []NodeLinkData
-	SubURL    string
-	AltSubURL string
+	SubURL    string    // 主订阅链接：按 UA 智能识别格式
+	SubLinks  []SubLink // 备用订阅链接：按客户端类型显式区分
+	AltSubURL string    // 向后兼容：等价于 V2Ray Base64 链接（?format=v2ray）
+}
+
+// SubLink 分客户端订阅链接（用于备用订阅卡片）
+type SubLink struct {
+	Label  string // 卡片显示的客户端类别名
+	Hint   string // 客户端示例，作为副标题
+	Format string // 对应 ?format= 参数值
+	URL    string // 完整 URL
 }
 
 // NodeLinkData 节点链接信息
@@ -290,14 +299,21 @@ func (s *SubscribeService) GetSubscribePageDataWithBaseURL(token, baseURL string
 		baseURL = strings.TrimRight(strings.TrimSpace(s.settingSvc.Get(KeySubscriptionBaseURL)), "/")
 	}
 	subURL := baseURL + "/sub/" + token
-	altURL := subURL + "?sub=1"
+	v2rayURL := subURL + "?format=v2ray"
+	clashURL := subURL + "?format=clash"
+	singboxURL := subURL + "?format=singbox"
 
 	data := &SubscribePageData{
 		Username:  user.Username,
 		Active:    user.Active,
 		ExpiresAt: user.ExpiresAt,
 		SubURL:    subURL,
-		AltSubURL: altURL,
+		AltSubURL: v2rayURL,
+		SubLinks: []SubLink{
+			{Label: "通用 Base64", Hint: "V2RayN / NekoRay / Shadowrocket", Format: "v2ray", URL: v2rayURL},
+			{Label: "Clash 系", Hint: "Mihomo / Clash Verge / ClashX", Format: "clash", URL: clashURL},
+			{Label: "Sing-box", Hint: "sing-box / Hiddify", Format: "singbox", URL: singboxURL},
+		},
 	}
 
 	groupIDs := userGroupIDs(user.Groups)
