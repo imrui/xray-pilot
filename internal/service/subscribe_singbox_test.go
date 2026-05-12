@@ -93,6 +93,14 @@ func TestGenerateSingboxVlessReality(t *testing.T) {
 			if ob["flow"] != "xtls-rprx-vision" {
 				t.Errorf("expected flow=xtls-rprx-vision, got %v", ob["flow"])
 			}
+			// tag 应当根据默认模板正确填充 transport，避免出现 "[vless-reality - ]" 空尾
+			tag, _ := ob["tag"].(string)
+			if strings.Contains(tag, " - ]") || strings.HasSuffix(tag, "- ") {
+				t.Errorf("tag contains empty transport placeholder: %q", tag)
+			}
+			if !strings.Contains(tag, "reality") {
+				t.Errorf("tag should contain transport=reality, got %q", tag)
+			}
 			tls, _ := ob["tls"].(map[string]any)
 			reality, _ := tls["reality"].(map[string]any)
 			if reality["public_key"] != "PUBKEY_FOR_TEST" {

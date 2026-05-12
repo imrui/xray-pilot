@@ -137,7 +137,8 @@ func (s *SubscribeService) buildSingboxOutbound(user *entity.User, node *entity.
 	if profile == nil {
 		return nil, ""
 	}
-	tag := s.buildRemark(node, user, string(profile.Protocol), "")
+	transport := singboxTransportForProtocol(profile.Protocol)
+	tag := s.buildRemark(node, user, string(profile.Protocol), transport)
 	if tag == "" {
 		tag = fmt.Sprintf("%s-%d", profile.Protocol, profile.ID)
 	}
@@ -153,6 +154,22 @@ func (s *SubscribeService) buildSingboxOutbound(user *entity.User, node *entity.
 		return buildSingboxHysteria2(user, node, profile, tag), tag
 	}
 	return nil, ""
+}
+
+// singboxTransportForProtocol 返回协议对应的传输层短名，用于填充
+// 订阅备注模板里的 {transport} 占位符，避免输出 "[vless-reality - ]" 这类空尾
+func singboxTransportForProtocol(protocol string) string {
+	switch protocol {
+	case types.ProtocolVlessReality:
+		return "reality"
+	case types.ProtocolVlessWSTLS:
+		return "ws"
+	case types.ProtocolTrojan:
+		return "tcp"
+	case types.ProtocolHysteria2:
+		return "udp"
+	}
+	return ""
 }
 
 func buildSingboxVlessReality(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey, tag string) map[string]any {
