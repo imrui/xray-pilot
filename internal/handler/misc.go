@@ -165,6 +165,8 @@ func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format stri
 	switch format {
 	case "clash":
 		content, err = h.svc.GenerateClash(token)
+	case "singbox":
+		content, err = h.svc.GenerateSingbox(token)
 	default:
 		content, err = h.svc.GenerateSubscription(token)
 	}
@@ -175,10 +177,15 @@ func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format stri
 
 	c.Header("Subscription-Userinfo", fmt.Sprintf("upload=0; download=0; total=0; expire=%d", expire))
 	c.Header("Profile-Update-Interval", "24")
-	c.Header("Content-Disposition", `attachment; filename="xray-pilot"`)
-	if format == "clash" {
+	switch format {
+	case "clash":
+		c.Header("Content-Disposition", `attachment; filename="xray-pilot.yaml"`)
 		c.Header("Content-Type", "text/yaml; charset=utf-8")
-	} else {
+	case "singbox":
+		c.Header("Content-Disposition", `attachment; filename="xray-pilot.json"`)
+		c.Header("Content-Type", "application/json; charset=utf-8")
+	default:
+		c.Header("Content-Disposition", `attachment; filename="xray-pilot"`)
 		c.Header("Content-Type", "text/plain; charset=utf-8")
 	}
 	c.String(http.StatusOK, content)
