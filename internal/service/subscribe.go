@@ -287,6 +287,20 @@ func (s *SubscribeService) GetUser(token string) (*entity.User, error) {
 	return s.userRepo.FindByToken(token)
 }
 
+// GetUserTraffic 返回用户累计上/下行字节，用于订阅响应的 Subscription-Userinfo 头
+// 找不到记录时返回 (0, 0)；该 header 是 v2ray 生态事实标准，主流客户端
+// （v2rayN/Clash Verge/Hiddify/Shadowrocket/NekoBox）据此显示用户用量
+func (s *SubscribeService) GetUserTraffic(userID uint) (up, down int64) {
+	totals, err := s.trafficRepo.ListTotalsByUserIDs([]uint{userID})
+	if err != nil {
+		return 0, 0
+	}
+	if t, ok := totals[userID]; ok {
+		return t.UpBytes, t.DownBytes
+	}
+	return 0, 0
+}
+
 // GetSubscribePageData 返回信息页所需的完整数据
 func (s *SubscribeService) GetSubscribePageData(token string) (*SubscribePageData, error) {
 	return s.GetSubscribePageDataWithBaseURL(token, "")

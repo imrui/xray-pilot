@@ -89,6 +89,43 @@ func TestSubscribePageDataNoTraffic(t *testing.T) {
 	}
 }
 
+// TestGetUserTraffic 验证 GetUserTraffic 返回与 UserTrafficTotal 一致的字节数
+// 该值供订阅响应头 Subscription-Userinfo 使用，主流客户端据此显示用量
+func TestGetUserTraffic(t *testing.T) {
+	setupServiceTestDB(t)
+
+	user := entity.User{
+		Username: "alice",
+		UUID:     "00000000-0000-0000-0000-0000000000aa",
+		Token:    "tok-alice",
+		Active:   true,
+	}
+	if err := repository.DB.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	total := entity.UserTrafficTotal{
+		UserID:        user.ID,
+		UpBytes:       12345,
+		DownBytes:     67890,
+		LastUpdatedAt: time.Now(),
+	}
+	if err := repository.DB.Create(&total).Error; err != nil {
+		t.Fatalf("create total: %v", err)
+	}
+
+	svc := NewSubscribeService()
+	up, down := svc.GetUserTraffic(user.ID)
+	if up != 12345 || down != 67890 {
+		t.Errorf("got up=%d down=%d, want 12345/67890", up, down)
+	}
+
+	// 未知 user 应该返回 0
+	up2, down2 := svc.GetUserTraffic(99999)
+	if up2 != 0 || down2 != 0 {
+		t.Errorf("unknown user: got up=%d down=%d, want 0/0", up2, down2)
+	}
+}
+
 // TestFormatBytes 验证字节格式化的关键 case
 // 与 frontend/src/lib/utils.ts 行为对齐
 func TestFormatBytes(t *testing.T) {
