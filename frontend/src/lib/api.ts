@@ -1,5 +1,5 @@
 import request from './axios'
-import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuPushResult } from '@/types'
+import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuPushResult, TrafficSummary } from '@/types'
 
 // ---- 通用分页参数 ----
 interface PageParams {
@@ -211,4 +211,10 @@ export const systemApi = {
 
   updateSettings: (data: Record<string, string>) =>
     request.put<ApiResponse<Record<string, string>>>('/system/settings', data),
+}
+
+// ---- 流量统计 ----
+export const trafficApi = {
+  summary: () =>
+    request.get<ApiResponse<TrafficSummary>>('/traffic/summary'),
 }

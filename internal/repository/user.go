@@ -110,6 +110,14 @@ func (r *UserRepository) FindByFeishuEmail(email string) (*entity.User, error) {
 	return &users[0], nil
 }
 
+// FindAll 不分页返回所有用户（流量统计场景下需要构建完整的 username→ID 映射）
+// 注意：当前不包含 Groups 预加载，避免无意义的 join
+func (r *UserRepository) FindAll() ([]entity.User, error) {
+	var users []entity.User
+	err := DB.Order("id asc").Find(&users).Error
+	return users, err
+}
+
 func (r *UserRepository) List(page, pageSize int) ([]entity.User, int64, error) {
 	var total int64
 	if err := DB.Model(&entity.User{}).Count(&total).Error; err != nil {

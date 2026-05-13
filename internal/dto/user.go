@@ -59,4 +59,9 @@ type UserResponse struct {
 	FeishuBoundAt string             `json:"feishu_bound_at,omitempty"`
 	CreatedAt     string             `json:"created_at"`
 	UpdatedAt     string             `json:"updated_at"`
+
+	// 流量统计（来自 UserTrafficTotal 累计，由 TrafficPoller 周期更新）
+	TrafficUpBytes       int64  `json:"traffic_up_bytes"`
+	TrafficDownBytes     int64  `json:"traffic_down_bytes"`
+	TrafficLastUpdatedAt string `json:"traffic_last_updated_at,omitempty"`
 }

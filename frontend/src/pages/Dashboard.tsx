@@ -1,11 +1,12 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, AlertTriangle, Link2, RefreshCcw, Server, Users } from 'lucide-react'
-import { logApi, nodeApi, profileApi, userApi } from '@/lib/api'
+import { Activity, AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Link2, RefreshCcw, Server, Users } from 'lucide-react'
+import { logApi, nodeApi, profileApi, trafficApi, userApi } from '@/lib/api'
 import type { InboundProfile, Node, NodeKey, SyncLog } from '@/types'
 import { Btn } from '@/components/ui/Form'
 import { Badge } from '@/components/ui/Badge'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
+import { formatBytes } from '@/lib/utils'
 
 function StatCard({
   title,
@@ -124,6 +125,12 @@ export default function Dashboard() {
     queryFn: () => logApi.list({ page: 1, page_size: 6 }).then((r) => r.data.data!),
   })
 
+  const trafficQuery = useQuery({
+    queryKey: ['dashboard-traffic'],
+    queryFn: () => trafficApi.summary().then((r) => r.data.data!),
+    refetchInterval: 60_000, // 1 分钟自动刷新；服务端拉取周期 5 分钟
+  })
+
   const users = usersQuery.data?.list ?? []
   const nodes = nodesQuery.data?.list ?? []
   const logs = logsQuery.data?.list ?? []
@@ -155,6 +162,30 @@ export default function Dashboard() {
           change={unhealthyNodes.length ? `${unhealthyNodes.length} 个节点异常` : '所有已检测节点正常'}
           changeTone={unhealthyNodes.length ? 'negative' : 'positive'}
           icon={Activity}
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <StatCard
+          title="累计上行"
+          value={formatBytes(trafficQuery.data?.total_up_bytes)}
+          change={trafficQuery.data?.last_updated_at ? `最近更新 ${new Date(trafficQuery.data.last_updated_at).toLocaleString()}` : '等待首次采集'}
+          changeTone="neutral"
+          icon={ArrowUpFromLine}
+        />
+        <StatCard
+          title="累计下行"
+          value={formatBytes(trafficQuery.data?.total_down_bytes)}
+          change={trafficQuery.data?.last_updated_at ? `最近更新 ${new Date(trafficQuery.data.last_updated_at).toLocaleString()}` : '等待首次采集'}
+          changeTone="neutral"
+          icon={ArrowDownToLine}
+        />
+        <StatCard
+          title="近 7 天活跃用户"
+          value={trafficQuery.data?.active_users_7d ?? 0}
+          change={trafficQuery.data?.active_users_7d ? '有流量产生即计入' : '等待首次采集'}
+          changeTone="neutral"
+          icon={Users}
         />
       </div>
 

@@ -15,9 +15,29 @@ import (
 type Config struct {
 	Log       Log        `json:"log"`
 	API       *API       `json:"api,omitempty"`
+	Stats     *struct{}  `json:"stats,omitempty"`
+	Policy    *Policy    `json:"policy,omitempty"`
 	Routing   *Routing   `json:"routing,omitempty"`
 	Inbounds  []Inbound  `json:"inbounds"`
 	Outbounds []Outbound `json:"outbounds"`
+}
+
+// Policy 启用按用户/inbound 维度的流量统计
+// 仅当 Stats 模块同时开启时生效。每个 client 配置里必须设置 email，
+// 否则该用户在 StatsService 中不会被建立计数器
+type Policy struct {
+	Levels map[string]LevelPolicy `json:"levels"`
+	System SystemPolicy           `json:"system"`
+}
+
+type LevelPolicy struct {
+	StatsUserUplink   bool `json:"statsUserUplink"`
+	StatsUserDownlink bool `json:"statsUserDownlink"`
+}
+
+type SystemPolicy struct {
+	StatsInboundUplink   bool `json:"statsInboundUplink"`
+	StatsInboundDownlink bool `json:"statsInboundDownlink"`
 }
 
 type Log struct {
@@ -186,6 +206,17 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 		API: &API{
 			Tag:      "api",
 			Services: []string{"HandlerService", "LoggerService", "StatsService"},
+		},
+		// 启用 stats 模块（空对象即可）+ policy 段，让 xray 按 email 维度记录每用户上下行
+		Stats: &struct{}{},
+		Policy: &Policy{
+			Levels: map[string]LevelPolicy{
+				"0": {StatsUserUplink: true, StatsUserDownlink: true},
+			},
+			System: SystemPolicy{
+				StatsInboundUplink:   true,
+				StatsInboundDownlink: true,
+			},
 		},
 		Routing: &Routing{
 			DomainStrategy: "IPIfNonMatch",

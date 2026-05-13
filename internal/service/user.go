@@ -17,14 +17,16 @@ import (
 )
 
 type UserService struct {
-	userRepo *repository.UserRepository
-	nodeRepo *repository.NodeRepository
+	userRepo    *repository.UserRepository
+	nodeRepo    *repository.NodeRepository
+	trafficRepo *repository.TrafficRepository
 }
 
 func NewUserService() *UserService {
 	return &UserService{
-		userRepo: repository.NewUserRepository(),
-		nodeRepo: repository.NewNodeRepository(),
+		userRepo:    repository.NewUserRepository(),
+		nodeRepo:    repository.NewNodeRepository(),
+		trafficRepo: repository.NewTrafficRepository(),
 	}
 }
 
@@ -192,9 +194,24 @@ func (s *UserService) List(page, pageSize int, baseURL string) ([]dto.UserRespon
 	if err != nil {
 		return nil, 0, err
 	}
+	// 一次性 join 当页用户的累计流量，避免 N+1
+	ids := make([]uint, 0, len(users))
+	for _, u := range users {
+		ids = append(ids, u.ID)
+	}
+	totals, _ := s.trafficRepo.ListTotalsByUserIDs(ids) // 失败时空 map，不阻塞主流程
+
 	result := make([]dto.UserResponse, 0, len(users))
 	for i := range users {
-		result = append(result, *s.toResponse(&users[i], baseURL))
+		resp := s.toResponse(&users[i], baseURL)
+		if t, ok := totals[users[i].ID]; ok {
+			resp.TrafficUpBytes = t.UpBytes
+			resp.TrafficDownBytes = t.DownBytes
+			if !t.LastUpdatedAt.IsZero() {
+				resp.TrafficLastUpdatedAt = t.LastUpdatedAt.Format(time.RFC3339)
+			}
+		}
+		result = append(result, *resp)
 	}
 	return result, total, nil
 }

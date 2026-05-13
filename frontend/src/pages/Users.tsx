@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarDays, ChevronDown, ChevronUp, Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, RefreshCw, Search, Send, Unplug, X } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { userApi, groupApi } from '@/lib/api'
+import { formatBytes } from '@/lib/utils'
 import type { FeishuPushResult, User } from '@/types'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Btn, FieldGroup } from '@/components/ui/Form'
@@ -854,6 +855,7 @@ export default function Users() {
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">到期时间</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">累计流量</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">飞书消息</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">飞书邮箱</th>
                 <th className="px-4 py-3 text-right text-[11px] font-medium uppercase tracking-[0.12em] text-faint">操作</th>
@@ -862,11 +864,11 @@ export default function Users() {
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={9} className="px-4 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-soft">暂无用户数据</td>
+                  <td colSpan={9} className="px-4 py-10 text-center text-soft">暂无用户数据</td>
                 </tr>
               ) : (
                 filteredUsers.map((u) => (
@@ -903,6 +905,12 @@ export default function Users() {
                     </td>
                     <td className="px-4 py-3.5">
                       <Switch checked={u.active} onChange={() => void toggleUserActive(u)} />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="space-y-0.5 text-xs leading-tight">
+                        <div className="text-soft" title="累计上行字节">↑ {formatBytes(u.traffic_up_bytes)}</div>
+                        <div className="text-soft" title="累计下行字节">↓ {formatBytes(u.traffic_down_bytes)}</div>
+                      </div>
                     </td>
                     <td className="px-4 py-3.5">
                       <Switch
