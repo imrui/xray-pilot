@@ -23,6 +23,7 @@ type SubscribeService struct {
 	userRepo    *repository.UserRepository
 	nodeRepo    *repository.NodeRepository
 	profileRepo *repository.InboundProfileRepository
+	trafficRepo *repository.TrafficRepository
 	settingSvc  *SettingService
 }
 
@@ -31,6 +32,7 @@ func NewSubscribeService() *SubscribeService {
 		userRepo:    repository.NewUserRepository(),
 		nodeRepo:    repository.NewNodeRepository(),
 		profileRepo: repository.NewInboundProfileRepository(),
+		trafficRepo: repository.NewTrafficRepository(),
 		settingSvc:  NewSettingService(),
 	}
 }
@@ -253,6 +255,16 @@ type SubscribePageData struct {
 	SubURL    string    // 主订阅链接：按 UA 智能识别格式
 	SubLinks  []SubLink // 备用订阅链接：按客户端类型显式区分
 	AltSubURL string    // 向后兼容：等价于 V2Ray Base64 链接（?format=v2ray）
+
+	// 累计流量（来自 UserTrafficTotal，由 TrafficPoller 周期更新）
+	// 当用户从未产生流量时，三项均为零值，模板侧据此决定是否提示"尚无流量记录"
+	TrafficUpBytes       int64
+	TrafficDownBytes     int64
+	TrafficTotalBytes    int64  // 上下行之和，预计算避免模板侧加法
+	TrafficUpHuman       string // 人类可读，预格式化避免模板侧逻辑
+	TrafficDownHuman     string
+	TrafficTotalHuman    string
+	TrafficLastUpdatedAt *time.Time
 }
 
 // SubLink 分客户端订阅链接（用于备用订阅卡片）
@@ -314,6 +326,22 @@ func (s *SubscribeService) GetSubscribePageDataWithBaseURL(token, baseURL string
 			{Label: "Clash 系", Hint: "Mihomo / Clash Verge / ClashX", Format: "clash", URL: clashURL},
 			{Label: "Sing-box", Hint: "sing-box / Hiddify", Format: "singbox", URL: singboxURL},
 		},
+	}
+
+	// 填充累计流量（查询失败时静默：信息页不应因辅助信息失败而 5xx）
+	if totals, err := s.trafficRepo.ListTotalsByUserIDs([]uint{user.ID}); err == nil {
+		if t, ok := totals[user.ID]; ok {
+			data.TrafficUpBytes = t.UpBytes
+			data.TrafficDownBytes = t.DownBytes
+			data.TrafficTotalBytes = t.UpBytes + t.DownBytes
+			data.TrafficUpHuman = formatBytes(t.UpBytes)
+			data.TrafficDownHuman = formatBytes(t.DownBytes)
+			data.TrafficTotalHuman = formatBytes(t.UpBytes + t.DownBytes)
+			if !t.LastUpdatedAt.IsZero() {
+				updatedAt := t.LastUpdatedAt
+				data.TrafficLastUpdatedAt = &updatedAt
+			}
+		}
 	}
 
 	groupIDs := userGroupIDs(user.Groups)
@@ -506,4 +534,27 @@ func decryptPrivateKey(encryptedKey string) (string, error) {
 		return encryptedKey, nil // 兼容明文
 	}
 	return plain, nil
+}
+
+// formatBytes 将字节数格式化为人类可读字符串（二进制单位）
+// 0 返回 "0 B"，与前端 lib/utils.ts 的 formatBytes 行为对齐
+func formatBytes(bytes int64) string {
+	if bytes <= 0 {
+		return "0 B"
+	}
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB"}
+	value := float64(bytes)
+	i := 0
+	for value >= 1024 && i < len(units)-1 {
+		value /= 1024
+		i++
+	}
+	switch {
+	case i == 0:
+		return fmt.Sprintf("%d %s", bytes, units[0])
+	case value < 10:
+		return fmt.Sprintf("%.2f %s", value, units[i])
+	default:
+		return fmt.Sprintf("%.1f %s", value, units[i])
+	}
 }
