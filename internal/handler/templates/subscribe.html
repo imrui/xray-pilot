@@ -42,9 +42,10 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .section-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
 .section-subtitle{margin-top:8px;font-size:12px;color:var(--text-faint);line-height:1.6}
 .user-grid{display:grid;grid-template-columns:minmax(0,1fr) 1px 280px;gap:0;align-items:start}
-.user-divider{height:100%;background:var(--border)}
+.user-divider{align-self:stretch;width:1px;background:var(--border)}
 .user-left{padding-right:24px;display:flex;flex-direction:column;justify-content:flex-start;min-height:220px;padding-top:4px}
-.user-right{padding-left:24px;display:flex;flex-direction:column;align-items:center;padding-top:4px}
+/* user-right 撑满左侧高度并内部垂直居中：左侧因累计流量增高时右侧不再贴顶 */
+.user-right{align-self:stretch;padding-left:24px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .user-fields{display:grid;gap:16px}
 .field-label{margin-bottom:4px;font-size:12px;color:var(--text-faint)}
 .field-value{font-size:15px;font-weight:600;color:var(--text)}
