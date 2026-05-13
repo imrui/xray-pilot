@@ -11,6 +11,7 @@ import (
 const (
 	KeySchedulerDriftInterval   = "scheduler.drift_check_interval"
 	KeySchedulerHealthInterval  = "scheduler.health_check_interval"
+	KeySchedulerTrafficInterval = "scheduler.traffic_poll_interval"
 	KeySSHDefaultPort           = "ssh.default_port"
 	KeySSHDefaultUser           = "ssh.default_user"
 	KeySSHDefaultKeyPath        = "ssh.default_key_path"
@@ -33,6 +34,7 @@ const (
 var settingDefaults = map[string]string{
 	KeySchedulerDriftInterval:   "300",
 	KeySchedulerHealthInterval:  "120",
+	KeySchedulerTrafficInterval: "300",
 	KeySSHDefaultPort:           "22",
 	KeySSHDefaultUser:           "root",
 	KeySSHDefaultKeyPath:        "",

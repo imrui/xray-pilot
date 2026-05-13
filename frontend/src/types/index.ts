@@ -18,6 +18,17 @@ export interface User {
   feishu_bound_at?: string
   created_at: string
   updated_at: string
+  // 流量统计累计（由后端 TrafficPoller 周期更新）
+  traffic_up_bytes?: number
+  traffic_down_bytes?: number
+  traffic_last_updated_at?: string
+}
+
+export interface TrafficSummary {
+  total_up_bytes: number
+  total_down_bytes: number
+  active_users_7d: number
+  last_updated_at?: string
 }
 
 export interface Group {

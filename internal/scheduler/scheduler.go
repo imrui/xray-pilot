@@ -16,6 +16,7 @@ import (
 // Scheduler 管理所有定时任务
 type Scheduler struct {
 	syncSvc    *service.SyncService
+	trafficSvc *service.TrafficService
 	settingSvc *service.SettingService
 	nodeRepo   *repository.NodeRepository
 	logRepo    *repository.LogRepository
@@ -25,6 +26,7 @@ type Scheduler struct {
 func New() *Scheduler {
 	return &Scheduler{
 		syncSvc:    service.NewSyncService(),
+		trafficSvc: service.NewTrafficService(),
 		settingSvc: service.NewSettingService(),
 		nodeRepo:   repository.NewNodeRepository(),
 		logRepo:    repository.NewLogRepository(),
@@ -36,6 +38,7 @@ func New() *Scheduler {
 func (s *Scheduler) Start(ctx context.Context) {
 	driftInterval := s.settingSvc.GetInt(service.KeySchedulerDriftInterval)
 	healthInterval := s.settingSvc.GetInt(service.KeySchedulerHealthInterval)
+	trafficInterval := s.settingSvc.GetInt(service.KeySchedulerTrafficInterval)
 
 	if driftInterval > 0 {
 		go s.runLoop(ctx, "drift_check",
@@ -50,6 +53,14 @@ func (s *Scheduler) Start(ctx context.Context) {
 			time.Duration(healthInterval)*time.Second,
 			15*time.Second,
 			s.runHealthCheck,
+		)
+	}
+
+	if trafficInterval > 0 {
+		go s.runLoop(ctx, "traffic_poll",
+			time.Duration(trafficInterval)*time.Second,
+			30*time.Second, // 启动后 30s 延迟，避免与 health_check 抢资源
+			func() { s.trafficSvc.RunOnce(ctx) },
 		)
 	}
 }

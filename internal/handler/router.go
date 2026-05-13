@@ -15,6 +15,7 @@ func RegisterRoutes(r *gin.Engine) {
 	systemH := NewSystemHandler()
 	subH := NewSubscribeHandler()
 	feishuH := NewFeishuHandler()
+	trafficH := NewTrafficHandler()
 
 	// 订阅（无需鉴权）
 	r.GET("/sub/:token", subH.Subscribe)
@@ -75,6 +76,9 @@ func RegisterRoutes(r *gin.Engine) {
 		// 操作日志
 		api.GET("/logs", logH.List)
 		api.POST("/logs/cleanup", logH.Cleanup)
+
+		// 流量统计
+		api.GET("/traffic/summary", trafficH.Summary)
 
 		// 系统信息（只读）
 		api.GET("/system/info", systemH.GetSystemInfo)
