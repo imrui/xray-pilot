@@ -153,9 +153,16 @@ func (h *SubscribeHandler) Subscribe(c *gin.Context) {
 
 // handleSubscription 返回代理客户端格式的订阅内容
 func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format string) {
-	var expire int64
-	if u, err := h.svc.GetUser(token); err == nil && u.ExpiresAt != nil {
-		expire = u.ExpiresAt.Unix()
+	var (
+		expire  int64
+		up      int64
+		down    int64
+	)
+	if u, err := h.svc.GetUser(token); err == nil {
+		if u.ExpiresAt != nil {
+			expire = u.ExpiresAt.Unix()
+		}
+		up, down = h.svc.GetUserTraffic(u.ID)
 	}
 
 	var (
@@ -175,7 +182,9 @@ func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format stri
 		return
 	}
 
-	c.Header("Subscription-Userinfo", fmt.Sprintf("upload=0; download=0; total=0; expire=%d", expire))
+	// Subscription-Userinfo 是 v2ray 生态事实标准头，主流客户端据此显示用户用量
+	// total=0 表示无配额限制（与 v0.2.1 决定不做配额一致）
+	c.Header("Subscription-Userinfo", fmt.Sprintf("upload=%d; download=%d; total=0; expire=%d", up, down, expire))
 	c.Header("Profile-Update-Interval", "24")
 	switch format {
 	case "clash":

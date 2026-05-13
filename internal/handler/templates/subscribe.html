@@ -42,9 +42,10 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .section-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
 .section-subtitle{margin-top:8px;font-size:12px;color:var(--text-faint);line-height:1.6}
 .user-grid{display:grid;grid-template-columns:minmax(0,1fr) 1px 280px;gap:0;align-items:start}
-.user-divider{height:100%;background:var(--border)}
+.user-divider{align-self:stretch;width:1px;background:var(--border)}
 .user-left{padding-right:24px;display:flex;flex-direction:column;justify-content:flex-start;min-height:220px;padding-top:4px}
-.user-right{padding-left:24px;display:flex;flex-direction:column;align-items:center;padding-top:4px}
+/* user-right 撑满左侧高度并内部垂直居中：左侧因累计流量增高时右侧不再贴顶 */
+.user-right{align-self:stretch;padding-left:24px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .user-fields{display:grid;gap:16px}
 .field-label{margin-bottom:4px;font-size:12px;color:var(--text-faint)}
 .field-value{font-size:15px;font-weight:600;color:var(--text)}
@@ -53,12 +54,10 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .field-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid;font-size:12px;font-weight:600}
 .traffic-section{margin-top:4px;padding-top:16px;border-top:1px solid var(--border)}
-.traffic-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:6px}
+.traffic-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;margin-top:8px}
+.traffic-cell{min-width:0}
 .traffic-cell-label{font-size:11px;color:var(--text-faint);letter-spacing:.04em}
 .traffic-cell-value{margin-top:2px;font-size:15px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
-.traffic-total{margin-top:10px;font-size:12px;color:var(--text-soft)}
-.traffic-total strong{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
-.traffic-updated{margin-top:6px;font-size:11px;color:var(--text-faint)}
 .traffic-empty{margin-top:6px;font-size:12px;color:var(--text-faint);font-style:italic}
 .badge-active{background:var(--badge-green-bg);color:var(--badge-green-text);border-color:var(--badge-green-border)}
 .badge-inactive{background:var(--badge-red-bg);color:var(--badge-red-text);border-color:var(--badge-red-border)}
@@ -95,8 +94,8 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .modal{position:relative;width:min(100%,360px);padding:22px;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-card)}
 .modal-close{position:absolute;top:14px;right:14px;width:28px;height:28px;border:1px solid var(--accent);border-radius:8px;background:transparent;color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .15s ease}
 .modal-close:hover{background:var(--accent-soft)}
-.modal-title{padding-right:36px;font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px}
-.modal-sub{margin-top:4px;margin-bottom:18px;font-size:12px;color:var(--text-faint)}
+.modal-title{padding:0 36px;font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;word-break:break-word;text-align:center}
+.modal-sub{margin-top:4px;margin-bottom:18px;font-size:12px;color:var(--text-faint);text-align:center}
 .modal-qr{display:flex;justify-content:center}
 @media (min-width:641px){
   .qr-hint{white-space:nowrap}
@@ -195,20 +194,26 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
           <div class="traffic-section">
             <div class="field-label">累计流量</div>
             {{if .HasTraffic}}
-            <div class="traffic-row">
-              <div>
+            <div class="traffic-grid">
+              <div class="traffic-cell">
                 <div class="traffic-cell-label">↑ 上行</div>
                 <div class="traffic-cell-value">{{.TrafficUpHuman}}</div>
               </div>
-              <div>
+              <div class="traffic-cell">
                 <div class="traffic-cell-label">↓ 下行</div>
                 <div class="traffic-cell-value">{{.TrafficDownHuman}}</div>
               </div>
+              <div class="traffic-cell">
+                <div class="traffic-cell-label">合计</div>
+                <div class="traffic-cell-value">{{.TrafficTotalHuman}}</div>
+              </div>
+              {{if .TrafficLastUpdatedStr}}
+              <div class="traffic-cell">
+                <div class="traffic-cell-label">最近更新</div>
+                <div class="traffic-cell-value">{{.TrafficLastUpdatedStr}}</div>
+              </div>
+              {{end}}
             </div>
-            <div class="traffic-total">合计 <strong>{{.TrafficTotalHuman}}</strong></div>
-            {{if .TrafficLastUpdatedStr}}
-            <div class="traffic-updated">最近更新 {{.TrafficLastUpdatedStr}}</div>
-            {{end}}
             {{else}}
             <div class="traffic-empty">尚无流量记录</div>
             {{end}}
@@ -290,7 +295,7 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
             复制
           </button>
-          <button class="btn btn-icon qr-btn" title="二维码" data-name="{{.Label}} 订阅" data-region="{{.Hint}}" data-link="{{.URL}}">
+          <button class="btn btn-icon qr-btn" title="二维码" data-name="{{.Label}} 订阅" data-sub="{{.Hint}}" data-link="{{.URL}}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
           </button>
         </div>
@@ -385,10 +390,20 @@ function copyText(btn){
   }
 }
 
-function showQR(name, region, link){
-  var regionHtml = region ? '<span class="region-tag" style="margin-right:4px">' + region + '</span>' : '';
-  document.getElementById('modalTitle').innerHTML = regionHtml + name;
-  document.getElementById('modalSub').textContent = name === '备用订阅链接' ? '扫描二维码导入订阅' : '扫描二维码导入此节点';
+// showQR 渲染二维码弹窗
+//   name   - 主标题（必填）
+//   region - 节点地域 badge（可选；通常很短，作为 region-tag 显示在标题左侧）
+//   sub    - 副标题文案（可选；用于备用订阅链接显示客户端示例）
+//   link   - 二维码内容
+//
+// 节点弹窗调用：showQR(name, region, '', link) → "[广州] node 1"
+// 备用订阅调用：showQR(label, '', hint, link)  → "通用 Base64 订阅" + 下方副标题
+function showQR(name, region, sub, link){
+  var titleHtml = '';
+  if(region){ titleHtml += '<span class="region-tag" style="margin-right:4px">' + region + '</span>'; }
+  titleHtml += '<span>' + name + '</span>';
+  document.getElementById('modalTitle').innerHTML = titleHtml;
+  document.getElementById('modalSub').textContent = sub || '扫描二维码导入此节点';
   var el = document.getElementById('modalQR');
   el.innerHTML = '';
   var size = window.innerWidth <= 640 ? Math.min(180, window.innerWidth - 120) : 220;
@@ -470,7 +485,12 @@ document.addEventListener('click', function(e){
   }
   var qrBtn = e.target.closest('.qr-btn');
   if(qrBtn){
-    showQR(qrBtn.dataset.name || '', qrBtn.dataset.region || '', qrBtn.dataset.link || '');
+    showQR(
+      qrBtn.dataset.name || '',
+      qrBtn.dataset.region || '',
+      qrBtn.dataset.sub || '',
+      qrBtn.dataset.link || ''
+    );
   }
 });
 
