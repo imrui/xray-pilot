@@ -207,7 +207,9 @@ func (h *SubscribeHandler) handleInfoPage(c *gin.Context, token string) {
 
 	type tmplData struct {
 		*service.SubscribePageData
-		ExpiresStr string
+		ExpiresStr            string
+		TrafficLastUpdatedStr string // 预格式化避免模板里写日期 layout
+		HasTraffic            bool   // 是否曾产生过流量；用于模板判定占位提示
 	}
 
 	td := tmplData{SubscribePageData: data}
@@ -216,6 +218,10 @@ func (h *SubscribeHandler) handleInfoPage(c *gin.Context, token string) {
 	} else {
 		td.ExpiresStr = "∞"
 	}
+	if data.TrafficLastUpdatedAt != nil {
+		td.TrafficLastUpdatedStr = data.TrafficLastUpdatedAt.Format("2006-01-02 15:04")
+	}
+	td.HasTraffic = data.TrafficTotalBytes > 0
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Status(http.StatusOK)
