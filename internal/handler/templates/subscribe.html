@@ -53,13 +53,10 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .field-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;border:1px solid;font-size:12px;font-weight:600}
 .traffic-section{margin-top:4px;padding-top:16px;border-top:1px solid var(--border)}
-.traffic-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:6px}
+.traffic-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;margin-top:8px}
+.traffic-cell{min-width:0}
 .traffic-cell-label{font-size:11px;color:var(--text-faint);letter-spacing:.04em}
 .traffic-cell-value{margin-top:2px;font-size:15px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
-.traffic-total-row{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-top:10px}
-.traffic-total{font-size:12px;color:var(--text-soft)}
-.traffic-total strong{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
-.traffic-updated{font-size:11px;color:var(--text-faint);white-space:nowrap}
 .traffic-empty{margin-top:6px;font-size:12px;color:var(--text-faint);font-style:italic}
 .badge-active{background:var(--badge-green-bg);color:var(--badge-green-text);border-color:var(--badge-green-border)}
 .badge-inactive{background:var(--badge-red-bg);color:var(--badge-red-text);border-color:var(--badge-red-border)}
@@ -96,8 +93,8 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .modal{position:relative;width:min(100%,360px);padding:22px;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-card)}
 .modal-close{position:absolute;top:14px;right:14px;width:28px;height:28px;border:1px solid var(--accent);border-radius:8px;background:transparent;color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .15s ease}
 .modal-close:hover{background:var(--accent-soft)}
-.modal-title{padding-right:36px;font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap;word-break:break-word}
-.modal-sub{margin-top:4px;margin-bottom:18px;font-size:12px;color:var(--text-faint)}
+.modal-title{padding:0 36px;font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;word-break:break-word;text-align:center}
+.modal-sub{margin-top:4px;margin-bottom:18px;font-size:12px;color:var(--text-faint);text-align:center}
 .modal-qr{display:flex;justify-content:center}
 @media (min-width:641px){
   .qr-hint{white-space:nowrap}
@@ -196,20 +193,24 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
           <div class="traffic-section">
             <div class="field-label">累计流量</div>
             {{if .HasTraffic}}
-            <div class="traffic-row">
-              <div>
+            <div class="traffic-grid">
+              <div class="traffic-cell">
                 <div class="traffic-cell-label">↑ 上行</div>
                 <div class="traffic-cell-value">{{.TrafficUpHuman}}</div>
               </div>
-              <div>
+              <div class="traffic-cell">
                 <div class="traffic-cell-label">↓ 下行</div>
                 <div class="traffic-cell-value">{{.TrafficDownHuman}}</div>
               </div>
-            </div>
-            <div class="traffic-total-row">
-              <div class="traffic-total">合计 <strong>{{.TrafficTotalHuman}}</strong></div>
+              <div class="traffic-cell">
+                <div class="traffic-cell-label">合计</div>
+                <div class="traffic-cell-value">{{.TrafficTotalHuman}}</div>
+              </div>
               {{if .TrafficLastUpdatedStr}}
-              <div class="traffic-updated">最近更新 {{.TrafficLastUpdatedStr}}</div>
+              <div class="traffic-cell">
+                <div class="traffic-cell-label">最近更新</div>
+                <div class="traffic-cell-value">{{.TrafficLastUpdatedStr}}</div>
+              </div>
               {{end}}
             </div>
             {{else}}
