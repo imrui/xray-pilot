@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Database, Eye, EyeOff, ServerCog, ShieldCheck, Wrench } from 'lucide-react'
-import { systemApi } from '@/lib/api'
+import { CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Database, Download, Eye, EyeOff, HardDriveDownload, ServerCog, ShieldCheck, Trash2, Wrench } from 'lucide-react'
+import { backupApi, systemApi } from '@/lib/api'
+import type { BackupFile } from '@/lib/api'
 import { Btn, Field, SelectField } from '@/components/ui/Form'
 import { PageHeader, PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Badge } from '@/components/ui/Badge'
 import type { DiagnosticItem } from '@/types'
 import { pushToast } from '@/lib/notify'
+import { formatBytes } from '@/lib/utils'
 
 const LOG_LEVEL_OPTIONS = [
   { value: 'warning', label: 'warning' },
@@ -291,8 +293,15 @@ export default function Settings() {
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="漂移检测间隔（秒，0 禁用）" type="number" value={form['scheduler.drift_check_interval'] ?? '300'} onChange={f('scheduler.drift_check_interval')} />
               <Field label="健康检测间隔（秒，0 禁用）" type="number" value={form['scheduler.health_check_interval'] ?? '120'} onChange={f('scheduler.health_check_interval')} />
+              <Field label="流量采集间隔（秒，0 禁用）" type="number" value={form['scheduler.traffic_poll_interval'] ?? '300'} onChange={f('scheduler.traffic_poll_interval')} />
+              <Field label="数据库备份间隔（小时，0 禁用）" type="number" value={form['backup.interval_hours'] ?? '24'} onChange={f('backup.interval_hours')} />
             </div>
           </Section>
+
+          <BackupSection
+            form={form}
+            onFieldChange={f}
+          />
         </div>
 
         <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
@@ -333,6 +342,122 @@ export default function Settings() {
         </div>
       </div>
     </PageShell>
+  )
+}
+
+function BackupSection({
+  form,
+  onFieldChange,
+}: {
+  form: SettingsMap
+  onFieldChange: (key: string) => (e: React.ChangeEvent<HTMLInputElement>) => void
+}) {
+  const qc = useQueryClient()
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['system-backups'],
+    queryFn: () => backupApi.list().then((r) => r.data.data ?? []),
+  })
+
+  const run = useMutation({
+    mutationFn: () => backupApi.run(),
+    onSuccess: (res) => {
+      pushToast({
+        title: '备份完成',
+        description: `${res.data.data?.name ?? ''} · ${formatBytes(res.data.data?.size)}`,
+        variant: 'success',
+      })
+      void qc.invalidateQueries({ queryKey: ['system-backups'] })
+    },
+    onError: (e: Error) => {
+      pushToast({ title: '备份失败', description: e.message, variant: 'warning' })
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: (name: string) => backupApi.remove(name),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['system-backups'] })
+    },
+  })
+
+  const backups = data ?? []
+
+  return (
+    <Section
+      title="数据备份"
+      description="SQLite VACUUM INTO 生成完整快照，对运行中的服务安全。备份文件需自行拷贝到异地以应对主机损毁。"
+      actions={
+        <Btn variant="secondary" loading={run.isPending} onClick={() => run.mutate()}>
+          立即备份
+        </Btn>
+      }
+    >
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field
+          label="备份目录（相对工作目录或绝对路径）"
+          value={form['backup.dir'] ?? 'data/backup'}
+          onChange={onFieldChange('backup.dir')}
+          placeholder="data/backup"
+        />
+        <Field
+          label="保留天数（超过则自动清理）"
+          type="number"
+          value={form['backup.retention_days'] ?? '30'}
+          onChange={onFieldChange('backup.retention_days')}
+        />
+      </div>
+
+      <div className="rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)]">
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 text-sm">
+          <div className="flex items-center gap-2 font-semibold">
+            <HardDriveDownload className="h-4 w-4 text-[var(--accent)]" />
+            备份文件
+            <span className="text-faint">（{backups.length} 个）</span>
+          </div>
+          <Btn variant="ghost" onClick={() => void refetch()}>
+            刷新
+          </Btn>
+        </div>
+        {isLoading ? (
+          <div className="px-4 py-6 text-sm text-soft">加载中…</div>
+        ) : backups.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-soft">暂无备份。点击「立即备份」生成首个快照。</div>
+        ) : (
+          <ul className="divide-y divide-[var(--border)]">
+            {backups.map((b: BackupFile) => (
+              <li key={b.name} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-[13px]">{b.name}</div>
+                  <div className="mt-0.5 text-xs text-soft">
+                    {formatBytes(b.size)} · {new Date(b.created_at).toLocaleString()}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={backupApi.downloadURL(b.name)}
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--accent)] transition hover:bg-white/5"
+                    download
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    下载
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm(`删除备份 ${b.name}？`)) remove.mutate(b.name)
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs text-rose-400 transition hover:bg-rose-500/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    删除
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Section>
   )
 }
 

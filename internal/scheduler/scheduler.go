@@ -17,6 +17,7 @@ import (
 type Scheduler struct {
 	syncSvc    *service.SyncService
 	trafficSvc *service.TrafficService
+	backupSvc  *service.BackupService
 	settingSvc *service.SettingService
 	nodeRepo   *repository.NodeRepository
 	logRepo    *repository.LogRepository
@@ -27,6 +28,7 @@ func New() *Scheduler {
 	return &Scheduler{
 		syncSvc:    service.NewSyncService(),
 		trafficSvc: service.NewTrafficService(),
+		backupSvc:  service.NewBackupService(),
 		settingSvc: service.NewSettingService(),
 		nodeRepo:   repository.NewNodeRepository(),
 		logRepo:    repository.NewLogRepository(),
@@ -61,6 +63,15 @@ func (s *Scheduler) Start(ctx context.Context) {
 			time.Duration(trafficInterval)*time.Second,
 			30*time.Second, // 启动后 30s 延迟，避免与 health_check 抢资源
 			func() { s.trafficSvc.RunOnce(ctx) },
+		)
+	}
+
+	backupHours := s.settingSvc.GetInt(service.KeyBackupIntervalHours)
+	if backupHours > 0 {
+		go s.runLoop(ctx, "backup_run",
+			time.Duration(backupHours)*time.Hour,
+			1*time.Hour, // 启动后 1h 触发首次，避免启动风暴
+			func() { s.backupSvc.RunOnce() },
 		)
 	}
 }

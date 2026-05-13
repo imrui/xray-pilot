@@ -218,3 +218,22 @@ export const trafficApi = {
   summary: () =>
     request.get<ApiResponse<TrafficSummary>>('/traffic/summary'),
 }
+
+// ---- 数据库备份 ----
+export interface BackupFile {
+  name: string
+  size: number
+  created_at: string
+}
+
+export const backupApi = {
+  list: () =>
+    request.get<ApiResponse<BackupFile[]>>('/system/backups'),
+  run: () =>
+    request.post<ApiResponse<BackupFile>>('/system/backups'),
+  // 返回完整下载 URL；浏览器端通过 a[href]+download 触发
+  downloadURL: (name: string) =>
+    `/api/system/backups/${encodeURIComponent(name)}/download`,
+  remove: (name: string) =>
+    request.delete<ApiResponse<{ deleted: string }>>(`/system/backups/${encodeURIComponent(name)}`),
+}

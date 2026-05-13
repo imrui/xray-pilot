@@ -12,6 +12,9 @@ const (
 	KeySchedulerDriftInterval   = "scheduler.drift_check_interval"
 	KeySchedulerHealthInterval  = "scheduler.health_check_interval"
 	KeySchedulerTrafficInterval = "scheduler.traffic_poll_interval"
+	KeyBackupDir                = "backup.dir"
+	KeyBackupIntervalHours      = "backup.interval_hours"
+	KeyBackupRetentionDays      = "backup.retention_days"
 	KeySSHDefaultPort           = "ssh.default_port"
 	KeySSHDefaultUser           = "ssh.default_user"
 	KeySSHDefaultKeyPath        = "ssh.default_key_path"
@@ -35,6 +38,9 @@ var settingDefaults = map[string]string{
 	KeySchedulerDriftInterval:   "300",
 	KeySchedulerHealthInterval:  "120",
 	KeySchedulerTrafficInterval: "300",
+	KeyBackupDir:                "data/backup",
+	KeyBackupIntervalHours:      "24",
+	KeyBackupRetentionDays:      "30",
 	KeySSHDefaultPort:           "22",
 	KeySSHDefaultUser:           "root",
 	KeySSHDefaultKeyPath:        "",
