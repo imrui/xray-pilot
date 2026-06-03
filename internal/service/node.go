@@ -36,6 +36,7 @@ func (s *NodeService) Create(req *dto.CreateNodeRequest) (*dto.NodeResponse, err
 	node := &entity.Node{
 		Name:       req.Name,
 		Region:     req.Region,
+		Owner:      req.Owner,
 		IP:         req.IP,
 		Domain:     req.Domain,
 		SSHPort:    req.SSHPort,
@@ -73,6 +74,9 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 	}
 	if req.Region != nil {
 		node.Region = *req.Region
+	}
+	if req.Owner != nil {
+		node.Owner = *req.Owner
 	}
 	if req.IP != nil {
 		node.IP = *req.IP
@@ -165,6 +169,7 @@ func (s *NodeService) toNodeResponse(n *entity.Node) *dto.NodeResponse {
 		ID:              n.ID,
 		Name:            n.Name,
 		Region:          n.Region,
+		Owner:           n.Owner,
 		IP:              n.IP,
 		Domain:          n.Domain,
 		GroupNames:      groupNames,

@@ -105,11 +105,43 @@ func (s *ProfileService) GetByID(id uint) (*dto.ProfileResponse, error) {
 	return toProfileResponse(p), nil
 }
 
+// ensureNoPortConflict 校验在指定节点上、给定传输层与端口未被其他协议占用。
+// 排除 profileID 自身（覆盖保存场景）。TCP 与 UDP 各自独立编址，互不冲突。
+func (s *ProfileService) ensureNoPortConflict(nodeID, profileID uint, transport string, port int) error {
+	keys, err := s.profileRepo.FindKeysForNode(nodeID)
+	if err != nil {
+		return fmt.Errorf("校验端口冲突失败: %w", err)
+	}
+	for i := range keys {
+		k := keys[i]
+		if k.ProfileID == profileID || k.Profile == nil {
+			continue
+		}
+		if types.ProtocolTransport(k.Profile.Protocol) == transport && k.EffectivePort() == port {
+			return fmt.Errorf("端口冲突：%s 端口 %d 已被协议[%s]占用，请改用其他端口", transport, port, k.Profile.Name)
+		}
+	}
+	return nil
+}
+
 // UpsertNodeKey 创建或更新节点密钥材料，对 Reality 私钥进行 AES-GCM 加密
 func (s *ProfileService) UpsertNodeKey(nodeID, profileID uint, req *dto.UpsertNodeKeyRequest) (*dto.NodeKeyResponse, error) {
 	profile, err := s.profileRepo.FindByID(profileID)
 	if err != nil {
 		return nil, errors.New("协议配置不存在")
+	}
+
+	// 计算实际监听端口（节点覆盖优先）并校验同节点端口冲突
+	portOverride := 0
+	if req.Port != nil && *req.Port > 0 {
+		portOverride = *req.Port
+	}
+	effPort := profile.Port
+	if portOverride > 0 {
+		effPort = portOverride
+	}
+	if err := s.ensureNoPortConflict(nodeID, profileID, types.ProtocolTransport(profile.Protocol), effPort); err != nil {
+		return nil, err
 	}
 
 	settingsJSON := normalizeSettingsJSON(req.Settings)
@@ -125,6 +157,7 @@ func (s *ProfileService) UpsertNodeKey(nodeID, profileID uint, req *dto.UpsertNo
 		NodeID:    nodeID,
 		ProfileID: profileID,
 		Settings:  settingsJSON,
+		Port:      portOverride,
 	}
 	if err := s.profileRepo.UpsertKey(key); err != nil {
 		if errors.Is(err, repository.ErrNodeKeyLocked) {
@@ -168,6 +201,11 @@ func (s *ProfileService) KeygenForNode(nodeID, profileID uint) (*dto.NodeKeyResp
 	}
 	if profile.Protocol != types.ProtocolVlessReality {
 		return nil, errors.New("仅支持 vless-reality 协议自动生成密钥")
+	}
+
+	// 自动生成走协议模板端口，校验同节点端口冲突
+	if err := s.ensureNoPortConflict(nodeID, profileID, types.ProtocolTransport(profile.Protocol), profile.Port); err != nil {
+		return nil, err
 	}
 
 	privKey, pubKey, err := xray.GenerateX25519KeyPair()
@@ -264,6 +302,7 @@ func toNodeKeyResponse(k *entity.NodeProfileKey) *dto.NodeKeyResponse {
 		NodeID:    k.NodeID,
 		ProfileID: k.ProfileID,
 		Settings:  settings,
+		Port:      k.Port,
 		Locked:    k.Locked,
 		CreatedAt: k.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: k.UpdatedAt.Format(time.RFC3339),

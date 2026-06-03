@@ -93,6 +93,18 @@ func (s *SubscribeService) GenerateSubscription(token string) (string, error) {
 	return base64.StdEncoding.EncodeToString([]byte(content)), nil
 }
 
+// effectiveKeyPort 返回节点协议对外暴露的实际端口：节点级覆盖优先，回退协议模板端口。
+// 订阅 URI / Clash / sing-box 输出都必须用这个值，否则节点改了端口客户端连不上。
+func effectiveKeyPort(profile *entity.InboundProfile, key *entity.NodeProfileKey) int {
+	if key != nil && key.Port > 0 {
+		return key.Port
+	}
+	if profile != nil {
+		return profile.Port
+	}
+	return 0
+}
+
 // buildURI 根据协议类型分发 URI 构建
 func (s *SubscribeService) buildURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
 	if profile == nil {
@@ -148,7 +160,7 @@ func (s *SubscribeService) buildVlessRealityURI(user *entity.User, node *entity.
 
 	remark := s.buildRemark(node, user, "vless", "reality")
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",
-		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.PathEscape(remark))
+		user.UUID, node.ConnectAddr(), effectiveKeyPort(profile, key), params.Encode(), url.PathEscape(remark))
 }
 
 func (s *SubscribeService) buildVlessWSTLSURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
@@ -176,7 +188,7 @@ func (s *SubscribeService) buildVlessWSTLSURI(user *entity.User, node *entity.No
 
 	remark := s.buildRemark(node, user, "vless", "ws")
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",
-		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.PathEscape(remark))
+		user.UUID, node.ConnectAddr(), effectiveKeyPort(profile, key), params.Encode(), url.PathEscape(remark))
 }
 
 func (s *SubscribeService) buildTrojanURI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
@@ -197,7 +209,7 @@ func (s *SubscribeService) buildTrojanURI(user *entity.User, node *entity.Node, 
 
 	remark := s.buildRemark(node, user, "trojan", "tcp")
 	return fmt.Sprintf("trojan://%s@%s:%d?%s#%s",
-		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.PathEscape(remark))
+		user.UUID, node.ConnectAddr(), effectiveKeyPort(profile, key), params.Encode(), url.PathEscape(remark))
 }
 
 func (s *SubscribeService) buildHysteria2URI(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey) string {
@@ -222,7 +234,7 @@ func (s *SubscribeService) buildHysteria2URI(user *entity.User, node *entity.Nod
 
 	remark := s.buildRemark(node, user, "hy2", "udp")
 	return fmt.Sprintf("hy2://%s@%s:%d?%s#%s",
-		user.UUID, node.ConnectAddr(), profile.Port, params.Encode(), url.PathEscape(remark))
+		user.UUID, node.ConnectAddr(), effectiveKeyPort(profile, key), params.Encode(), url.PathEscape(remark))
 }
 
 // buildRemark 生成节点备注，支持格式占位符：
@@ -469,6 +481,7 @@ func (s *SubscribeService) buildClashProxy(user *entity.User, node *entity.Node,
 	}
 	name := s.buildRemark(node, user, string(profile.Protocol), "")
 	addr := node.ConnectAddr()
+	port := effectiveKeyPort(profile, key)
 
 	switch profile.Protocol {
 	case types.ProtocolVlessReality:
@@ -493,7 +506,7 @@ func (s *SubscribeService) buildClashProxy(user *entity.User, node *entity.Node,
 			shortID = km.ShortIds[0]
 		}
 		return fmt.Sprintf("  - name: %q\n    type: vless\n    server: %s\n    port: %d\n    uuid: %s\n    tls: true\n    servername: %s\n    flow: xtls-rprx-vision\n    client-fingerprint: %s\n    reality-opts:\n      public-key: %s\n      short-id: %s\n    network: tcp\n",
-			name, addr, profile.Port, user.UUID, sni, fp, km.PublicKey, shortID)
+			name, addr, port, user.UUID, sni, fp, km.PublicKey, shortID)
 
 	case types.ProtocolVlessWSTLS:
 		var ps types.VlessWSTLSSettings
@@ -509,7 +522,7 @@ func (s *SubscribeService) buildClashProxy(user *entity.User, node *entity.Node,
 			path = "/"
 		}
 		return fmt.Sprintf("  - name: %q\n    type: vless\n    server: %s\n    port: %d\n    uuid: %s\n    tls: true\n    servername: %s\n    network: ws\n    ws-opts:\n      path: %s\n      headers:\n        Host: %s\n",
-			name, addr, profile.Port, user.UUID, host, path, host)
+			name, addr, port, user.UUID, host, path, host)
 
 	case types.ProtocolTrojan:
 		var ps types.TrojanSettings
@@ -521,7 +534,7 @@ func (s *SubscribeService) buildClashProxy(user *entity.User, node *entity.Node,
 			sni = addr
 		}
 		return fmt.Sprintf("  - name: %q\n    type: trojan\n    server: %s\n    port: %d\n    password: %s\n    sni: %s\n",
-			name, addr, profile.Port, user.UUID, sni)
+			name, addr, port, user.UUID, sni)
 
 	case types.ProtocolHysteria2:
 		var ps types.Hysteria2Settings
@@ -533,7 +546,7 @@ func (s *SubscribeService) buildClashProxy(user *entity.User, node *entity.Node,
 			sni = addr
 		}
 		return fmt.Sprintf("  - name: %q\n    type: hysteria2\n    server: %s\n    port: %d\n    password: %s\n    sni: %s\n",
-			name, addr, profile.Port, user.UUID, sni)
+			name, addr, port, user.UUID, sni)
 	}
 	return ""
 }

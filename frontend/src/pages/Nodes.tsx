@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Copy, FileCode, Filter, PencilLine, Plus, RefreshCw, Search, Wifi } from 'lucide-react'
+import { AlertTriangle, Copy, FileCode, Filter, PencilLine, Plus, RefreshCw, Search, Sparkles, Wifi } from 'lucide-react'
 import { nodeApi, profileApi } from '@/lib/api'
+import { generateShortIds } from '@/lib/keygen'
+import { protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
 import type { InboundProfile, Node, NodeKey, SyncStatus } from '@/types'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
@@ -32,6 +34,7 @@ const unconfiguredStatusMeta = {
 interface FormState {
   name: string
   region: string
+  owner: string
   ip: string
   domain: string
   ssh_port: string
@@ -43,6 +46,7 @@ interface FormState {
 const emptyForm = (): FormState => ({
   name: '',
   region: '',
+  owner: '',
   ip: '',
   domain: '',
   ssh_port: '22',
@@ -85,6 +89,7 @@ export default function Nodes() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'synced' | 'drifted' | 'failed' | 'pending'>('all')
   const [regionFilter, setRegionFilter] = useState<string>('all')
+  const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
   const { data, isLoading } = useQuery({
@@ -112,6 +117,10 @@ export default function Nodes() {
 
   const regions = useMemo(() => {
     return Array.from(new Set((data?.list ?? []).map((n) => n.region).filter(Boolean)))
+  }, [data?.list])
+
+  const owners = useMemo(() => {
+    return Array.from(new Set((data?.list ?? []).map((n) => n.owner).filter(Boolean)))
   }, [data?.list])
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['nodes'] })
@@ -198,6 +207,7 @@ export default function Nodes() {
     const next = {
       name: n.name,
       region: n.region,
+      owner: n.owner,
       ip: n.ip,
       domain: n.domain,
       ssh_port: String(n.ssh_port),
@@ -236,12 +246,14 @@ export default function Nodes() {
           n.name.toLowerCase().includes(keyword) ||
           n.ip.toLowerCase().includes(keyword) ||
           n.domain.toLowerCase().includes(keyword) ||
-          n.region.toLowerCase().includes(keyword)
+          n.region.toLowerCase().includes(keyword) ||
+          n.owner.toLowerCase().includes(keyword)
         const matchesStatus = statusFilter === 'all' || n.sync_status === statusFilter
         const matchesRegion = regionFilter === 'all' || n.region === regionFilter
-        return matchesKeyword && matchesStatus && matchesRegion
+        const matchesOwner = ownerFilter === 'all' || n.owner === ownerFilter
+        return matchesKeyword && matchesStatus && matchesRegion && matchesOwner
       })
-  }, [data?.list, search, statusFilter, regionFilter])
+  }, [data?.list, search, statusFilter, regionFilter, ownerFilter])
 
   const allVisibleSelected = filteredNodes.length > 0 && filteredNodes.every((n) => selectedIds.includes(n.id))
   const dirty = JSON.stringify(form) !== JSON.stringify(initialForm) && drawer.open
@@ -318,9 +330,10 @@ export default function Nodes() {
         <button
           type="button"
           onClick={() => setProtocolNode(node)}
-          className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+          title="点击管理该节点协议"
+          className="inline-flex rounded-full transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
         >
-          {firstProfile.name}
+          <Badge label={firstProfile.name} variant={protocolBadgeVariant(firstProfile.protocol)} />
         </button>
         {restProfiles.length > 0 && (
           <Tooltip
@@ -328,16 +341,18 @@ export default function Nodes() {
             content={
               <div className="space-y-1">
                 {matchedProfiles.map((profile) => (
-                  <div key={profile.id}>{profile.name}</div>
+                  <div key={profile.id}>
+                    {profile.name} <span className="text-faint">· {protocolLabel(profile.protocol)}</span>
+                  </div>
                 ))}
               </div>
             }
-            className="max-w-[240px] whitespace-normal"
+            className="max-w-[260px] whitespace-normal"
           >
             <button
               type="button"
               onClick={() => setProtocolNode(node)}
-              className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+              className="inline-flex h-6 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
             >
               +{restProfiles.length}
             </button>
@@ -381,6 +396,17 @@ export default function Nodes() {
               {regions.map((region) => (
                 <option key={region} value={region}>
                   {region}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex h-11 min-w-[130px] items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm">
+            <Filter className="h-4 w-4 text-faint" />
+            <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} className="w-full bg-transparent text-sm outline-none">
+              <option value="all">全部所有者</option>
+              {owners.map((owner) => (
+                <option key={owner} value={owner}>
+                  {owner}
                 </option>
               ))}
             </select>
@@ -450,7 +476,7 @@ export default function Nodes() {
 
       <SurfaceCard className="overflow-visible">
         <div className="overflow-x-auto overflow-y-visible">
-          <table className="w-full min-w-[1380px] text-left text-sm">
+          <table className="w-full min-w-[1480px] text-left text-sm">
             <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
               <tr>
                 <th className="w-10 px-4 py-3">
@@ -466,6 +492,7 @@ export default function Nodes() {
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">连接地址</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">所有者</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">用户 / Xray</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">协议</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
@@ -476,11 +503,11 @@ export default function Nodes() {
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={11} className="px-4 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredNodes.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
+                  <td colSpan={11} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
                 </tr>
               ) : (
                 filteredNodes.map((n) => (
@@ -523,6 +550,13 @@ export default function Nodes() {
                     </td>
                     <td className="px-4 py-3.5">
                       {renderGroupCell(n.group_names)}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {n.owner ? (
+                        <Badge label={n.owner} variant="gray" />
+                      ) : (
+                        <span className="text-soft">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="font-medium text-[var(--text)]">{n.online_user_count} 人</div>
@@ -661,8 +695,9 @@ export default function Nodes() {
             <Field label="节点名 *" value={form.name} onChange={f('name')} />
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="地区" value={form.region} onChange={f('region')} placeholder="如：香港" />
-              <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="例如：高可用入口节点" />
+              <Field label="所有者" value={form.owner} onChange={f('owner')} placeholder="标识节点来源，如：供应商A" />
             </div>
+            <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="例如：高可用入口节点" />
           </FieldGroup>
 
           <FieldGroup title="连接地址" description="域名为空时使用 IP 直连。">
@@ -711,7 +746,7 @@ export default function Nodes() {
         />
       )}
       {protocolNode && (
-        <NodeProtocolsModal
+        <NodeProtocolsDrawer
           node={protocolNode}
           profiles={profilesData?.list ?? []}
           onPreview={() => {
@@ -816,7 +851,7 @@ function ProtocolSummary({ nodeKeys, activeProfiles }: { nodeKeys: NodeKey[]; ac
   )
 }
 
-function NodeProtocolsModal({
+function NodeProtocolsDrawer({
   node,
   profiles,
   onPreview,
@@ -829,136 +864,468 @@ function NodeProtocolsModal({
 }) {
   const confirm = useConfirm()
   const qc = useQueryClient()
-  const { data: nodeKeys, isLoading, error } = useQuery({
-    queryKey: ['nodeKeysQuickView', node.id],
+  const [activeProfileId, setActiveProfileId] = useState<number | null>(null)
+  const [selectedProfileIds, setSelectedProfileIds] = useState<number[]>([])
+  const [loadedByProfile, setLoadedByProfile] = useState<Record<number, { settings: string; port: number }>>({})
+  const [draftByProfile, setDraftByProfile] = useState<Record<number, { settings: string; port: number }>>({})
+  const [filter, setFilter] = useState('')
+  const [msg, setMsg] = useState('')
+  const [msgType, setMsgType] = useState<'ok' | 'err'>('ok')
+
+  const { data: nodeKeys } = useQuery({
+    queryKey: ['nodeKeys', node.id],
     queryFn: () => nodeApi.getKeys(node.id).then((r) => r.data.data ?? []),
-    retry: false,
   })
-  const removeKey = useMutation({
-    mutationFn: (profileId: number) => nodeApi.deleteKey(node.id, profileId),
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['nodes'] }),
-        qc.invalidateQueries({ queryKey: ['node-keys-for-list'] }),
-        qc.invalidateQueries({ queryKey: ['nodeKeysQuickView', node.id] }),
-      ])
+
+  const keyByProfileId = useMemo(() => {
+    const m = new Map<number, NodeKey>()
+    ;(nodeKeys ?? []).forEach((k) => m.set(k.profile_id, k))
+    return m
+  }, [nodeKeys])
+
+  // 同步已绑协议的 loaded 数据
+  useEffect(() => {
+    if (!nodeKeys) return
+    nodeKeys.forEach((k) => {
+      if (loadedByProfile[k.profile_id] !== undefined) return
+      setLoadedByProfile((prev) => ({
+        ...prev,
+        [k.profile_id]: {
+          settings: stringifyNodeKeySettings(k.settings),
+          port: k.port,
+        },
+      }))
+    })
+  }, [nodeKeys, loadedByProfile])
+
+  const activeProfiles = profiles.filter((p) => p.active)
+  const filteredProfiles = activeProfiles.filter((p) => {
+    const kw = filter.trim().toLowerCase()
+    if (!kw) return true
+    return p.name.toLowerCase().includes(kw) || p.protocol.toLowerCase().includes(kw)
+  })
+
+  const activateProfile = (id: number) => {
+    // 未绑定协议激活时，给一个默认草稿，方便编辑
+    if (loadedByProfile[id] === undefined && draftByProfile[id] === undefined) {
+      setDraftByProfile((prev) => ({ ...prev, [id]: { settings: '{}', port: 0 } }))
+    }
+    setActiveProfileId(id)
+  }
+
+  const updateDraft = (profileId: number, patch: Partial<{ settings: string; port: number }>) => {
+    const base = draftByProfile[profileId] ?? loadedByProfile[profileId] ?? { settings: '{}', port: 0 }
+    setDraftByProfile((prev) => ({ ...prev, [profileId]: { ...base, ...patch } }))
+  }
+
+  const dirtyProfileIds = Object.keys(draftByProfile)
+    .map(Number)
+    .filter((id) => {
+      const d = draftByProfile[id]
+      const l = loadedByProfile[id]
+      return !l || d.settings !== l.settings || d.port !== l.port
+    })
+
+  const toggleProfileSelect = (id: number) => {
+    setSelectedProfileIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  const activeProfile = activeProfileId !== null ? activeProfiles.find((p) => p.id === activeProfileId) : undefined
+  const activeKey = activeProfileId !== null ? keyByProfileId.get(activeProfileId) : undefined
+  const activeLocked = activeKey?.locked ?? false
+  const activeDraft = activeProfileId !== null ? (draftByProfile[activeProfileId] ?? loadedByProfile[activeProfileId]) : undefined
+
+  // 端口冲突前端实时检测（后端仍会硬校验兜底）
+  const portConflict = useMemo(() => {
+    if (!activeProfile || !activeDraft) return null
+    const effPort = activeDraft.port > 0 ? activeDraft.port : activeProfile.port
+    const transport = activeProfile.protocol === 'hysteria2' ? 'udp' : 'tcp'
+    for (const k of nodeKeys ?? []) {
+      if (k.profile_id === activeProfile.id) continue
+      const other = profiles.find((p) => p.id === k.profile_id)
+      if (!other) continue
+      const otherTransport = other.protocol === 'hysteria2' ? 'udp' : 'tcp'
+      const otherEffPort = k.port > 0 ? k.port : other.port
+      if (otherTransport === transport && otherEffPort === effPort) {
+        return `${transport.toUpperCase()} 端口 ${effPort} 已被协议 [${other.name}] 占用`
+      }
+    }
+    return null
+  }, [activeProfile, activeDraft, nodeKeys, profiles])
+
+  const batchSave = useMutation({
+    mutationFn: async () => {
+      const targets = selectedProfileIds.length > 0 ? selectedProfileIds : activeProfileId !== null ? [activeProfileId] : []
+      if (targets.length === 0) throw new Error('请先选择目标协议')
+      const results: Array<{ id: number; ok: boolean; msg: string }> = []
+      for (const id of targets) {
+        const draft = draftByProfile[id] ?? loadedByProfile[id] ?? { settings: '{}', port: 0 }
+        const settings = draft.settings || '{}'
+        try {
+          await nodeApi.upsertKey(node.id, id, settings, draft.port)
+          results.push({ id, ok: true, msg: '已保存' })
+        } catch (e) {
+          results.push({ id, ok: false, msg: (e as Error).message })
+        }
+      }
+      return results
+    },
+    onSuccess: (results) => {
+      const ok = results.filter((r) => r.ok).length
+      const failed = results.length - ok
+      results.filter((r) => r.ok).forEach((r) => {
+        const d = draftByProfile[r.id] ?? loadedByProfile[r.id] ?? { settings: '{}', port: 0 }
+        setLoadedByProfile((prev) => ({ ...prev, [r.id]: d }))
+        setDraftByProfile((prev) => {
+          const n = { ...prev }
+          delete n[r.id]
+          return n
+        })
+      })
+      setMsg(
+        failed === 0
+          ? `已保存 ${ok} 个协议`
+          : `成功 ${ok}，失败 ${failed}。${results.filter((r) => !r.ok).map((r) => `#${r.id} ${r.msg}`).join('；')}`,
+      )
+      setMsgType(failed === 0 ? 'ok' : 'err')
+      qc.invalidateQueries({ queryKey: ['nodes'] })
+      qc.invalidateQueries({ queryKey: ['nodeKeys', node.id] })
+      qc.invalidateQueries({ queryKey: ['node-keys-for-list'] })
+    },
+    onError: (e: Error) => {
+      setMsg(`保存失败: ${e.message}`)
+      setMsgType('err')
     },
   })
 
-  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]))
-  const boundProfiles = (nodeKeys ?? [])
-    .map((key) => ({ key, profile: profileMap.get(key.profile_id) }))
-    .filter((item): item is { key: NodeKey; profile: InboundProfile } => Boolean(item.profile))
+  const keygen = useMutation({
+    mutationFn: async () => {
+      if (activeProfileId === null) throw new Error('请先选择协议')
+      if (activeProfile?.protocol !== 'vless-reality') throw new Error('仅 VLESS+Reality 支持一键生成')
+      const res = await nodeApi.keygen()
+      const keys = res.data.data
+      if (!keys) throw new Error('密钥生成失败')
+      return JSON.stringify(
+        { private_key: keys.private_key, public_key: keys.public_key, short_ids: generateShortIds(6) },
+        null,
+        2,
+      )
+    },
+    onSuccess: (settings) => {
+      if (activeProfileId !== null) updateDraft(activeProfileId, { settings })
+      setMsg('密钥已生成（草稿），记得保存')
+      setMsgType('ok')
+    },
+    onError: (e: Error) => {
+      setMsg(`生成失败: ${e.message}`)
+      setMsgType('err')
+    },
+  })
+
+  const fillTemplate = () => {
+    if (selectedProfileIds.length > 0) {
+      selectedProfileIds.forEach((id) => {
+        const p = activeProfiles.find((x) => x.id === id)
+        if (p) updateDraft(id, { settings: stringifyNodeKeySettings(p.settings) })
+      })
+      setMsg(`已为 ${selectedProfileIds.length} 个协议填入模板配置`)
+      setMsgType('ok')
+      return
+    }
+    if (activeProfileId === null || !activeProfile) return
+    updateDraft(activeProfileId, { settings: stringifyNodeKeySettings(activeProfile.settings) })
+    setMsg('已填入协议默认配置')
+    setMsgType('ok')
+  }
+
+  const lockToggle = useMutation({
+    mutationFn: (locked: boolean) => {
+      if (activeProfileId === null) throw new Error('请先选择协议')
+      return nodeApi.setKeyLock(node.id, activeProfileId, locked)
+    },
+    onSuccess: (_, locked) => {
+      setMsg(locked ? '已锁定该节点协议' : '已解除锁定')
+      setMsgType('ok')
+      qc.invalidateQueries({ queryKey: ['nodeKeys', node.id] })
+    },
+    onError: (e: Error) => {
+      setMsg(`操作失败: ${e.message}`)
+      setMsgType('err')
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: (profileId: number) => nodeApi.deleteKey(node.id, profileId),
+    onSuccess: (_, profileId) => {
+      setMsg('已移除该协议绑定')
+      setMsgType('ok')
+      setLoadedByProfile((prev) => {
+        const n = { ...prev }
+        delete n[profileId]
+        return n
+      })
+      setDraftByProfile((prev) => {
+        const n = { ...prev }
+        delete n[profileId]
+        return n
+      })
+      qc.invalidateQueries({ queryKey: ['nodes'] })
+      qc.invalidateQueries({ queryKey: ['nodeKeys', node.id] })
+      qc.invalidateQueries({ queryKey: ['node-keys-for-list'] })
+    },
+    onError: (e: Error) => {
+      setMsg(`移除失败: ${e.message}`)
+      setMsgType('err')
+    },
+  })
+
+  const targets = selectedProfileIds.length > 0 ? selectedProfileIds : activeProfileId !== null ? [activeProfileId] : []
+  const unboundSelected = selectedProfileIds.filter((id) => !keyByProfileId.has(id))
+  const saveLabel = selectedProfileIds.length > 1
+    ? unboundSelected.length === selectedProfileIds.length
+      ? `批量绑定 (${selectedProfileIds.length})`
+      : `批量保存 (${selectedProfileIds.length})`
+    : keyByProfileId.has(activeProfileId ?? -1) ? '保存协议' : '绑定协议'
 
   return (
-    <Modal
+    <Drawer
       open
       onClose={onClose}
-      title={`节点协议概览 · ${node.name}`}
-      size="lg"
+      title={`节点协议管理 · ${node.name}`}
+      description="左侧选择/多选协议；右侧编辑参数与端口。未绑协议直接保存即视为绑定。"
+      width="xl"
       footer={
-        <div className="flex items-center gap-2">
+        <>
           <Btn variant="secondary" onClick={onClose}>关闭</Btn>
           <Btn variant="secondary" onClick={onPreview}>
             <FileCode className="h-4 w-4" />
             查看完整配置
           </Btn>
-        </div>
+          <Btn
+            loading={batchSave.isPending}
+            onClick={() => batchSave.mutate()}
+            disabled={targets.length === 0 || (selectedProfileIds.length === 0 && activeLocked) || portConflict !== null}
+          >
+            {saveLabel}
+          </Btn>
+        </>
       }
     >
-      <div className="space-y-4">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4 text-sm text-soft">
-          <div className="font-medium text-[var(--text)]">
-            <span className="text-faint">#{node.id}</span>
-            <span className="mx-2">{node.name}</span>
+      <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
+        {/* 左侧：协议清单 */}
+        <div className="space-y-3">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-muted)] p-3 text-xs text-soft">
+            <div className="font-medium text-[var(--text)]">
+              <span className="text-faint">#{node.id}</span>
+              <span className="mx-2">{node.name}</span>
+            </div>
+            <div className="mt-1 truncate">
+              {[node.ip, node.domain].filter(Boolean).join(' · ')}
+            </div>
+            <div className="mt-1 truncate">
+              <span className="text-faint">地区</span> {node.region || '--'}
+              <span className="mx-1.5 text-faint">·</span>
+              <span className="text-faint">所有者</span> {node.owner || '--'}
+            </div>
           </div>
-          <div className="mt-1">
-            {node.ip}
-            <span className="mx-2 text-faint">·</span>
-            {node.domain || '--'}
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="搜索协议 名称/类型"
+            className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none"
+          />
+          <div className="flex items-center justify-between text-xs text-soft">
+            <span>共 {filteredProfiles.length} 个</span>
+            <button
+              type="button"
+              onClick={() => {
+                const allVis = filteredProfiles.every((p) => selectedProfileIds.includes(p.id))
+                setSelectedProfileIds(
+                  allVis
+                    ? selectedProfileIds.filter((id) => !filteredProfiles.some((p) => p.id === id))
+                    : Array.from(new Set([...selectedProfileIds, ...filteredProfiles.map((p) => p.id)])),
+                )
+              }}
+              className="text-[var(--accent)] hover:underline"
+            >
+              {filteredProfiles.every((p) => selectedProfileIds.includes(p.id)) && filteredProfiles.length > 0 ? '清空选择' : '全选可见'}
+            </button>
+          </div>
+          <div className="max-h-[520px] space-y-1.5 overflow-y-auto pr-1">
+            {filteredProfiles.map((p) => {
+              const k = keyByProfileId.get(p.id)
+              const isActive = activeProfileId === p.id
+              const isSelected = selectedProfileIds.includes(p.id)
+              const isDirty = dirtyProfileIds.includes(p.id)
+              const effPort = k && k.port > 0 ? k.port : p.port
+              return (
+                <div
+                  key={p.id}
+                  className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-sm transition ${
+                    isActive
+                      ? 'border-[var(--accent)]/40 bg-[var(--accent-soft)]'
+                      : 'border-[var(--border)] bg-[var(--panel-strong)] hover:bg-[var(--panel-muted)]'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleProfileSelect(p.id)}
+                    className="h-4 w-4 shrink-0 rounded border-[var(--border-strong)]"
+                    aria-label={`选择 ${p.name}`}
+                  />
+                  <button type="button" onClick={() => activateProfile(p.id)} className="flex min-w-0 flex-1 flex-col gap-1 text-left">
+                    <span className="flex items-center gap-1.5">
+                      <Badge label={protocolLabel(p.protocol)} variant={protocolBadgeVariant(p.protocol)} />
+                      {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存" />}
+                    </span>
+                    <span className="flex items-center gap-1.5 truncate text-xs text-soft">
+                      <span className="truncate font-medium text-[var(--text)]">{p.name}</span>
+                      <span className="text-faint">·</span>
+                      {k ? (
+                        <>
+                          <span>{k.port > 0 ? `端口 ${effPort}` : `默认 ${effPort}`}</span>
+                          {k.locked && <span className="text-amber-500">🔒</span>}
+                        </>
+                      ) : (
+                        <span className="text-faint">未绑</span>
+                      )}
+                    </span>
+                  </button>
+                  {k && <Badge label="已绑" variant="green" />}
+                </div>
+              )
+            })}
           </div>
         </div>
-        {isLoading && <p className="py-8 text-center text-sm text-soft">加载中…</p>}
-        {error && <p className="rounded-2xl border border-rose-500/20 bg-rose-500/8 p-4 text-sm text-rose-400">{(error as Error).message}</p>}
-        {!isLoading && !error && boundProfiles.length === 0 && (
-          <p className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4 text-sm text-soft">
-            当前节点未绑定任何协议，可继续通过协议配置页面补充节点密钥。
-          </p>
-        )}
-        {!isLoading && !error && boundProfiles.length > 0 && (
-          <div className="space-y-3">
-            {boundProfiles.map(({ key, profile }) => (
-              <div key={profile.id} className="rounded-2xl border border-[var(--border)] bg-[var(--panel-strong)] p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="font-semibold">
-                        <span className="text-faint">#{profile.id}</span>
-                        <span className="mx-2">{profile.name}</span>
-                      </div>
-                      <Badge label={profile.protocol} variant="blue" />
-                      {key.locked && <Badge label="已锁定" variant="yellow" />}
-                    </div>
-                    <div className="mt-2 grid gap-2 text-xs text-soft md:grid-cols-3">
-                      <div>端口 {profile.port}</div>
-                      <div>模板 {profile.active ? '启用中' : '已停用'}</div>
-                      <div>更新时间 {new Date(key.updated_at).toLocaleString('zh-CN')}</div>
-                    </div>
-                  </div>
-                  <Btn
-                    variant="secondary"
-                    disabled={key.locked || removeKey.isPending}
-                    onClick={async () => {
-                      const ok = await confirm({
-                        title: `移除节点协议「${profile.name}」？`,
-                        description: key.locked ? '当前协议已锁定，需先解锁后才能移除。' : '移除后该协议将不再参与节点配置生成，节点会重新进入待同步状态。',
-                        confirmText: '移除协议',
-                        cancelText: '取消',
-                        tone: 'danger',
-                      })
-                      if (!ok || key.locked) return
-                      removeKey.mutate(profile.id)
-                    }}
-                  >
-                    移除协议
+
+        {/* 右侧：编辑区 */}
+        <div className="space-y-4">
+          {targets.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-soft">
+              请从左侧选择协议（点击进入编辑，复选框用于批量操作）
+            </div>
+          )}
+
+          {targets.length > 0 && (
+            <>
+              <FieldGroup
+                title={
+                  selectedProfileIds.length > 1
+                    ? `批量目标 · ${selectedProfileIds.length} 个协议${unboundSelected.length > 0 ? `（含 ${unboundSelected.length} 个未绑）` : ''}`
+                    : `当前协议 · ${activeProfile?.name ?? ''}${!keyByProfileId.has(activeProfileId ?? -1) ? '（未绑）' : ''}`
+                }
+                description={
+                  selectedProfileIds.length > 1
+                    ? '批量保存会对所有勾选的协议生效；未绑协议会以模板默认参数完成绑定（可保存后逐个微调）。'
+                    : activeProfile
+                      ? `协议默认端口 ${activeProfile.port}（${activeProfile.protocol === 'hysteria2' ? 'UDP' : 'TCP'}）。端口留空或填 0 即继承默认。`
+                      : ''
+                }
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedProfileIds.length === 0 && activeProfile?.protocol === 'vless-reality' && (
+                    <Btn variant="secondary" loading={keygen.isPending} onClick={() => keygen.mutate()} disabled={activeLocked}>
+                      <Sparkles className="h-4 w-4" />
+                      一键生成
+                    </Btn>
+                  )}
+                  <Btn variant="secondary" onClick={fillTemplate} disabled={selectedProfileIds.length === 0 && activeLocked}>
+                    填充模板
                   </Btn>
+                  {selectedProfileIds.length === 0 && activeKey && (
+                    <Btn variant="secondary" loading={lockToggle.isPending} onClick={() => lockToggle.mutate(!activeLocked)}>
+                      {activeLocked ? '解除锁定' : '锁定协议'}
+                    </Btn>
+                  )}
+                  {selectedProfileIds.length === 0 && activeKey && (
+                    <Btn
+                      variant="secondary"
+                      disabled={activeLocked || remove.isPending}
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: `移除协议「${activeProfile?.name}」？`,
+                          description: '移除后该协议将不再参与节点配置生成，节点会重新进入待同步状态。',
+                          confirmText: '移除协议',
+                          cancelText: '取消',
+                          tone: 'danger',
+                        })
+                        if (ok && activeProfileId !== null) remove.mutate(activeProfileId)
+                      }}
+                    >
+                      移除协议
+                    </Btn>
+                  )}
                 </div>
-                <pre className="mt-3 overflow-x-auto rounded-xl border border-[var(--border)] bg-slate-950/90 p-3 text-[11px] leading-5 text-slate-100">
-                  {formatKeySettingsPreview(key.settings)}
-                </pre>
-              </div>
-            ))}
-          </div>
-        )}
+              </FieldGroup>
+
+              {selectedProfileIds.length === 0 && activeProfile && activeDraft && (
+                <FieldGroup title="参数与端口" description="保存空对象 `{}` 表示继承协议默认参数；端口填 0 表示继承协议模板端口。">
+                  <Field
+                    label={`监听端口（留空继承模板 ${activeProfile.port}）`}
+                    value={String(activeDraft.port || '')}
+                    onChange={(e) => updateDraft(activeProfileId!, { port: Number(e.target.value) || 0 })}
+                    placeholder={`${activeProfile.port}`}
+                    type="number"
+                  />
+                  {portConflict && <p className="text-xs text-rose-500">端口冲突：{portConflict}（保存会被后端拒绝）</p>}
+                  <textarea
+                    value={activeDraft.settings}
+                    onChange={(e) => updateDraft(activeProfileId!, { settings: e.target.value })}
+                    rows={12}
+                    disabled={activeLocked}
+                    className="min-h-[240px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+                    placeholder='{} 表示继承协议默认参数'
+                  />
+                  {activeLocked && <p className="text-xs text-amber-500">当前节点协议已锁定，需先解锁才能修改、删除或重新生成。</p>}
+                </FieldGroup>
+              )}
+
+              {selectedProfileIds.length > 1 && (
+                <FieldGroup title="批量草稿预览" description="每个协议保有独立草稿；按钮（如填充模板）的效果会写入所有选中协议。">
+                  <div className="space-y-2">
+                    {selectedProfileIds.map((id) => {
+                      const p = activeProfiles.find((x) => x.id === id)
+                      const draft = draftByProfile[id] ?? loadedByProfile[id] ?? { settings: '{}', port: 0 }
+                      const hasDraft = !!draftByProfile[id]
+                      const bound = keyByProfileId.has(id)
+                      return (
+                        <div key={id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-xs">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="truncate font-medium">{p?.name ?? `#${id}`}</span>
+                            {p && <Badge label={protocolLabel(p.protocol)} variant={protocolBadgeVariant(p.protocol)} />}
+                            {!bound && <Badge label="新绑定" variant="yellow" />}
+                          </div>
+                          <div className="flex items-center gap-2 text-soft">
+                            <span>{draft.port > 0 ? `端口 ${draft.port}` : '默认端口'}</span>
+                            <span>{draft.settings && draft.settings !== '{}' ? `${draft.settings.length} 字符` : '继承默认'}</span>
+                            {hasDraft && <Badge label="未保存" variant="yellow" />}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </FieldGroup>
+              )}
+
+              {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>{msg}</p>}
+            </>
+          )}
+        </div>
       </div>
-    </Modal>
+    </Drawer>
   )
 }
 
-function formatKeySettingsPreview(settings: unknown) {
-  try {
-    const parsed = typeof settings === 'string' ? JSON.parse(settings) : settings
-    const text = JSON.stringify(redactSensitiveSettings(parsed), null, 2)
-    if (text.length <= 280) return text
-    return `${text.slice(0, 280)}\n...`
-  } catch {
-    return '当前节点协议参数无法预览'
+function stringifyNodeKeySettings(settings: unknown) {
+  if (!settings) return '{}'
+  if (typeof settings === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(settings), null, 2)
+    } catch {
+      return settings
+    }
   }
+  return JSON.stringify(settings, null, 2)
 }
 
-function redactSensitiveSettings(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(redactSensitiveSettings)
-  }
-  if (!value || typeof value !== 'object') {
-    return value
-  }
-
-  const sensitiveKeys = new Set(['private_key', 'password', 'cert_key', 'certificate_key'])
-  return Object.fromEntries(
-    Object.entries(value).map(([key, innerValue]) => [
-      key,
-      sensitiveKeys.has(key) ? '***' : redactSensitiveSettings(innerValue),
-    ]),
-  )
-}

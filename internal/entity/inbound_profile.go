@@ -25,8 +25,23 @@ type NodeProfileKey struct {
 	ProfileID uint            `gorm:"not null;uniqueIndex:idx_node_profile"`
 	Profile   *InboundProfile `gorm:"foreignKey:ProfileID"`
 	// Settings JSON 序列化的节点密钥材料，具体结构见 pkg/types（RealityKeyMaterial / TLSCertMaterial）
-	Settings  string `gorm:"type:text"`
-	Locked    bool   `gorm:"default:false"`
+	Settings string `gorm:"type:text"`
+	// Port 节点级监听端口覆盖；0 表示继承所属 InboundProfile.Port。
+	// 支持同一节点上多协议错开端口（如 Reality 占 443、Trojan 改 8443）。
+	Port      int
+	Locked    bool `gorm:"default:false"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// EffectivePort 返回该节点协议实际监听端口：优先节点级覆盖，回退协议模板端口。
+// 调用前需确保 Profile 已加载（Preload），否则覆盖为空时返回 0。
+func (k *NodeProfileKey) EffectivePort() int {
+	if k.Port > 0 {
+		return k.Port
+	}
+	if k.Profile != nil {
+		return k.Profile.Port
+	}
+	return 0
 }

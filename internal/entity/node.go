@@ -18,6 +18,7 @@ type Node struct {
 	ID     uint   `gorm:"primaryKey"`
 	Name   string `gorm:"not null"`
 	Region string
+	Owner  string // 所有者，标识节点来源
 	IP     string // 服务器 IP（SSH 连接使用）
 	Domain string // 可选连接域名（订阅 URI 优先使用，为空则用 IP）
 

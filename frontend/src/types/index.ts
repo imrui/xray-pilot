@@ -48,6 +48,7 @@ export interface Node {
   id: number
   name: string
   region: string
+  owner: string           // 所有者，标识节点来源
   ip: string
   domain: string          // 客户端连接域名（CDN/中转），空则用 ip
   group_names?: string[]
@@ -88,6 +89,7 @@ export interface NodeKey {
   node_id: number
   profile_id: number
   settings: unknown   // JSON object（编辑节点密钥时返回可直接修改的原值）
+  port: number        // 节点级监听端口覆盖；0 表示继承协议模板端口
   locked: boolean
   created_at: string
   updated_at: string

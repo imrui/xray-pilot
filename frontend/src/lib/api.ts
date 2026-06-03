@@ -134,8 +134,8 @@ export const nodeApi = {
   getKeys: (nodeId: number) =>
     request.get<ApiResponse<NodeKey[]>>(`/nodes/${nodeId}/keys`),
 
-  upsertKey: (nodeId: number, profileId: number, settings: string) =>
-    request.put<ApiResponse<NodeKey>>(`/nodes/${nodeId}/keys/${profileId}`, { settings }),
+  upsertKey: (nodeId: number, profileId: number, settings: string, port?: number) =>
+    request.put<ApiResponse<NodeKey>>(`/nodes/${nodeId}/keys/${profileId}`, { settings, port: port ?? 0 }),
 
   setKeyLock: (nodeId: number, profileId: number, locked: boolean) =>
     request.patch<ApiResponse<null>>(`/nodes/${nodeId}/keys/${profileId}/lock`, { locked }),
