@@ -48,6 +48,7 @@ export interface Node {
   id: number
   name: string
   region: string
+  owner: string           // 所有者，标识节点来源
   ip: string
   domain: string          // 客户端连接域名（CDN/中转），空则用 ip
   group_names?: string[]

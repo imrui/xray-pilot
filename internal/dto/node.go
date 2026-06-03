@@ -4,6 +4,7 @@ package dto
 type CreateNodeRequest struct {
 	Name       string `json:"name" binding:"required"`
 	Region     string `json:"region"`
+	Owner      string `json:"owner"` // 所有者，标识节点来源
 	IP         string `json:"ip" binding:"required"`
 	Domain     string `json:"domain"` // 可选：客户端连接域名（CDN/中转）
 	SSHPort    int    `json:"ssh_port"`
@@ -16,6 +17,7 @@ type CreateNodeRequest struct {
 type UpdateNodeRequest struct {
 	Name       *string `json:"name"`
 	Region     *string `json:"region"`
+	Owner      *string `json:"owner"`
 	IP         *string `json:"ip"`
 	Domain     *string `json:"domain"`
 	SSHPort    *int    `json:"ssh_port"`
@@ -29,6 +31,7 @@ type NodeResponse struct {
 	ID              uint     `json:"id"`
 	Name            string   `json:"name"`
 	Region          string   `json:"region"`
+	Owner           string   `json:"owner"`
 	IP              string   `json:"ip"`
 	Domain          string   `json:"domain"`
 	GroupNames      []string `json:"group_names,omitempty"`

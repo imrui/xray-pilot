@@ -405,8 +405,13 @@ export default function Groups() {
                     >
                       <div className={`h-2.5 w-2.5 rounded-full ${checked ? 'bg-[var(--accent)]' : 'bg-slate-400/60'}`} />
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium">{n.name}</div>
-                        <div className="mt-1 text-xs text-soft">{n.region ? `${n.region} · ${n.ip}` : n.ip}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{n.name}</span>
+                          {n.owner && <Badge label={n.owner} variant="gray" />}
+                        </div>
+                        <div className="mt-1 text-xs text-soft">
+                          {[n.region, n.ip, n.domain].filter(Boolean).join(' · ')}
+                        </div>
                       </div>
                       <Layers2 className="h-4 w-4 text-soft" />
                     </button>

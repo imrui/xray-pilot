@@ -32,6 +32,7 @@ const unconfiguredStatusMeta = {
 interface FormState {
   name: string
   region: string
+  owner: string
   ip: string
   domain: string
   ssh_port: string
@@ -43,6 +44,7 @@ interface FormState {
 const emptyForm = (): FormState => ({
   name: '',
   region: '',
+  owner: '',
   ip: '',
   domain: '',
   ssh_port: '22',
@@ -85,6 +87,7 @@ export default function Nodes() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'synced' | 'drifted' | 'failed' | 'pending'>('all')
   const [regionFilter, setRegionFilter] = useState<string>('all')
+  const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
   const { data, isLoading } = useQuery({
@@ -112,6 +115,10 @@ export default function Nodes() {
 
   const regions = useMemo(() => {
     return Array.from(new Set((data?.list ?? []).map((n) => n.region).filter(Boolean)))
+  }, [data?.list])
+
+  const owners = useMemo(() => {
+    return Array.from(new Set((data?.list ?? []).map((n) => n.owner).filter(Boolean)))
   }, [data?.list])
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['nodes'] })
@@ -198,6 +205,7 @@ export default function Nodes() {
     const next = {
       name: n.name,
       region: n.region,
+      owner: n.owner,
       ip: n.ip,
       domain: n.domain,
       ssh_port: String(n.ssh_port),
@@ -236,12 +244,14 @@ export default function Nodes() {
           n.name.toLowerCase().includes(keyword) ||
           n.ip.toLowerCase().includes(keyword) ||
           n.domain.toLowerCase().includes(keyword) ||
-          n.region.toLowerCase().includes(keyword)
+          n.region.toLowerCase().includes(keyword) ||
+          n.owner.toLowerCase().includes(keyword)
         const matchesStatus = statusFilter === 'all' || n.sync_status === statusFilter
         const matchesRegion = regionFilter === 'all' || n.region === regionFilter
-        return matchesKeyword && matchesStatus && matchesRegion
+        const matchesOwner = ownerFilter === 'all' || n.owner === ownerFilter
+        return matchesKeyword && matchesStatus && matchesRegion && matchesOwner
       })
-  }, [data?.list, search, statusFilter, regionFilter])
+  }, [data?.list, search, statusFilter, regionFilter, ownerFilter])
 
   const allVisibleSelected = filteredNodes.length > 0 && filteredNodes.every((n) => selectedIds.includes(n.id))
   const dirty = JSON.stringify(form) !== JSON.stringify(initialForm) && drawer.open
@@ -385,6 +395,17 @@ export default function Nodes() {
               ))}
             </select>
           </label>
+          <label className="flex h-11 min-w-[130px] items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm">
+            <Filter className="h-4 w-4 text-faint" />
+            <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} className="w-full bg-transparent text-sm outline-none">
+              <option value="all">全部所有者</option>
+              {owners.map((owner) => (
+                <option key={owner} value={owner}>
+                  {owner}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="flex items-center gap-2">
@@ -450,7 +471,7 @@ export default function Nodes() {
 
       <SurfaceCard className="overflow-visible">
         <div className="overflow-x-auto overflow-y-visible">
-          <table className="w-full min-w-[1380px] text-left text-sm">
+          <table className="w-full min-w-[1480px] text-left text-sm">
             <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
               <tr>
                 <th className="w-10 px-4 py-3">
@@ -466,6 +487,7 @@ export default function Nodes() {
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">连接地址</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">所有者</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">用户 / Xray</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">协议</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
@@ -476,11 +498,11 @@ export default function Nodes() {
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={11} className="px-4 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredNodes.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
+                  <td colSpan={11} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
                 </tr>
               ) : (
                 filteredNodes.map((n) => (
@@ -523,6 +545,13 @@ export default function Nodes() {
                     </td>
                     <td className="px-4 py-3.5">
                       {renderGroupCell(n.group_names)}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {n.owner ? (
+                        <Badge label={n.owner} variant="gray" />
+                      ) : (
+                        <span className="text-soft">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="font-medium text-[var(--text)]">{n.online_user_count} 人</div>
@@ -661,8 +690,9 @@ export default function Nodes() {
             <Field label="节点名 *" value={form.name} onChange={f('name')} />
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="地区" value={form.region} onChange={f('region')} placeholder="如：香港" />
-              <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="例如：高可用入口节点" />
+              <Field label="所有者" value={form.owner} onChange={f('owner')} placeholder="标识节点来源，如：供应商A" />
             </div>
+            <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="例如：高可用入口节点" />
           </FieldGroup>
 
           <FieldGroup title="连接地址" description="域名为空时使用 IP 直连。">
