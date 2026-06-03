@@ -9,7 +9,7 @@ interface DrawerProps {
   description?: ReactNode
   children: ReactNode
   footer?: ReactNode
-  width?: 'md' | 'lg'
+  width?: 'md' | 'lg' | 'xl'
   dirty?: boolean
   saving?: boolean
   onBeforeClose?: () => Promise<boolean> | boolean
@@ -37,6 +37,7 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
   const widths = {
     md: 'max-w-[560px]',
     lg: 'max-w-[720px]',
+    xl: 'max-w-[960px]',
   }
 
   const requestClose = async () => {

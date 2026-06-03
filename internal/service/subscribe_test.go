@@ -117,3 +117,28 @@ func TestGenerateSubscriptionIncludesNodesFromAllGroups(t *testing.T) {
 		t.Fatalf("expected subscription to include both node domains, got %q", string(decoded))
 	}
 }
+
+// TestEffectiveKeyPort 校验节点级端口覆盖优先级：key.Port > 0 时覆盖 profile.Port。
+// 这是订阅 URI / Clash / sing-box 三套输出与 Xray 节点监听端口保持一致的核心保证。
+func TestEffectiveKeyPort(t *testing.T) {
+	profile := &entity.InboundProfile{Port: 443}
+
+	cases := []struct {
+		name    string
+		profile *entity.InboundProfile
+		key     *entity.NodeProfileKey
+		want    int
+	}{
+		{"node override wins", profile, &entity.NodeProfileKey{Port: 8443}, 8443},
+		{"zero port falls back to profile", profile, &entity.NodeProfileKey{Port: 0}, 443},
+		{"nil key falls back to profile", profile, nil, 443},
+		{"both nil returns 0", nil, nil, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveKeyPort(tc.profile, tc.key); got != tc.want {
+				t.Fatalf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

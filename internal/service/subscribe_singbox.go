@@ -147,11 +147,11 @@ func (s *SubscribeService) buildSingboxOutbound(user *entity.User, node *entity.
 	case types.ProtocolVlessReality:
 		return buildSingboxVlessReality(user, node, profile, key, tag), tag
 	case types.ProtocolVlessWSTLS:
-		return buildSingboxVlessWSTLS(user, node, profile, tag), tag
+		return buildSingboxVlessWSTLS(user, node, profile, key, tag), tag
 	case types.ProtocolTrojan:
-		return buildSingboxTrojan(user, node, profile, tag), tag
+		return buildSingboxTrojan(user, node, profile, key, tag), tag
 	case types.ProtocolHysteria2:
-		return buildSingboxHysteria2(user, node, profile, tag), tag
+		return buildSingboxHysteria2(user, node, profile, key, tag), tag
 	}
 	return nil, ""
 }
@@ -199,7 +199,7 @@ func buildSingboxVlessReality(user *entity.User, node *entity.Node, profile *ent
 		"type":            "vless",
 		"tag":             tag,
 		"server":          node.ConnectAddr(),
-		"server_port":     profile.Port,
+		"server_port":     effectiveKeyPort(profile, key),
 		"uuid":            user.UUID,
 		"flow":            "xtls-rprx-vision",
 		"packet_encoding": "xudp",
@@ -219,7 +219,7 @@ func buildSingboxVlessReality(user *entity.User, node *entity.Node, profile *ent
 	}
 }
 
-func buildSingboxVlessWSTLS(user *entity.User, node *entity.Node, profile *entity.InboundProfile, tag string) map[string]any {
+func buildSingboxVlessWSTLS(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey, tag string) map[string]any {
 	var ps types.VlessWSTLSSettings
 	if profile.Settings != "" {
 		_ = json.Unmarshal([]byte(profile.Settings), &ps)
@@ -238,7 +238,7 @@ func buildSingboxVlessWSTLS(user *entity.User, node *entity.Node, profile *entit
 		"type":            "vless",
 		"tag":             tag,
 		"server":          node.ConnectAddr(),
-		"server_port":     profile.Port,
+		"server_port":     effectiveKeyPort(profile, key),
 		"uuid":            user.UUID,
 		"packet_encoding": "xudp",
 		"tls": map[string]any{
@@ -260,7 +260,7 @@ func buildSingboxVlessWSTLS(user *entity.User, node *entity.Node, profile *entit
 	}
 }
 
-func buildSingboxTrojan(user *entity.User, node *entity.Node, profile *entity.InboundProfile, tag string) map[string]any {
+func buildSingboxTrojan(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey, tag string) map[string]any {
 	var ps types.TrojanSettings
 	if profile.Settings != "" {
 		_ = json.Unmarshal([]byte(profile.Settings), &ps)
@@ -274,7 +274,7 @@ func buildSingboxTrojan(user *entity.User, node *entity.Node, profile *entity.In
 		"type":        "trojan",
 		"tag":         tag,
 		"server":      node.ConnectAddr(),
-		"server_port": profile.Port,
+		"server_port": effectiveKeyPort(profile, key),
 		"password":    user.UUID,
 		"tls": map[string]any{
 			"enabled":     true,
@@ -288,7 +288,7 @@ func buildSingboxTrojan(user *entity.User, node *entity.Node, profile *entity.In
 	}
 }
 
-func buildSingboxHysteria2(user *entity.User, node *entity.Node, profile *entity.InboundProfile, tag string) map[string]any {
+func buildSingboxHysteria2(user *entity.User, node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey, tag string) map[string]any {
 	var ps types.Hysteria2Settings
 	if profile.Settings != "" {
 		_ = json.Unmarshal([]byte(profile.Settings), &ps)
@@ -302,7 +302,7 @@ func buildSingboxHysteria2(user *entity.User, node *entity.Node, profile *entity
 		"type":        "hysteria2",
 		"tag":         tag,
 		"server":      node.ConnectAddr(),
-		"server_port": profile.Port,
+		"server_port": effectiveKeyPort(profile, key),
 		"password":    user.UUID,
 		"tls": map[string]any{
 			"enabled":     true,

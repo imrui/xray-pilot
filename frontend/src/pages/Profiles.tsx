@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, PencilLine, Plus, Sparkles } from 'lucide-react'
 import { nodeApi, profileApi } from '@/lib/api'
-import type { InboundProfile, Protocol } from '@/types'
+import { generateShortIds } from '@/lib/keygen'
+import { PROTOCOL_OPTIONS, protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
+import type { InboundProfile, NodeKey, Protocol } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
 import { Field, SelectField, Btn, FieldGroup } from '@/components/ui/Form'
@@ -15,33 +17,13 @@ import { useConfirm } from '@/components/ui/ConfirmProvider'
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
-const protocolOptions = [
-  { value: 'vless-reality', label: 'VLESS + Reality' },
-  { value: 'vless-ws-tls', label: 'VLESS + WS + TLS' },
-  { value: 'trojan', label: 'Trojan + TLS' },
-  { value: 'hysteria2', label: 'Hysteria2' },
-]
-
-const protocolBadge: Record<Protocol, 'green' | 'blue' | 'yellow' | 'red'> = {
-  'vless-reality': 'green',
-  'vless-ws-tls': 'blue',
-  trojan: 'yellow',
-  hysteria2: 'red',
-}
+const protocolOptions = PROTOCOL_OPTIONS
 
 const defaultSettings: Record<Protocol, string> = {
   'vless-reality': JSON.stringify({ sni: 'www.microsoft.com', fingerprint: 'chrome', private_key: '', public_key: '', short_ids: [] }, null, 2),
   'vless-ws-tls': JSON.stringify({ host: 'cdn.example.com', path: '/ws' }, null, 2),
   trojan: JSON.stringify({ sni: 'example.com' }, null, 2),
   hysteria2: JSON.stringify({ sni: 'example.com', up_mbps: 100, down_mbps: 100 }, null, 2),
-}
-
-function generateShortIds(count = 6) {
-  return Array.from({ length: count }, () => {
-    const bytes = new Uint8Array(4)
-    crypto.getRandomValues(bytes)
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-  })
 }
 
 function stringifySettings(settings: unknown) {
@@ -95,56 +77,116 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (next: bool
 }
 
 function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose: () => void }) {
-  const [nodeId, setNodeId] = useState('')
-  const [loadedSettingsByNode, setLoadedSettingsByNode] = useState<Record<string, string>>({})
-  const [draftSettingsByNode, setDraftSettingsByNode] = useState<Record<string, string>>({})
+  const [activeNodeId, setActiveNodeId] = useState<number | null>(null)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([])
+  const [loadedByNode, setLoadedByNode] = useState<Record<number, { settings: string; port: number }>>({})
+  const [draftByNode, setDraftByNode] = useState<Record<number, { settings: string; port: number }>>({})
+  const [filter, setFilter] = useState('')
   const [msg, setMsg] = useState('')
   const [msgType, setMsgType] = useState<'ok' | 'err'>('ok')
   const qc = useQueryClient()
 
   const { data: nodes } = useQuery({
     queryKey: ['nodes-all'],
-    queryFn: () => nodeApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data?.list ?? []),
+    queryFn: () => nodeApi.list({ page: 1, page_size: 200 }).then((r) => r.data.data?.list ?? []),
   })
   const sortedNodes = [...(nodes ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
-  const selectedKey = nodeId ? `${profile.id}:${nodeId}` : ''
-
-  const { data: currentKey, isFetching: loadingKey, refetch: refetchKey } = useQuery({
-    queryKey: ['nodeKey', nodeId, profile.id],
-    queryFn: async () => {
-      const res = await nodeApi.getKeys(Number(nodeId))
-      const keys = res.data.data ?? []
-      const key = keys.find((k) => k.profile_id === profile.id)
-      return key ?? null
-    },
-    enabled: !!nodeId,
+  const filteredNodes = sortedNodes.filter((n) => {
+    const kw = filter.trim().toLowerCase()
+    if (!kw) return true
+    return n.name.toLowerCase().includes(kw) || n.ip.toLowerCase().includes(kw) || n.region.toLowerCase().includes(kw)
   })
 
+  // 一次性加载所有节点的密钥概览，用于显示"已绑定 / 端口 / 锁定"标记
+  const { data: keysByNode } = useQuery({
+    queryKey: ['node-keys-overview', profile.id, (nodes ?? []).map((n) => n.id).join(',')],
+    queryFn: async () => {
+      const result: Record<number, NodeKey | null> = {}
+      await Promise.all(
+        (nodes ?? []).map(async (n) => {
+          const res = await nodeApi.getKeys(n.id)
+          const keys = res.data.data ?? []
+          result[n.id] = keys.find((k) => k.profile_id === profile.id) ?? null
+        }),
+      )
+      return result
+    },
+    enabled: (nodes?.length ?? 0) > 0,
+  })
+
+  // 切换激活节点时，自动加载草稿/已存值
   useEffect(() => {
-    if (!selectedKey || loadingKey) return
-    const next = currentKey ? stringifySettings(currentKey.settings) : ''
-    setLoadedSettingsByNode((prev) => (prev[selectedKey] === next ? prev : { ...prev, [selectedKey]: next }))
-  }, [currentKey, loadingKey, selectedKey])
+    if (!activeNodeId || !keysByNode) return
+    if (loadedByNode[activeNodeId] !== undefined) return
+    const k = keysByNode[activeNodeId]
+    const next = {
+      settings: k ? stringifySettings(k.settings) : '',
+      port: k?.port ?? 0,
+    }
+    setLoadedByNode((prev) => ({ ...prev, [activeNodeId]: next }))
+  }, [activeNodeId, keysByNode, loadedByNode])
 
-  const currentSettings = selectedKey ? (draftSettingsByNode[selectedKey] ?? loadedSettingsByNode[selectedKey] ?? '') : ''
+  const activeDraft = activeNodeId !== null ? (draftByNode[activeNodeId] ?? loadedByNode[activeNodeId]) : undefined
+  const activeKey = activeNodeId !== null && keysByNode ? keysByNode[activeNodeId] : null
+  const activeLocked = activeKey?.locked ?? false
 
-  const keyLocked = currentKey?.locked ?? false
+  const updateDraft = (nodeId: number, patch: Partial<{ settings: string; port: number }>) => {
+    const base = draftByNode[nodeId] ?? loadedByNode[nodeId] ?? { settings: '', port: 0 }
+    setDraftByNode((prev) => ({ ...prev, [nodeId]: { ...base, ...patch } }))
+  }
 
-  const save = useMutation({
-    mutationFn: () => nodeApi.upsertKey(Number(nodeId), profile.id, currentSettings),
-    onSuccess: () => {
-      setMsg('已保存')
-      setMsgType('ok')
-      if (selectedKey) {
-        setLoadedSettingsByNode((prev) => ({ ...prev, [selectedKey]: currentSettings }))
-        setDraftSettingsByNode((prev) => {
-          const next = { ...prev }
-          delete next[selectedKey]
-          return next
-        })
+  const dirtyNodeIds = Object.keys(draftByNode)
+    .map(Number)
+    .filter((id) => {
+      const d = draftByNode[id]
+      const l = loadedByNode[id]
+      return !l || d.settings !== l.settings || d.port !== l.port
+    })
+
+  const toggleNodeSelect = (id: number) => {
+    setSelectedNodeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  // 批量保存：对选中节点逐个 upsert，逐个反馈成功/失败
+  const batchSave = useMutation({
+    mutationFn: async () => {
+      const targets = selectedNodeIds.length > 0 ? selectedNodeIds : activeNodeId !== null ? [activeNodeId] : []
+      if (targets.length === 0) throw new Error('请先选择目标节点')
+      const results: Array<{ id: number; ok: boolean; msg: string }> = []
+      for (const id of targets) {
+        const draft = draftByNode[id] ?? loadedByNode[id]
+        if (!draft || !draft.settings) {
+          results.push({ id, ok: false, msg: '密钥参数为空' })
+          continue
+        }
+        try {
+          await nodeApi.upsertKey(id, profile.id, draft.settings, draft.port)
+          results.push({ id, ok: true, msg: '已保存' })
+        } catch (e) {
+          results.push({ id, ok: false, msg: (e as Error).message })
+        }
       }
+      return results
+    },
+    onSuccess: (results) => {
+      const ok = results.filter((r) => r.ok).length
+      const failed = results.length - ok
+      // 成功节点：把草稿落地为 loaded，清掉草稿
+      results.filter((r) => r.ok).forEach((r) => {
+        const d = draftByNode[r.id] ?? loadedByNode[r.id]
+        if (d) {
+          setLoadedByNode((prev) => ({ ...prev, [r.id]: d }))
+          setDraftByNode((prev) => {
+            const next = { ...prev }
+            delete next[r.id]
+            return next
+          })
+        }
+      })
+      setMsg(failed === 0 ? `已保存 ${ok} 个节点` : `保存完成：成功 ${ok}，失败 ${failed}。失败详情：${results.filter((r) => !r.ok).map((r) => `#${r.id} ${r.msg}`).join('；')}`)
+      setMsgType(failed === 0 ? 'ok' : 'err')
       qc.invalidateQueries({ queryKey: ['nodes'] })
-      void refetchKey()
+      qc.invalidateQueries({ queryKey: ['node-keys-overview'] })
     },
     onError: (e: Error) => {
       setMsg(`保存失败: ${e.message}`)
@@ -152,29 +194,32 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     },
   })
 
-  const keygen = useMutation({
+  // 批量一键生成（仅 vless-reality）：为每个选中节点独立生成密钥到草稿
+  const batchKeygen = useMutation({
     mutationFn: async () => {
-      if (profile.protocol === 'vless-reality') {
+      const targets = selectedNodeIds.length > 0 ? selectedNodeIds : activeNodeId !== null ? [activeNodeId] : []
+      if (targets.length === 0) throw new Error('请先选择目标节点')
+      if (profile.protocol !== 'vless-reality') throw new Error('仅 VLESS+Reality 支持一键生成')
+      const generated: Record<number, string> = {}
+      for (const id of targets) {
         const res = await nodeApi.keygen()
         const keys = res.data.data
         if (!keys) throw new Error('密钥生成失败')
-        return JSON.stringify(
-          {
-            private_key: keys.private_key,
-            public_key: keys.public_key,
-            short_ids: generateShortIds(6),
-          },
+        generated[id] = JSON.stringify(
+          { private_key: keys.private_key, public_key: keys.public_key, short_ids: generateShortIds(6) },
           null,
           2,
         )
       }
-      return stringifySettings(profile.settings)
+      return generated
     },
-    onSuccess: (nextSettings) => {
-      if (selectedKey) {
-        setDraftSettingsByNode((prev) => ({ ...prev, [selectedKey]: nextSettings }))
-      }
-      setMsg('密钥已生成')
+    onSuccess: (generated) => {
+      Object.entries(generated).forEach(([idStr, settings]) => {
+        const id = Number(idStr)
+        const cur = draftByNode[id] ?? loadedByNode[id] ?? { settings: '', port: 0 }
+        setDraftByNode((prev) => ({ ...prev, [id]: { ...cur, settings } }))
+      })
+      setMsg(`已为 ${Object.keys(generated).length} 个节点生成密钥草稿，记得保存`)
       setMsgType('ok')
     },
     onError: (e: Error) => {
@@ -184,19 +229,27 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
   })
 
   const fillTemplate = () => {
-    if (selectedKey) {
-      setDraftSettingsByNode((prev) => ({ ...prev, [selectedKey]: stringifySettings(profile.settings) }))
+    const targets = selectedNodeIds.length > 0 ? selectedNodeIds : activeNodeId !== null ? [activeNodeId] : []
+    if (targets.length === 0) {
+      setMsg('请先选择目标节点')
+      setMsgType('err')
+      return
     }
-    setMsg('已填入协议默认配置')
+    const tpl = stringifySettings(profile.settings)
+    targets.forEach((id) => updateDraft(id, { settings: tpl }))
+    setMsg(`已为 ${targets.length} 个节点填入协议默认配置`)
     setMsgType('ok')
   }
 
   const lockToggle = useMutation({
-    mutationFn: (locked: boolean) => nodeApi.setKeyLock(Number(nodeId), profile.id, locked),
-    onSuccess: async (_, locked) => {
+    mutationFn: (locked: boolean) => {
+      if (activeNodeId === null) throw new Error('请先选择节点')
+      return nodeApi.setKeyLock(activeNodeId, profile.id, locked)
+    },
+    onSuccess: (_, locked) => {
       setMsg(locked ? '已锁定该节点协议' : '已解除锁定')
       setMsgType('ok')
-      await refetchKey()
+      qc.invalidateQueries({ queryKey: ['node-keys-overview'] })
     },
     onError: (e: Error) => {
       setMsg(`操作失败: ${e.message}`)
@@ -204,79 +257,191 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     },
   })
 
+  const targetsCount = selectedNodeIds.length > 0 ? selectedNodeIds : activeNodeId !== null ? [activeNodeId] : []
+  const saveLabel = selectedNodeIds.length > 1 ? `批量保存 (${selectedNodeIds.length})` : '保存密钥'
+
   return (
     <Drawer
       open
       onClose={onClose}
       title={`配置节点密钥 · ${profile.name}`}
-      description="先选择目标节点，再生成或覆写该节点对应协议的密钥材料；锁定入口也在这里。"
+      description="左侧选择/多选目标节点；右侧编辑参数与端口。支持批量生成与批量保存。"
       footer={
         <>
           <Btn variant="secondary" onClick={onClose}>关闭</Btn>
-          <Btn loading={save.isPending} onClick={() => save.mutate()} disabled={!nodeId || !currentSettings || keyLocked}>保存密钥</Btn>
+          <Btn
+            loading={batchSave.isPending}
+            onClick={() => batchSave.mutate()}
+            disabled={targetsCount.length === 0 || (selectedNodeIds.length === 0 && activeLocked)}
+          >
+            {saveLabel}
+          </Btn>
         </>
       }
-      width="lg"
+      width="xl"
     >
-      <div className="space-y-4">
-        <FieldGroup title="目标节点" description="切换节点后会自动加载当前保存的密钥配置。">
-          <SelectField
-            label="目标节点"
-            value={nodeId}
-            onChange={setNodeId}
-            options={sortedNodes.map((n) => ({ value: n.id, label: `${n.name} (${n.ip})` }))}
-            placeholder="选择节点"
-          />
-        </FieldGroup>
-
-        <FieldGroup title="密钥参数与锁定" description="支持一键生成、模板填充、锁定和手动编辑。保存空对象 `{}` 表示该节点继承协议默认参数。">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1 text-xs text-soft">
-              <div>{loadingKey ? '正在加载当前密钥…' : '保持 JSON 结构正确后再保存；只保存后该协议才会绑定到当前节点。'}</div>
-              {nodeId && (
-                <div className={keyLocked ? 'text-amber-500' : ''}>
-                  {currentKey
-                    ? keyLocked
-                      ? '当前节点协议已锁定，需先解锁才能修改、删除或重新生成。'
-                      : '当前节点协议未锁定，可按需调整。'
-                    : '当前节点尚未保存此协议密钥，保存后可进一步锁定。'}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {currentKey && (
-                <Btn
-                  variant="secondary"
-                  loading={lockToggle.isPending}
-                  onClick={() => lockToggle.mutate(!keyLocked)}
-                  disabled={!nodeId}
-                >
-                  {keyLocked ? '解除锁定' : '锁定协议'}
-                </Btn>
-              )}
-              {profile.protocol === 'vless-reality' && (
-                <Btn variant="secondary" loading={keygen.isPending} onClick={() => keygen.mutate()} disabled={!nodeId || keyLocked}>
-                  <Sparkles className="h-4 w-4" />
-                  一键生成
-                </Btn>
-              )}
-              <Btn variant="secondary" onClick={fillTemplate} disabled={!nodeId || keyLocked}>填充模板</Btn>
-            </div>
+      <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
+        {/* 左侧节点列表 */}
+        <div className="space-y-3">
+          <div>
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="搜索节点 名称/IP/地区"
+              className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none"
+            />
           </div>
-          <textarea
-            value={currentSettings}
-            onChange={(e) => {
-              if (!selectedKey) return
-              const nextValue = e.target.value
-              setDraftSettingsByNode((prev) => ({ ...prev, [selectedKey]: nextValue }))
-            }}
-            rows={12}
-            disabled={keyLocked}
-            className="min-h-[260px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
-            placeholder='{"private_key": "...", "public_key": "...", "short_ids": ["..."]}'
-          />
-          {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>{msg}</p>}
-        </FieldGroup>
+          <div className="flex items-center justify-between text-xs text-soft">
+            <span>共 {filteredNodes.length} 个</span>
+            <button
+              type="button"
+              onClick={() => {
+                const allVis = filteredNodes.every((n) => selectedNodeIds.includes(n.id))
+                setSelectedNodeIds(allVis ? selectedNodeIds.filter((id) => !filteredNodes.some((n) => n.id === id)) : Array.from(new Set([...selectedNodeIds, ...filteredNodes.map((n) => n.id)])))
+              }}
+              className="text-[var(--accent)] hover:underline"
+            >
+              {filteredNodes.every((n) => selectedNodeIds.includes(n.id)) && filteredNodes.length > 0 ? '清空选择' : '全选可见'}
+            </button>
+          </div>
+          <div className="max-h-[560px] space-y-1.5 overflow-y-auto pr-1">
+            {filteredNodes.map((n) => {
+              const k = keysByNode?.[n.id]
+              const isActive = activeNodeId === n.id
+              const isSelected = selectedNodeIds.includes(n.id)
+              const isDirty = dirtyNodeIds.includes(n.id)
+              return (
+                <div
+                  key={n.id}
+                  className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-sm transition ${
+                    isActive ? 'border-[var(--accent)]/40 bg-[var(--accent-soft)]' : 'border-[var(--border)] bg-[var(--panel-strong)] hover:bg-[var(--panel-muted)]'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleNodeSelect(n.id)}
+                    className="h-4 w-4 shrink-0 rounded border-[var(--border-strong)]"
+                    aria-label={`选择 ${n.name}`}
+                  />
+                  <button type="button" onClick={() => setActiveNodeId(n.id)} className="flex min-w-0 flex-1 flex-col text-left">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate font-medium">{n.name}</span>
+                      {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存" />}
+                    </span>
+                    <span className="truncate text-xs text-soft">
+                      {n.ip}
+                      {k && (
+                        <>
+                          <span className="mx-1.5 text-faint">·</span>
+                          {k.port > 0 ? `端口 ${k.port}` : `默认 ${profile.port}`}
+                          {k.locked && <span className="ml-1.5 text-amber-500">🔒</span>}
+                        </>
+                      )}
+                    </span>
+                  </button>
+                  {k && <Badge label="已绑" variant="green" />}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* 右侧编辑区 */}
+        <div className="space-y-4">
+          {activeNodeId === null && selectedNodeIds.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-soft">
+              请从左侧选择节点（点击进入编辑，复选框用于批量操作）
+            </div>
+          )}
+
+          {(activeNodeId !== null || selectedNodeIds.length > 0) && (
+            <>
+              <FieldGroup
+                title={selectedNodeIds.length > 1 ? `批量目标 · ${selectedNodeIds.length} 个节点` : `当前节点 · ${sortedNodes.find((n) => n.id === activeNodeId)?.name ?? ''}`}
+                description={selectedNodeIds.length > 1 ? '批量操作会对所有勾选的节点生效；填充/生成会写入草稿，保存后才提交。' : `协议默认端口 ${profile.port}（${profile.protocol === 'hysteria2' ? 'UDP' : 'TCP'}）。端口留空或填 0 即继承默认。`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {profile.protocol === 'vless-reality' && (
+                    <Btn
+                      variant="secondary"
+                      loading={batchKeygen.isPending}
+                      onClick={() => batchKeygen.mutate()}
+                      disabled={targetsCount.length === 0 || (selectedNodeIds.length === 0 && activeLocked)}
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      {selectedNodeIds.length > 1 ? `批量生成 (${selectedNodeIds.length})` : '一键生成'}
+                    </Btn>
+                  )}
+                  <Btn variant="secondary" onClick={fillTemplate} disabled={targetsCount.length === 0 || (selectedNodeIds.length === 0 && activeLocked)}>填充模板</Btn>
+                  {selectedNodeIds.length === 0 && activeKey && (
+                    <Btn
+                      variant="secondary"
+                      loading={lockToggle.isPending}
+                      onClick={() => lockToggle.mutate(!activeLocked)}
+                    >
+                      {activeLocked ? '解除锁定' : '锁定协议'}
+                    </Btn>
+                  )}
+                </div>
+              </FieldGroup>
+
+              {selectedNodeIds.length === 0 && activeDraft && (
+                <FieldGroup title="参数与端口" description="保存空对象 `{}` 表示继承协议默认参数；端口填 0 表示继承协议模板端口。">
+                  <Field
+                    label={`监听端口（留空继承模板 ${profile.port}）`}
+                    value={String(activeDraft.port || '')}
+                    onChange={(e) => updateDraft(activeNodeId!, { port: Number(e.target.value) || 0 })}
+                    placeholder={`${profile.port}`}
+                    type="number"
+                  />
+                  <textarea
+                    value={activeDraft.settings}
+                    onChange={(e) => updateDraft(activeNodeId!, { settings: e.target.value })}
+                    rows={12}
+                    disabled={activeLocked}
+                    className="min-h-[240px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+                    placeholder='{"private_key": "...", "public_key": "...", "short_ids": ["..."]}'
+                  />
+                  {activeLocked && <p className="text-xs text-amber-500">当前节点协议已锁定，需先解锁才能修改、删除或重新生成。</p>}
+                </FieldGroup>
+              )}
+
+              {selectedNodeIds.length > 1 && (
+                <FieldGroup title="批量草稿预览" description="每个节点保有独立草稿；上方按钮的效果会写入所有选中节点。">
+                  <div className="space-y-2">
+                    {selectedNodeIds.map((id) => {
+                      const node = sortedNodes.find((n) => n.id === id)
+                      const draft = draftByNode[id] ?? loadedByNode[id]
+                      const hasDraft = !!draftByNode[id]
+                      return (
+                        <div key={id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-xs">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="truncate font-medium">{node?.name ?? `#${id}`}</span>
+                            <span className="text-soft">{node?.ip}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-soft">
+                            {draft ? (
+                              <>
+                                <span>{draft.port > 0 ? `端口 ${draft.port}` : '默认端口'}</span>
+                                <span>{draft.settings ? `${draft.settings.length} 字符` : '空'}</span>
+                                {hasDraft && <Badge label="未保存" variant="yellow" />}
+                              </>
+                            ) : (
+                              <span className="text-faint">未加载</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </FieldGroup>
+              )}
+
+              {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>{msg}</p>}
+            </>
+          )}
+        </div>
       </div>
     </Drawer>
   )
@@ -455,9 +620,14 @@ export default function Profiles() {
       label: '类型',
       render: (p: InboundProfile) => (
         <div className="space-y-1.5">
-          <div>
-            <Badge label={protocolOptions.find((o) => o.value === p.protocol)?.label ?? p.protocol} variant={protocolBadge[p.protocol as Protocol] ?? 'gray'} />
-          </div>
+          <button
+            type="button"
+            onClick={() => setKeyDrawer(p)}
+            title="点击配置节点密钥与端口"
+            className="inline-flex rounded-full transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            <Badge label={protocolLabel(p.protocol)} variant={protocolBadgeVariant(p.protocol)} />
+          </button>
           <div className="text-xs text-soft">监听端口 {p.port}</div>
         </div>
       ),

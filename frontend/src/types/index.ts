@@ -89,6 +89,7 @@ export interface NodeKey {
   node_id: number
   profile_id: number
   settings: unknown   // JSON object（编辑节点密钥时返回可直接修改的原值）
+  port: number        // 节点级监听端口覆盖；0 表示继承协议模板端口
   locked: boolean
   created_at: string
   updated_at: string

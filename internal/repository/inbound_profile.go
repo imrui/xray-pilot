@@ -85,6 +85,7 @@ func (r *InboundProfileRepository) UpsertKey(key *entity.NodeProfileKey) error {
 		return ErrNodeKeyLocked
 	}
 	existing.Settings = key.Settings
+	existing.Port = key.Port
 	return DB.Save(&existing).Error
 }
 

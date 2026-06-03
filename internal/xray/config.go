@@ -178,8 +178,17 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 	var inbounds []Inbound
 	var warnings []string
 
+	// usedPorts 兜底拦截同节点端口冲突（key: "传输层/端口"）。
+	// 正常流程在保存密钥时已校验，此处防御旧数据或手工改库导致 Xray 起不来。
+	usedPorts := make(map[string]string)
+
 	for _, key := range profileKeys {
 		if key.Profile == nil || !key.Profile.Active {
+			continue
+		}
+		portKey := fmt.Sprintf("%s/%d", types.ProtocolTransport(key.Profile.Protocol), effectivePort(key.Profile, &key))
+		if owner, ok := usedPorts[portKey]; ok {
+			warnings = append(warnings, fmt.Sprintf("协议[%s]端口 %s 与[%s]冲突，已跳过该入站", key.Profile.Name, portKey, owner))
 			continue
 		}
 		inbound, err := buildInbound(node, key.Profile, &key, users)
@@ -187,6 +196,7 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 			warnings = append(warnings, fmt.Sprintf("协议[%s](%s): %v", key.Profile.Name, key.Profile.Protocol, err))
 			continue
 		}
+		usedPorts[portKey] = key.Profile.Name
 		inbounds = append(inbounds, inbound)
 	}
 
@@ -237,6 +247,14 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 		return "", warnings, fmt.Errorf("序列化配置失败: %w", err)
 	}
 	return string(data), warnings, nil
+}
+
+// effectivePort 计算入站实际监听端口：节点级覆盖优先，回退协议模板端口。
+func effectivePort(profile *entity.InboundProfile, key *entity.NodeProfileKey) int {
+	if key != nil && key.Port > 0 {
+		return key.Port
+	}
+	return profile.Port
 }
 
 func buildInbound(node *entity.Node, profile *entity.InboundProfile, key *entity.NodeProfileKey, users []entity.User) (Inbound, error) {
@@ -303,7 +321,7 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 
 	return Inbound{
 		Listen:   "0.0.0.0",
-		Port:     profile.Port,
+		Port:     effectivePort(profile, key),
 		Protocol: "vless",
 		Tag:      fmt.Sprintf("vless-reality-%d", profile.ID),
 		Settings: vlessInboundSettings{
@@ -360,7 +378,7 @@ func buildVlessWSTLSInbound(profile *entity.InboundProfile, key *entity.NodeProf
 
 	return Inbound{
 		Listen:   "0.0.0.0",
-		Port:     profile.Port,
+		Port:     effectivePort(profile, key),
 		Protocol: "vless",
 		Tag:      fmt.Sprintf("vless-ws-%d", profile.ID),
 		Settings: vlessInboundSettings{
@@ -406,7 +424,7 @@ func buildTrojanInbound(profile *entity.InboundProfile, key *entity.NodeProfileK
 
 	return Inbound{
 		Listen:         "0.0.0.0",
-		Port:           profile.Port,
+		Port:           effectivePort(profile, key),
 		Protocol:       "trojan",
 		Tag:            fmt.Sprintf("trojan-%d", profile.ID),
 		Settings:       trojanInboundSettings{Clients: clients},
