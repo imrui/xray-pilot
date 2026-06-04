@@ -13,8 +13,9 @@ import (
 	"github.com/imrui/xray-pilot/internal/repository"
 )
 
-// setupInstallTestEnv 复用 backup_test 的连接逻辑，但把 SSH 私钥/公钥也准备好
-func setupInstallTestEnv(t *testing.T) {
+// setupInstallTestEnv 复用 backup_test 的连接逻辑，但把 SSH 私钥/公钥也准备好。
+// 私钥路径通过 SettingService 写入（与生产链路一致），不依赖 config.Global。
+func setupInstallTestEnv(t *testing.T) (privPath string) {
 	t.Helper()
 	if repository.DB != nil {
 		if sqlDB, err := repository.DB.DB(); err == nil {
@@ -42,20 +43,29 @@ func setupInstallTestEnv(t *testing.T) {
 	if err := os.MkdirAll(keyDir, 0o700); err != nil {
 		t.Fatalf("mkdir ssh dir: %v", err)
 	}
-	privPath := filepath.Join(keyDir, "id_ed25519")
+	privPath = filepath.Join(keyDir, "id_ed25519")
 	if err := os.WriteFile(privPath, []byte("fake-private"), 0o600); err != nil {
 		t.Fatalf("write priv: %v", err)
 	}
 	if err := os.WriteFile(privPath+".pub", []byte("ssh-ed25519 AAAA... panel@xray-pilot"), 0o644); err != nil {
 		t.Fatalf("write pub: %v", err)
 	}
-	config.Global.SSH.DefaultKeyPath = privPath
+	if err := NewSettingService().BatchUpdate(map[string]string{
+		KeySSHDefaultKeyPath: privPath,
+	}); err != nil {
+		t.Fatalf("seed ssh key path: %v", err)
+	}
+	return privPath
 }
 
 func TestCreateToken_RequiresPanelPubkey(t *testing.T) {
 	setupInstallTestEnv(t)
-	// 故意把私钥指向不存在路径
-	config.Global.SSH.DefaultKeyPath = "/nonexistent/key"
+	// 故意把 setting 改成不存在路径，复现"用户在系统设置页填了错路径"的场景
+	if err := NewSettingService().BatchUpdate(map[string]string{
+		KeySSHDefaultKeyPath: "/nonexistent/key",
+	}); err != nil {
+		t.Fatalf("set bad path: %v", err)
+	}
 
 	svc := NewInstallService()
 	_, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
@@ -64,6 +74,24 @@ func TestCreateToken_RequiresPanelPubkey(t *testing.T) {
 	}, "admin")
 	if !errors.Is(err, ErrPanelSSHKeyMissing) {
 		t.Fatalf("expected ErrPanelSSHKeyMissing, got %v", err)
+	}
+}
+
+// 复现用户反馈：私钥存在但 .pub 不存在，install 应当报 ErrPanelSSHKeyMissing
+func TestCreateToken_RequiresPubkeyFile(t *testing.T) {
+	privPath := setupInstallTestEnv(t)
+	// 删除 .pub，保留私钥
+	if err := os.Remove(privPath + ".pub"); err != nil {
+		t.Fatalf("rm pub: %v", err)
+	}
+
+	svc := NewInstallService()
+	_, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
+		Name:     "test-node-pub-missing",
+		PanelURL: "https://panel.example",
+	}, "admin")
+	if !errors.Is(err, ErrPanelSSHKeyMissing) {
+		t.Fatalf("expected ErrPanelSSHKeyMissing when .pub missing, got %v", err)
 	}
 }
 

@@ -12,7 +12,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
@@ -33,7 +32,7 @@ var (
 	ErrInstallTokenUsed        = errors.New("安装 token 已被使用")
 	ErrInstallTokenExpired     = errors.New("安装 token 已过期")
 	ErrInstallTokenIPMismatch  = errors.New("安装 token 来源 IP 与首次绑定不一致")
-	ErrPanelSSHKeyMissing      = errors.New("panel 未配置 SSH 私钥（请在 config.yaml 设置 ssh.default_key_path 并保证 .pub 公钥存在）")
+	ErrPanelSSHKeyMissing      = errors.New("panel 未配置 SSH 私钥（请在 系统设置 > 默认 SSH 私钥 配置路径，并确保对应 .pub 公钥文件存在）")
 	ErrInstallNodeAlreadyExist = errors.New("同名节点已存在，请更换节点名后重新生成 token")
 )
 
@@ -50,23 +49,30 @@ type nodeMeta struct {
 
 // InstallService 节点一键接入流程的业务编排
 type InstallService struct {
-	tokenRepo *repository.NodeInstallTokenRepository
-	nodeRepo  *repository.NodeRepository
-	logRepo   *repository.LogRepository
+	tokenRepo  *repository.NodeInstallTokenRepository
+	nodeRepo   *repository.NodeRepository
+	logRepo    *repository.LogRepository
+	settingSvc *SettingService
 }
 
 func NewInstallService() *InstallService {
 	return &InstallService{
-		tokenRepo: repository.NewNodeInstallTokenRepository(),
-		nodeRepo:  repository.NewNodeRepository(),
-		logRepo:   repository.NewLogRepository(),
+		tokenRepo:  repository.NewNodeInstallTokenRepository(),
+		nodeRepo:   repository.NewNodeRepository(),
+		logRepo:    repository.NewLogRepository(),
+		settingSvc: NewSettingService(),
 	}
 }
 
 // PanelPubKeyPath 返回 panel 公钥的绝对路径
 // 约定：公钥 = 私钥路径 + ".pub"（ed25519 / rsa 默认形态）
+//
+// 私钥路径与诊断服务、同步服务统一从 SettingService 读取，
+// 与系统设置页面 > 默认 SSH 私钥 的可编辑值保持一致；config.yaml
+// 的 ssh.default_key_path 仅作为首次启动种子（SeedFromConfig），
+// 之后以 DB 值为权威。
 func (s *InstallService) PanelPubKeyPath() string {
-	priv := strings.TrimSpace(config.Global.SSH.DefaultKeyPath)
+	priv := strings.TrimSpace(s.settingSvc.Get(KeySSHDefaultKeyPath))
 	if priv == "" {
 		return ""
 	}

@@ -167,7 +167,17 @@ func (s *DiagnosticsService) checkSSHDefaultKeyPath() DiagnosticItem {
 	}
 	_ = f.Close()
 
-	item.Detail = "默认 SSH 私钥文件存在，当前进程可读取。"
+	// 同步检查 .pub 公钥：节点一键接入需要把公钥写入新节点 authorized_keys。
+	// 公钥缺失不影响普通 SSH 同步，仅作 warning 提示，避免误判为致命错误。
+	pubPath := keyPath + ".pub"
+	if _, pubErr := os.Stat(pubPath); pubErr != nil {
+		item.Status = DiagnosticWarning
+		item.Detail = "默认 SSH 私钥文件存在，但配套的 .pub 公钥缺失，节点一键接入将不可用。"
+		item.Suggestion = "为该私钥生成对应公钥：ssh-keygen -y -f " + keyPath + " > " + pubPath
+		return item
+	}
+
+	item.Detail = "默认 SSH 私钥文件存在，配套 .pub 公钥可读，节点一键接入就绪。"
 	return item
 }
 
