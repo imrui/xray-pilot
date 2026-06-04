@@ -59,6 +59,7 @@ func autoMigrate(db *gorm.DB) error {
 		&entity.SystemSetting{},
 		&entity.TrafficSample{},
 		&entity.UserTrafficTotal{},
+		&entity.NodeInstallToken{},
 	)
 }
 

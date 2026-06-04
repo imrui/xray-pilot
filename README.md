@@ -139,6 +139,17 @@ sudo AUTHORIZED_KEYS=$'ssh-ed25519 AAAA... admin@main\nssh-ed25519 AAAA... root@
 
 The script creates a timestamped backup of `sshd_config` before changing `PermitRootLogin`.
 
+#### Auto-onboarding mode (v0.4.0+, recommended)
+
+If you already run a panel, open the "One-click install" dialog in the node list; it generates a curl command that wires the panel SSH pubkey, installs Xray, and posts the node back to the panel — no need to paste pubkeys or manually add the node afterwards.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/scripts/node-bootstrap.sh | \
+  sudo PANEL_URL=https://your-panel INSTALL_TOKEN=abc123... bash
+```
+
+`PANEL_URL` and `INSTALL_TOKEN` come from the dialog. Tokens default to 10-minute TTL, are single-use, and are bound to the first source IP that fetches the panel pubkey. The script falls back to the interactive flow when these variables are absent.
+
 ## Upgrade
 
 Existing Linux installations can be upgraded by re-running the installer:

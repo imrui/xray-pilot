@@ -35,6 +35,17 @@ func (r *NodeRepository) FindByID(id uint) (*entity.Node, error) {
 	return &node, err
 }
 
+// FindByName 按节点名查找；当前主要用于 install 流程的同名冲突预检。
+// 其他路径仍允许同名（历史行为兼容）。
+func (r *NodeRepository) FindByName(name string) (*entity.Node, error) {
+	var node entity.Node
+	err := DB.Where("name = ?", name).First(&node).Error
+	if err != nil {
+		return nil, err
+	}
+	return &node, nil
+}
+
 func (r *NodeRepository) List(page, pageSize int) ([]entity.Node, int64, error) {
 	var total int64
 	if err := DB.Model(&entity.Node{}).Count(&total).Error; err != nil {

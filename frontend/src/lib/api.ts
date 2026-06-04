@@ -226,6 +226,40 @@ export interface BackupFile {
   created_at: string
 }
 
+// ---- 节点一键接入 ----
+export interface InstallToken {
+  id: number
+  token: string
+  expires_at: string
+  curl_command: string
+  node_name: string
+  used: boolean
+  node_id?: number
+  used_by_ip?: string
+}
+
+export interface CreateInstallTokenInput {
+  name: string
+  region?: string
+  owner?: string
+  remark?: string
+  ssh_user?: string
+  ssh_port?: number
+  panel_url: string
+  ttl_seconds?: number
+}
+
+export const installApi = {
+  create: (data: CreateInstallTokenInput) =>
+    request.post<ApiResponse<InstallToken>>('/nodes/install-tokens', data),
+  list: () =>
+    request.get<ApiResponse<InstallToken[]>>('/nodes/install-tokens'),
+  get: (token: string) =>
+    request.get<ApiResponse<InstallToken>>(`/nodes/install-tokens/${encodeURIComponent(token)}`),
+  remove: (id: number) =>
+    request.delete<ApiResponse<{ deleted_id: number }>>(`/nodes/install-tokens/${id}`),
+}
+
 export const backupApi = {
   list: () =>
     request.get<ApiResponse<BackupFile[]>>('/system/backups'),

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Copy, FileCode, Filter, PencilLine, Plus, RefreshCw, Search, Sparkles, Wifi } from 'lucide-react'
+import { AlertTriangle, Copy, FileCode, Filter, PencilLine, Plus, RefreshCw, Search, Sparkles, Terminal, Wifi } from 'lucide-react'
+import { OneClickInstallDialog } from '@/components/OneClickInstallDialog'
 import { nodeApi, profileApi } from '@/lib/api'
 import { generateShortIds } from '@/lib/keygen'
 import { protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
@@ -91,6 +92,7 @@ export default function Nodes() {
   const [regionFilter, setRegionFilter] = useState<string>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [installOpen, setInstallOpen] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['nodes', page, pageSize],
@@ -417,6 +419,10 @@ export default function Nodes() {
           <Btn variant="secondary" loading={syncDrifted.isPending} onClick={() => syncDrifted.mutate()}>
             <RefreshCw className="h-4 w-4" />
             同步待处理节点
+          </Btn>
+          <Btn variant="secondary" onClick={() => setInstallOpen(true)}>
+            <Terminal className="h-4 w-4" />
+            一键接入
           </Btn>
           <Btn onClick={openCreate}>
             <Plus className="h-4 w-4" />
@@ -756,6 +762,11 @@ export default function Nodes() {
           onClose={() => setProtocolNode(null)}
         />
       )}
+      <OneClickInstallDialog
+        open={installOpen}
+        onClose={() => setInstallOpen(false)}
+        onRegistered={() => invalidate()}
+      />
     </PageShell>
   )
 }

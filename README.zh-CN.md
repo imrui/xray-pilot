@@ -167,6 +167,21 @@ bash /root/node-bootstrap.sh
 - 部分发行版的 SSH 服务名可能不同，脚本会自动尝试 `ssh` 和 `sshd`；如果都失败，会输出提醒，需手工重启。
 - 建议在云厂商安全组、防火墙和系统防火墙中同时确认 `22` 端口可访问。
 
+#### 自动接入模式（v0.4.0+，推荐）
+
+如果你已经部署了 panel，可以在面板里点「一键接入」生成一行 curl 命令，脚本会自动完成「拉 panel 公钥 → 写 authorized_keys → 装 xray → BBR → 重启 SSH → 回填节点元数据」整套流程，**不再需要手工填公钥、也不用回到面板新增节点**。
+
+命令形如：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/scripts/node-bootstrap.sh | \
+  sudo PANEL_URL=https://your-panel INSTALL_TOKEN=abc123... bash
+```
+
+`PANEL_URL` / `INSTALL_TOKEN` 由面板对话框直接复制；脚本检测到这两个变量后自动进入自动模式。token 默认 10 分钟有效、一次性、绑定首次访问 IP；过期或被使用后将无法再次执行。
+
+自动模式与原有交互模式互不影响——若环境变量未设置则按原方式提示输入公钥。
+
 ## 升级
 
 已经通过一键安装部署的 Linux 机器，可以直接重新执行安装脚本完成升级：
