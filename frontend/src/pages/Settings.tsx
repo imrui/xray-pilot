@@ -433,14 +433,18 @@ function BackupSection({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <a
-                    href={backupApi.downloadURL(b.name)}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      backupApi.download(b.name).catch((e: Error) => {
+                        pushToast({ title: '下载备份失败', description: e.message, variant: 'error' })
+                      })
+                    }}
                     className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--accent)] transition hover:bg-white/5"
-                    download
                   >
                     <Download className="h-3.5 w-3.5" />
                     下载
-                  </a>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {

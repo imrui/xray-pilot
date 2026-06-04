@@ -280,9 +280,9 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
       }
       width="xl"
     >
-      <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid h-full gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
         {/* 左侧节点列表 */}
-        <div className="space-y-3">
+        <div className="flex h-full min-h-0 flex-col space-y-3">
           <div>
             <input
               value={filter}
@@ -304,7 +304,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
               {filteredNodes.every((n) => selectedNodeIds.includes(n.id)) && filteredNodes.length > 0 ? '清空选择' : '全选可见'}
             </button>
           </div>
-          <div className="max-h-[560px] space-y-1.5 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
             {filteredNodes.map((n) => {
               const k = keysByNode?.[n.id]
               const isActive = activeNodeId === n.id
@@ -329,14 +329,14 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                       <span className="truncate font-medium">{n.name}</span>
                       {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存" />}
                     </span>
-                    <span className="truncate text-xs text-soft">
-                      {n.ip}
+                    <span className="flex min-w-0 items-center gap-1 text-xs text-soft">
+                      <span className="min-w-0 flex-1 truncate">{n.ip}</span>
                       {k && (
-                        <>
-                          <span className="mx-1.5 text-faint">·</span>
-                          {k.port > 0 ? `端口 ${k.port}` : `默认 ${profile.port}`}
-                          {k.locked && <span className="ml-1.5 text-amber-500">🔒</span>}
-                        </>
+                        <span className="flex shrink-0 items-center gap-1">
+                          <span className="text-faint">·</span>
+                          <span>{k.port > 0 ? `端口 ${k.port}` : `默认`}</span>
+                          {k.locked && <span className="text-amber-500">🔒</span>}
+                        </span>
                       )}
                     </span>
                   </button>
@@ -348,7 +348,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
         </div>
 
         {/* 右侧编辑区 */}
-        <div className="space-y-4">
+        <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
           {activeNodeId === null && selectedNodeIds.length === 0 && (
             <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-soft">
               请从左侧选择节点（点击进入编辑，复选框用于批量操作）
