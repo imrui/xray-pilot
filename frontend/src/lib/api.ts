@@ -231,9 +231,28 @@ export const backupApi = {
     request.get<ApiResponse<BackupFile[]>>('/system/backups'),
   run: () =>
     request.post<ApiResponse<BackupFile>>('/system/backups'),
-  // 返回完整下载 URL；浏览器端通过 a[href]+download 触发
-  downloadURL: (name: string) =>
-    `/api/system/backups/${encodeURIComponent(name)}/download`,
+  // 用 axios 拉 blob 触发下载，确保 JWT header 跟随请求；
+  // 直接用 <a href download> 会导致浏览器跳过拦截器、缺失 Authorization 被后端拒为 401。
+  download: async (name: string) => {
+    const res = await request.get(`/system/backups/${encodeURIComponent(name)}/download`, {
+      responseType: 'blob',
+    })
+    let filename = name
+    const cd = String((res.headers as Record<string, unknown>)['content-disposition'] ?? '')
+    const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)
+    if (m) {
+      try { filename = decodeURIComponent(m[1]) } catch { filename = m[1] }
+    }
+    const blob = res.data as Blob
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
   remove: (name: string) =>
     request.delete<ApiResponse<{ deleted: string }>>(`/system/backups/${encodeURIComponent(name)}`),
 }
