@@ -76,6 +76,15 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .node-info{flex:1;min-width:0}
 .node-name-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .region-tag{display:inline-flex;align-items:center;padding:2px 6px;border:1px solid var(--border);border-radius:6px;background:var(--panel);font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-faint);text-transform:uppercase}
+.protocol-tag{display:inline-flex;align-items:center;padding:2px 7px;border:1px solid;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.02em}
+.protocol-tag.proto-vless-reality{background:var(--badge-green-bg);color:var(--badge-green-text);border-color:var(--badge-green-border)}
+.protocol-tag.proto-vless-ws-tls{background:var(--badge-blue-bg);color:var(--badge-blue-text);border-color:var(--badge-blue-border)}
+.protocol-tag.proto-trojan{background:var(--badge-yellow-bg);color:var(--badge-yellow-text);border-color:var(--badge-yellow-border)}
+.protocol-tag.proto-hysteria2{background:var(--badge-red-bg);color:var(--badge-red-text);border-color:var(--badge-red-border)}
+.node-meta-row{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:11px;color:var(--text-faint);flex-wrap:wrap}
+.node-meta-row .meta-sync{font-variant-numeric:tabular-nums}
+.node-meta-row .meta-sync.stale{color:var(--badge-yellow-text)}
+.node-meta-row .meta-remark{color:var(--text-soft);font-style:italic}
 .node-name{font-size:15px;font-weight:600;color:var(--text)}
 .node-link,.alt-link{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .node-actions,.alt-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
@@ -259,8 +268,15 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
           <div class="node-name-row">
             <span class="node-name">{{.Name}}</span>
             {{if .Region}}<span class="region-tag">{{.Region}}</span>{{end}}
+            {{if .ProtocolLabel}}<span class="protocol-tag proto-{{.Protocol}}">{{.ProtocolLabel}}</span>{{end}}
           </div>
           <div class="node-link" title="{{.Link}}">{{.Link}}</div>
+          {{if or .LastSyncAt .Remark}}
+          <div class="node-meta-row">
+            {{if .LastSyncAt}}<span class="meta-sync" data-last-sync="{{.LastSyncAt.UTC.Format "2006-01-02T15:04:05Z"}}"></span>{{end}}
+            {{if .Remark}}<span class="meta-remark">{{.Remark}}</span>{{end}}
+          </div>
+          {{end}}
         </div>
         <div class="node-actions">
           <button class="btn copy-btn" data-copy="{{.Link}}">
@@ -291,6 +307,12 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
           <div class="alt-link" title="{{.URL}}">{{.URL}}</div>
         </div>
         <div class="alt-actions">
+          {{if eq .Format "clash"}}
+          <a class="btn" href="clash://install-config?url={{.URL | urlquery}}&name=xray-pilot" title="一键导入 Mihomo / Clash Verge / ClashX">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/><path d="M14 3v6h6"/></svg>
+            一键导入
+          </a>
+          {{end}}
           <button class="btn copy-btn" data-copy="{{.URL}}">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
             复制
@@ -351,7 +373,33 @@ window.addEventListener('load', function(){
     colorLight: '#ffffff',
     correctLevel: QRCode.CorrectLevel.M
   });
+  renderRelativeSyncTimes();
 });
+
+// renderRelativeSyncTimes 把节点行里 <span data-last-sync="ISO"> 渲染成"5 分钟前"
+// 之类的相对时间；超过 24h 加 .stale 给出视觉提醒，提示用户配置可能已过时。
+function renderRelativeSyncTimes(){
+  var nodes = document.querySelectorAll('.meta-sync[data-last-sync]');
+  if(!nodes.length) return;
+  var now = Date.now();
+  nodes.forEach(function(el){
+    var iso = el.getAttribute('data-last-sync');
+    if(!iso) return;
+    var t = Date.parse(iso);
+    if(isNaN(t)) return;
+    var diffSec = Math.max(0, Math.floor((now - t) / 1000));
+    var label;
+    if(diffSec < 60) label = '刚刚同步';
+    else if(diffSec < 3600) label = '同步于 ' + Math.floor(diffSec / 60) + ' 分钟前';
+    else if(diffSec < 86400) label = '同步于 ' + Math.floor(diffSec / 3600) + ' 小时前';
+    else label = '同步于 ' + Math.floor(diffSec / 86400) + ' 天前';
+    el.textContent = label;
+    if(diffSec >= 86400){
+      el.classList.add('stale');
+      el.title = '节点配置已超过 24 小时未同步，可能与客户端实际可用配置不一致';
+    }
+  });
+}
 
 function fallbackCopy(text, onSuccess, onFail){
   var ta = document.createElement('textarea');

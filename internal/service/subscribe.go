@@ -288,10 +288,18 @@ type SubLink struct {
 }
 
 // NodeLinkData 节点链接信息
+//
+// 字段为信息页模板优化（v0.4.0）增补：Protocol/ProtocolLabel 用于配色徽章；
+// LastSyncAt 用前端 JS 渲染相对时间避免服务端时区问题；
+// Remark 仅在非空时透出，给"仅看视频禁 P2P"之类的使用提示留位。
 type NodeLinkData struct {
-	Name   string
-	Region string
-	Link   string
+	Name          string
+	Region        string
+	Link          string
+	Protocol      string // slug，如 vless-reality，用作 CSS class 后缀
+	ProtocolLabel string // 显示用，如 "VLESS + Reality"
+	LastSyncAt    *time.Time
+	Remark        string
 }
 
 // GetUser 通过 token 获取用户（供 handler 读取 ExpiresAt 用于响应头）
@@ -384,12 +392,18 @@ func (s *SubscribeService) GetSubscribePageDataWithBaseURL(token, baseURL string
 	for _, node := range nodes {
 		node := node
 		// 每个节点取第一个可用链接；节点无协议配置时也加入列表（link 为空）
-		var firstLink string
+		var (
+			firstLink     string
+			firstProtocol string
+		)
 		if profileKeys, err := s.profileRepo.FindActiveKeysForNode(node.ID); err == nil {
 			for _, key := range profileKeys {
 				key := key
 				if l := s.buildURI(user, &node, key.Profile, &key); l != "" {
 					firstLink = l
+					if key.Profile != nil {
+						firstProtocol = string(key.Profile.Protocol)
+					}
 					break
 				}
 			}
@@ -397,13 +411,38 @@ func (s *SubscribeService) GetSubscribePageDataWithBaseURL(token, baseURL string
 		if firstLink == "" {
 			continue
 		}
+		var lastSync *time.Time
+		if node.LastSyncAt != nil {
+			ls := *node.LastSyncAt
+			lastSync = &ls
+		}
 		data.Nodes = append(data.Nodes, NodeLinkData{
-			Name:   node.Name,
-			Region: node.Region,
-			Link:   firstLink,
+			Name:          node.Name,
+			Region:        node.Region,
+			Link:          firstLink,
+			Protocol:      firstProtocol,
+			ProtocolLabel: protocolDisplayLabel(firstProtocol),
+			LastSyncAt:    lastSync,
+			Remark:        node.Remark,
 		})
 	}
 	return data, nil
+}
+
+// protocolDisplayLabel 把内部 protocol slug 转成订阅信息页显示用的人类可读标签。
+// 与 frontend/src/lib/protocol.ts::PROTOCOL_LABELS 对齐。
+func protocolDisplayLabel(p string) string {
+	switch p {
+	case "vless-reality":
+		return "VLESS + Reality"
+	case "vless-ws-tls":
+		return "VLESS + WS + TLS"
+	case "trojan":
+		return "Trojan"
+	case "hysteria2":
+		return "Hysteria2"
+	}
+	return ""
 }
 
 // GenerateClash 生成 Clash 格式订阅（YAML）
