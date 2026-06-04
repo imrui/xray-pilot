@@ -11,9 +11,11 @@ When a tag matching `v*` is pushed, the release workflow will read `release-note
 
 If the file is missing, the workflow will fail so the release is not published with an empty description.
 
-## 风格指南（v0.4.0 起统一）
+## 风格指南
 
 Release notes 直接发布到 GitHub Release 页面，面向**最终用户与运维者**。控制总字数（一般 < 300 字），按功能条目组织，避免开发者视角的实现细节。
+
+历史所有版本（v0.1.0 ~ v0.3.1）已按此风格回填并同步覆盖到 GitHub Release 页面。
 
 ### 推荐结构
 
