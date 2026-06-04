@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { Check, Copy, X } from 'lucide-react'
+import { copyText } from '@/lib/clipboard'
 
 interface QRModalProps {
   open: boolean
@@ -14,8 +15,9 @@ export function QRModal({ open, onClose, url, title = '订阅二维码' }: QRMod
 
   if (!open) return null
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(url)
+  const handleCopy = async () => {
+    const ok = await copyText(url)
+    if (!ok) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

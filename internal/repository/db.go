@@ -2,11 +2,15 @@ package repository
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	gormlogger "gorm.io/gorm/logger"
 
 	_ "modernc.org/sqlite"
 
@@ -31,7 +35,19 @@ func Connect() error {
 		}
 	}
 
-	db, err := gorm.Open(dialector, &gorm.Config{})
+	// IgnoreRecordNotFoundError：ErrRecordNotFound 在业务上几乎都是预期路径
+	// （如 SettingService.Get 拿不到 key 时回退默认、install 检查同名节点等），
+	// 默认 GORM logger 把它当 warning 打日志会让控制台被噪音淹没。
+	dbLogger := gormlogger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		gormlogger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  gormlogger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+	db, err := gorm.Open(dialector, &gorm.Config{Logger: dbLogger})
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %w", err)
 	}
@@ -59,6 +75,7 @@ func autoMigrate(db *gorm.DB) error {
 		&entity.SystemSetting{},
 		&entity.TrafficSample{},
 		&entity.UserTrafficTotal{},
+		&entity.NodeInstallToken{},
 	)
 }
 

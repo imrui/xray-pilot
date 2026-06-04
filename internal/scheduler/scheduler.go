@@ -19,6 +19,7 @@ type Scheduler struct {
 	trafficSvc *service.TrafficService
 	backupSvc  *service.BackupService
 	settingSvc *service.SettingService
+	installSvc *service.InstallService
 	nodeRepo   *repository.NodeRepository
 	logRepo    *repository.LogRepository
 	log        *zap.Logger
@@ -30,6 +31,7 @@ func New() *Scheduler {
 		trafficSvc: service.NewTrafficService(),
 		backupSvc:  service.NewBackupService(),
 		settingSvc: service.NewSettingService(),
+		installSvc: service.NewInstallService(),
 		nodeRepo:   repository.NewNodeRepository(),
 		logRepo:    repository.NewLogRepository(),
 		log:        zap.L().Named("scheduler"),
@@ -72,6 +74,41 @@ func (s *Scheduler) Start(ctx context.Context) {
 			time.Duration(backupHours)*time.Hour,
 			1*time.Hour, // 启动后 1h 触发首次，避免启动风暴
 			func() { s.backupSvc.RunOnce() },
+		)
+	}
+
+	// 安装 token 清理：固定 1 小时一次，无需配置项
+	go s.runLoop(ctx, "install_token_cleanup",
+		1*time.Hour,
+		5*time.Minute,
+		s.runInstallTokenCleanup,
+	)
+}
+
+// runInstallTokenCleanup 清理已过期且未使用的一次性安装 token
+func (s *Scheduler) runInstallTokenCleanup() {
+	deleted, err := s.installSvc.CleanupExpired()
+	if err != nil {
+		s.log.Warn("安装 token 清理失败", zap.Error(err))
+		s.logRepo.RecordWithActor(
+			"install_token_cleanup",
+			"all",
+			"system:scheduler:install_token_cleanup",
+			false,
+			err.Error(),
+			0,
+		)
+		return
+	}
+	if deleted > 0 {
+		s.log.Info("安装 token 清理完成", zap.Int64("deleted", deleted))
+		s.logRepo.RecordWithActor(
+			"install_token_cleanup",
+			"all",
+			"system:scheduler:install_token_cleanup",
+			true,
+			fmt.Sprintf("deleted=%d", deleted),
+			0,
 		)
 	}
 }
@@ -149,9 +186,10 @@ func (s *Scheduler) runHealthCheck() {
 		}
 		// 节点从健康变为不健康时，记录日志
 		if !ok && node.LastCheckOK {
-			s.logRepo.Record(
+			s.logRepo.RecordWithActor(
 				"health_check",
 				nodeTarget(node),
+				"system:scheduler:health_check",
 				false,
 				"节点不可达（TCP 连接失败）",
 				int64(latencyMs),

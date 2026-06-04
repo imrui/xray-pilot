@@ -14,6 +14,7 @@ import { ActionMenu } from '@/components/ui/ActionMenu'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { pushToast } from '@/lib/notify'
+import { copyText } from '@/lib/clipboard'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -712,7 +713,15 @@ export default function Users() {
   }
 
   const copySubscribeUrl = async (user: User) => {
-    await navigator.clipboard.writeText(user.subscribe_url)
+    const ok = await copyText(user.subscribe_url)
+    if (!ok) {
+      pushToast({
+        title: '复制失败',
+        description: '请手动选中订阅地址并按 Ctrl+C 复制',
+        variant: 'warning',
+      })
+      return
+    }
     setCopiedUserId(user.id)
     pushToast({
       title: '订阅链接已复制',

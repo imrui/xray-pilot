@@ -17,6 +17,7 @@ func RegisterRoutes(r *gin.Engine) {
 	feishuH := NewFeishuHandler()
 	trafficH := NewTrafficHandler()
 	backupH := NewBackupHandler()
+	installH := NewInstallHandler()
 
 	// 订阅（无需鉴权）
 	r.GET("/sub/:token", subH.Subscribe)
@@ -24,6 +25,13 @@ func RegisterRoutes(r *gin.Engine) {
 
 	// 登录（无需鉴权）
 	r.POST("/api/auth/login", authH.Login)
+
+	// 节点装机脚本端点（token 鉴权，非 JWT）
+	install := r.Group("/api/install")
+	{
+		install.GET("/panel-pubkey", installH.GetPanelPubkey)
+		install.POST("/register", installH.Register)
+	}
 
 	// 需要 JWT 鉴权的路由
 	api := r.Group("/api", JWTMiddleware())
@@ -54,6 +62,11 @@ func RegisterRoutes(r *gin.Engine) {
 		api.POST("/nodes/sync-all", nodeH.SyncAll)
 		api.POST("/nodes/sync-drifted", nodeH.SyncDrifted)
 		api.POST("/nodes/keygen", nodeH.Keygen)
+		// 节点一键接入 token 管理（管理员域）
+		api.POST("/nodes/install-tokens", installH.CreateToken)
+		api.GET("/nodes/install-tokens", installH.ListTokens)
+		api.GET("/nodes/install-tokens/:token", installH.GetToken)
+		api.DELETE("/nodes/install-tokens/:id", installH.DeleteToken)
 		api.GET("/nodes/:id", nodeH.Get)
 		api.PUT("/nodes/:id", nodeH.Update)
 		api.DELETE("/nodes/:id", nodeH.Delete)

@@ -39,6 +39,16 @@ type Node struct {
 	LastCheckOK   bool
 	LastLatencyMs int
 
+	// ConnectionMode 标识节点控制平面类型，为未来 agent 化预留扩展。
+	//   ssh    - 当前默认，panel 通过 SSH push 配置（v0.4.0 全部填这个）
+	//   grpc   - v0.4.5 预留，xray gRPC 实时控制面
+	//   agent  - v0.7.0+ 预留，独立 xpilot-node 程序反向连接
+	ConnectionMode string `gorm:"size:16;default:'ssh'"`
+
+	// RegisteredAt 节点通过一键安装脚本注册回 panel 的时间；
+	// 手工新增的节点该字段为空，用于区分接入路径。
+	RegisteredAt *time.Time
+
 	Remark    string
 	CreatedAt time.Time
 	UpdatedAt time.Time

@@ -11,6 +11,15 @@ SSH_CONFIG_FILE="${SSH_CONFIG_FILE:-/etc/ssh/sshd_config}"
 AUTHORIZED_KEYS_FILE="${AUTHORIZED_KEYS_FILE:-${ROOT_HOME}/.ssh/authorized_keys}"
 SSH_CONFIG_BACKUP=""
 
+# 自动接入模式（v0.4.0+）：检测 PANEL_URL + INSTALL_TOKEN 后从面板拉公钥并注册回填。
+# 这两个变量留空时脚本仍按原有交互模式运行，README 老用法不受影响。
+PANEL_URL="${PANEL_URL:-}"
+INSTALL_TOKEN="${INSTALL_TOKEN:-}"
+AUTO_MODE="false"
+if [[ -n "${PANEL_URL}" && -n "${INSTALL_TOKEN}" ]]; then
+  AUTO_MODE="true"
+fi
+
 log_step() {
   echo
   echo "==> $1"
@@ -49,6 +58,10 @@ collect_authorized_keys() {
     return
   fi
 
+  if [[ "${AUTO_MODE}" == "true" ]]; then
+    return
+  fi
+
   echo "Paste management public keys for root authorized_keys, one per line."
   echo "Press Enter on an empty line to finish. Leave it empty to skip this step."
 
@@ -64,6 +77,58 @@ collect_authorized_keys() {
   if [[ "${#collected[@]}" -gt 0 ]]; then
     AUTHORIZED_KEYS_INPUT="$(printf '%s\n' "${collected[@]}")"
   fi
+}
+
+# fetch_panel_pubkey 自动模式下从 panel 拉公钥并写入 AUTHORIZED_KEYS_INPUT。
+# 拉取失败立即退出，避免后续 SSH 配置变更后失去 root 访问。
+fetch_panel_pubkey() {
+  if [[ "${AUTO_MODE}" != "true" ]]; then
+    return
+  fi
+
+  local url="${PANEL_URL%/}/api/install/panel-pubkey?token=${INSTALL_TOKEN}"
+  local pubkey
+  if ! pubkey="$(curl -fsSL "${url}")"; then
+    echo "Failed to fetch panel pubkey from ${PANEL_URL}." >&2
+    echo "请检查 PANEL_URL 可达性、token 是否有效且未过期。" >&2
+    exit 1
+  fi
+  if [[ -z "${pubkey// /}" ]]; then
+    echo "Panel pubkey response is empty." >&2
+    exit 1
+  fi
+  AUTHORIZED_KEYS_INPUT="${pubkey}"
+}
+
+# report_to_panel 自动模式下脚本完成后回填节点元数据。失败不阻断 xray 已起的成果。
+report_to_panel() {
+  if [[ "${AUTO_MODE}" != "true" ]]; then
+    return
+  fi
+
+  local url="${PANEL_URL%/}/api/install/register?token=${INSTALL_TOKEN}"
+  local public_ip xray_version kernel distro
+  public_ip="$(curl -fsSL --max-time 10 https://api.ipify.org 2>/dev/null || echo unknown)"
+  xray_version="$(xray version 2>/dev/null | head -n 1 | awk '{print $2}' || echo unknown)"
+  kernel="$(uname -r 2>/dev/null || echo unknown)"
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    distro="$( . /etc/os-release && echo "${PRETTY_NAME:-unknown}" )"
+  else
+    distro="unknown"
+  fi
+
+  local payload
+  payload="$(printf '{"public_ip":"%s","xray_version":"%s","kernel":"%s","distro":"%s"}' \
+    "${public_ip}" "${xray_version}" "${kernel}" "${distro}")"
+
+  if ! curl -fsSL -X POST -H 'Content-Type: application/json' \
+        -d "${payload}" "${url}" >/dev/null; then
+    echo "WARNING: 节点已配置完成但注册回 panel 失败。" >&2
+    echo "请在面板「新增节点」手动录入：IP=${public_ip} xray=${xray_version}" >&2
+    return
+  fi
+  log_done "Registered with panel (${PANEL_URL})"
 }
 
 upsert_sshd_option() {
@@ -179,12 +244,18 @@ main() {
   require_cmd awk
   log_done "Prerequisites ready"
 
-  log_step "Collecting management public keys"
-  collect_authorized_keys
-  if [[ -n "${AUTHORIZED_KEYS_INPUT}" ]]; then
-    log_done "Management public keys collected"
+  if [[ "${AUTO_MODE}" == "true" ]]; then
+    log_step "Fetching panel SSH pubkey via install token"
+    fetch_panel_pubkey
+    log_done "Panel pubkey fetched (${PANEL_URL})"
   else
-    log_done "Skipped management public keys input"
+    log_step "Collecting management public keys"
+    collect_authorized_keys
+    if [[ -n "${AUTHORIZED_KEYS_INPUT}" ]]; then
+      log_done "Management public keys collected"
+    else
+      log_done "Skipped management public keys input"
+    fi
   fi
 
   log_step "Updating sshd_config"
@@ -215,6 +286,11 @@ main() {
   else
     echo "WARNING: Unable to restart ssh.service or sshd.service automatically." >&2
     echo "Please verify the SSH service name manually and restart it if needed." >&2
+  fi
+
+  if [[ "${AUTO_MODE}" == "true" ]]; then
+    log_step "Reporting back to panel"
+    report_to_panel
   fi
 
   echo
