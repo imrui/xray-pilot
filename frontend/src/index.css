@@ -164,3 +164,11 @@
     border-top: 1px solid var(--border);
   }
 }
+
+@layer base {
+  /* 原生 select 的下拉选项强制使用主题色，避免暗色模式下白底白字 */
+  option {
+    background-color: var(--panel-strong);
+    color: var(--text);
+  }
+}
