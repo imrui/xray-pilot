@@ -4,6 +4,7 @@ import { AlertTriangle, Copy, FileCode, Filter, PencilLine, Plus, RefreshCw, Sea
 import { OneClickInstallDialog } from '@/components/OneClickInstallDialog'
 import { nodeApi, profileApi } from '@/lib/api'
 import { generateShortIds } from '@/lib/keygen'
+import { copyText } from '@/lib/clipboard'
 import { protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
 import type { InboundProfile, Node, NodeKey, SyncStatus } from '@/types'
 import { Modal } from '@/components/ui/Modal'
@@ -792,8 +793,16 @@ function PreviewConfigModal({ node, activeProfiles, onClose }: { node: Node; act
 
   const handleCopy = async () => {
     if (!data?.config) return
-    await navigator.clipboard.writeText(data.config)
-    setCopied(true)
+    const ok = await copyText(data.config)
+    if (ok) {
+      setCopied(true)
+    } else {
+      pushToast({
+        title: '复制失败',
+        description: '请手动选中预览内容并按 Ctrl+C 复制',
+        variant: 'warning',
+      })
+    }
   }
 
   return (

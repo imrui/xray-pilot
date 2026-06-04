@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Copy, Sparkles, Terminal } from 'lucide-react'
 import { installApi, type InstallToken } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 import { Modal } from '@/components/ui/Modal'
 import { Field, Btn, FieldGroup, SelectField } from '@/components/ui/Form'
 import { pushToast } from '@/lib/notify'
@@ -124,9 +125,17 @@ export function OneClickInstallDialog({ open, onClose, onRegistered }: Props) {
 
   const handleCopyCommand = async () => {
     if (!token?.curl_command) return
-    await navigator.clipboard.writeText(token.curl_command)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    const ok = await copyText(token.curl_command)
+    if (ok) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } else {
+      pushToast({
+        title: '复制失败',
+        description: '请手动选中命令并按 Ctrl+C 复制',
+        variant: 'warning',
+      })
+    }
   }
 
   const handleRegenerate = () => {
