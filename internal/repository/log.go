@@ -16,11 +16,28 @@ func (r *LogRepository) Create(log *entity.SyncLog) error {
 	return DB.Create(log).Error
 }
 
-// Record 快捷写入一条操作日志
+// Record 快捷写入一条操作日志（不带 actor）
+//
+// Deprecated: 新代码请用 RecordWithActor 显式声明 actor。
+// 该方法保留供 v0.4.0 之前的 27 处老调用点继续工作；
+// v0.5.0 多管理员落地时统一迁移完毕后再删除。
 func (r *LogRepository) Record(action, target string, success bool, msg string, durationMs int64) {
 	_ = r.Create(&entity.SyncLog{
 		Action:     action,
 		Target:     target,
+		Success:    success,
+		Message:    msg,
+		DurationMs: durationMs,
+	})
+}
+
+// RecordWithActor 写入一条带 actor 的操作日志。
+// actor 字符串格式约定见 entity.SyncLog godoc。
+func (r *LogRepository) RecordWithActor(action, target, actor string, success bool, msg string, durationMs int64) {
+	_ = r.Create(&entity.SyncLog{
+		Action:     action,
+		Target:     target,
+		Actor:      actor,
 		Success:    success,
 		Message:    msg,
 		DurationMs: durationMs,

@@ -90,10 +90,26 @@ func (s *Scheduler) runInstallTokenCleanup() {
 	deleted, err := s.installSvc.CleanupExpired()
 	if err != nil {
 		s.log.Warn("安装 token 清理失败", zap.Error(err))
+		s.logRepo.RecordWithActor(
+			"install_token_cleanup",
+			"all",
+			"system:scheduler:install_token_cleanup",
+			false,
+			err.Error(),
+			0,
+		)
 		return
 	}
 	if deleted > 0 {
 		s.log.Info("安装 token 清理完成", zap.Int64("deleted", deleted))
+		s.logRepo.RecordWithActor(
+			"install_token_cleanup",
+			"all",
+			"system:scheduler:install_token_cleanup",
+			true,
+			fmt.Sprintf("deleted=%d", deleted),
+			0,
+		)
 	}
 }
 
@@ -170,9 +186,10 @@ func (s *Scheduler) runHealthCheck() {
 		}
 		// 节点从健康变为不健康时，记录日志
 		if !ok && node.LastCheckOK {
-			s.logRepo.Record(
+			s.logRepo.RecordWithActor(
 				"health_check",
 				nodeTarget(node),
+				"system:scheduler:health_check",
 				false,
 				"节点不可达（TCP 连接失败）",
 				int64(latencyMs),

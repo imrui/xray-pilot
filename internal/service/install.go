@@ -152,12 +152,12 @@ func (s *InstallService) CreateToken(req *dto.CreateInstallTokenRequest, adminUs
 
 	curl := buildInstallCurlCommand(strings.TrimRight(req.PanelURL, "/"), tokenStr)
 
-	// 操作日志：actor 字段在 v0.5.0 落地，当前先把信息写进 message
-	s.logRepo.Record(
+	s.logRepo.RecordWithActor(
 		"install_token_create",
 		fmt.Sprintf("node=%s", req.Name),
+		fmt.Sprintf("admin:%s", adminUsername),
 		true,
-		fmt.Sprintf("actor=admin:%s ttl=%ds", adminUsername, int(ttl.Seconds())),
+		fmt.Sprintf("ttl=%ds", int(ttl.Seconds())),
 		0,
 	)
 
@@ -250,12 +250,13 @@ func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP strin
 	}
 
 	short := tokenShortID(t.Token)
-	s.logRepo.Record(
+	s.logRepo.RecordWithActor(
 		"install_node_register",
 		fmt.Sprintf("node=%s id=%d", node.Name, node.ID),
+		fmt.Sprintf("system:install-token:%s", short),
 		true,
-		fmt.Sprintf("actor=system:install-token:%s ip=%s xray=%s kernel=%s distro=%s",
-			short, ip, req.XrayVersion, req.Kernel, req.Distro),
+		fmt.Sprintf("ip=%s xray=%s kernel=%s distro=%s",
+			ip, req.XrayVersion, req.Kernel, req.Distro),
 		0,
 	)
 
@@ -293,11 +294,12 @@ func (s *InstallService) Delete(id uint, adminUsername string) error {
 	if err := s.tokenRepo.Delete(id); err != nil {
 		return err
 	}
-	s.logRepo.Record(
+	s.logRepo.RecordWithActor(
 		"install_token_delete",
 		fmt.Sprintf("token_id=%d", id),
+		fmt.Sprintf("admin:%s", adminUsername),
 		true,
-		fmt.Sprintf("actor=admin:%s", adminUsername),
+		"",
 		0,
 	)
 	return nil
