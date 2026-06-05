@@ -58,8 +58,38 @@ func Connect() error {
 	if err := migrateLegacyUserGroups(db); err != nil {
 		return fmt.Errorf("迁移用户分组关系失败: %w", err)
 	}
+	if err := cleanupOrphanRelations(db); err != nil {
+		// 清理失败不阻断启动，仅日志（业务上不影响），但下次仍会尝试
+		fmt.Printf("[warn] 清理孤儿关联表失败: %v\n", err)
+	}
 
 	DB = db
+	return nil
+}
+
+// cleanupOrphanRelations 清理多对多 / 关联表中指向不存在主体的孤儿行。
+//
+// 历史背景：v0.4.3 之前 NodeRepository.Delete 是 hard delete 但未级联清理
+// 中间表，叠加 SQLite ID 复用机制后会让"删节点 → 一键接入新节点"撞到旧
+// 节点 ID 的 orphan 关联（继承旧分组 / 协议绑定 / 用户）。本函数在每次
+// 启动后跑一次兜底，清掉所有方向的孤儿，确保新建实体不会撞库。
+//
+// 用 Exec 走 raw SQL 而非 GORM 抽象——中间表 group_nodes 没有 entity 定义，
+// 直接 SQL 最直白；性能也好（避免 GORM 反射开销）。
+func cleanupOrphanRelations(db *gorm.DB) error {
+	statements := []string{
+		"DELETE FROM group_nodes WHERE node_id NOT IN (SELECT id FROM nodes)",
+		"DELETE FROM group_nodes WHERE group_id NOT IN (SELECT id FROM groups)",
+		"DELETE FROM node_profile_keys WHERE node_id NOT IN (SELECT id FROM nodes)",
+		"DELETE FROM node_profile_keys WHERE profile_id NOT IN (SELECT id FROM inbound_profiles)",
+		"DELETE FROM user_groups WHERE user_id NOT IN (SELECT id FROM users)",
+		"DELETE FROM user_groups WHERE group_id NOT IN (SELECT id FROM groups)",
+	}
+	for _, stmt := range statements {
+		if err := db.Exec(stmt).Error; err != nil {
+			return fmt.Errorf("执行 %q 失败: %w", stmt, err)
+		}
+	}
 	return nil
 }
 
