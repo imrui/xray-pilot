@@ -35,6 +35,13 @@ type NodeInstallToken struct {
 
 	// CreatedByAdmin 创建该 token 的管理员标识（v0.5.0 多管理员落地前先存 username）
 	CreatedByAdmin string `gorm:"size:64"`
+
+	// Reachable / ReachableLatencyMs / ReachableMessage 注册时 panel 主动
+	// TCP 探针节点 SSH 端口的结果。nil 表示未做过探针；true 表示能连通；
+	// false 表示防火墙拦截或节点 SSH 未起，前端据此提示用户排查防火墙。
+	Reachable          *bool  `gorm:"index"`
+	ReachableLatencyMs int
+	ReachableMessage   string `gorm:"size:255"`
 }
 
 // IsUsed 返回 token 是否已经被使用过

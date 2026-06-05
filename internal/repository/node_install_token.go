@@ -69,6 +69,18 @@ func (r *NodeInstallTokenRepository) Delete(id uint) error {
 	return DB.Delete(&entity.NodeInstallToken{}, id).Error
 }
 
+// UpdateReachability 把注册成功后的 SSH 端口连通性自检结果写回 token，
+// 供前端轮询 GetToken 时拿到决定 success 态显示连通 / 防火墙警告。
+func (r *NodeInstallTokenRepository) UpdateReachability(id uint, reachable bool, latencyMs int, message string) error {
+	return DB.Model(&entity.NodeInstallToken{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"reachable":            reachable,
+			"reachable_latency_ms": latencyMs,
+			"reachable_message":    message,
+		}).Error
+}
+
 // DeleteExpired 清理已过期且未使用的 token；
 // 已使用的 token 保留作为审计追溯，由更长周期的日志归档处理。
 func (r *NodeInstallTokenRepository) DeleteExpired(now time.Time) (int64, error) {

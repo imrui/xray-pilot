@@ -29,6 +29,17 @@ type InstallTokenResponse struct {
 	Used         bool      `json:"used"`
 	NodeID       *uint     `json:"node_id,omitempty"`
 	UsedByIP     string    `json:"used_by_ip,omitempty"`
+
+	// PanelOutboundIP 面板出网 IP（用于一键接入对话框提示用户在节点防火墙放行）
+	// 由系统设置中「面板出网 IP」决定：手动覆盖优先，否则取后台每小时自动探测的值；
+	// 两者都为空时返回 ""，对话框降级为通用文案。
+	PanelOutboundIP string `json:"panel_outbound_ip,omitempty"`
+
+	// Reachable / ReachableLatencyMs / ReachableMessage panel 注册后做的 SSH 连通性
+	// 探针结果（仅在 Used = true 时有意义）。nil = 未探测；true/false = 探针结果。
+	Reachable          *bool  `json:"reachable,omitempty"`
+	ReachableLatencyMs int    `json:"reachable_latency_ms,omitempty"`
+	ReachableMessage   string `json:"reachable_message,omitempty"`
 }
 
 // RegisterNodeRequest 节点装机脚本回调时上报的自检信息
@@ -40,7 +51,14 @@ type RegisterNodeRequest struct {
 }
 
 // RegisterNodeResponse 注册成功后返回
+//
+// Reachable / ReachableLatencyMs / ReachableMessage 由 panel 注册成功后立刻
+// 做的 SSH 端口 TCP 探针得到。脚本一般不消费这些字段（脚本只关心节点是否
+// 注册成功），但前端轮询 GetToken 会拿到同名字段决定 success 态的连通性提示。
 type RegisterNodeResponse struct {
-	NodeID uint   `json:"node_id"`
-	Name   string `json:"name"`
+	NodeID             uint   `json:"node_id"`
+	Name               string `json:"name"`
+	Reachable          bool   `json:"reachable"`
+	ReachableLatencyMs int    `json:"reachable_latency_ms"`
+	ReachableMessage   string `json:"reachable_message,omitempty"`
 }

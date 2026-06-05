@@ -289,6 +289,27 @@ export default function Settings() {
             <p className="text-xs text-soft">建议不要直接使用 `/root/.ssh/*`。对于 systemd 部署，请把服务可读的 SSH 私钥放在 `/etc/xray-pilot/ssh/` 下。</p>
           </Section>
 
+          <Section title="面板出网 IP" description="用于一键接入提示用户在节点防火墙放行的 IP。后台每小时自动探测；手动覆盖优先。">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field
+                label="自动探测值（只读）"
+                value={form['panel.outbound_ip_auto'] ?? ''}
+                onChange={() => {}}
+                placeholder="启动后约 10 秒填入"
+                readOnly
+              />
+              <Field
+                label="手动覆盖（留空则使用自动值）"
+                value={form['panel.outbound_ip_manual'] ?? ''}
+                onChange={f('panel.outbound_ip_manual')}
+                placeholder="多 IP / NAT / 容器场景手动填入"
+              />
+            </div>
+            <p className="text-xs text-soft">
+              通过 `https://api.ipify.org` 探测，可用 `XRAY_PILOT_OUTBOUND_PROBE_URL` 环境变量覆盖为私有探针。容器或反代环境下自动值可能拿到的是入口 IP，请改用手动覆盖。
+            </p>
+          </Section>
+
           <Section title="定时任务" description="修改后通常需要重启服务以确保新周期生效。">
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="漂移检测间隔（秒，0 禁用）" type="number" value={form['scheduler.drift_check_interval'] ?? '300'} onChange={f('scheduler.drift_check_interval')} />

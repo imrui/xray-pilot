@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"net"
 	"time"
 
 	"go.uber.org/zap"
@@ -20,6 +19,7 @@ type Scheduler struct {
 	backupSvc  *service.BackupService
 	settingSvc *service.SettingService
 	installSvc *service.InstallService
+	panelSvc   *service.PanelService
 	nodeRepo   *repository.NodeRepository
 	logRepo    *repository.LogRepository
 	log        *zap.Logger
@@ -32,6 +32,7 @@ func New() *Scheduler {
 		backupSvc:  service.NewBackupService(),
 		settingSvc: service.NewSettingService(),
 		installSvc: service.NewInstallService(),
+		panelSvc:   service.NewPanelService(),
 		nodeRepo:   repository.NewNodeRepository(),
 		logRepo:    repository.NewLogRepository(),
 		log:        zap.L().Named("scheduler"),
@@ -83,6 +84,24 @@ func (s *Scheduler) Start(ctx context.Context) {
 		5*time.Minute,
 		s.runInstallTokenCleanup,
 	)
+
+	// 面板出网 IP 探测：固定 1 小时一次（启动后 10 秒先跑一次，让一键接入
+	// 对话框首次打开就能拿到 IP）。
+	go s.runLoop(ctx, "panel_outbound_ip_detect",
+		1*time.Hour,
+		10*time.Second,
+		func() { s.runPanelOutboundIPDetect(ctx) },
+	)
+}
+
+// runPanelOutboundIPDetect 拿到面板出网 IP 后写入 setting；用于一键接入提示。
+func (s *Scheduler) runPanelOutboundIPDetect(ctx context.Context) {
+	ip, err := s.panelSvc.DetectOutboundIP(ctx)
+	if err != nil {
+		s.log.Warn("面板出网 IP 探测失败", zap.Error(err))
+		return
+	}
+	s.log.Debug("面板出网 IP 已刷新", zap.String("ip", ip))
 }
 
 // runInstallTokenCleanup 清理已过期且未使用的一次性安装 token
@@ -177,7 +196,7 @@ func (s *Scheduler) runHealthCheck() {
 		if sshPort == 0 {
 			sshPort = 22
 		}
-		ok, latencyMs := tcpProbe(node.IP, sshPort)
+		ok, latencyMs := service.TCPProbe(node.IP, sshPort)
 		if err := s.nodeRepo.UpdateLastCheck(node.ID, ok, latencyMs); err != nil {
 			s.log.Warn("健康检测：更新状态失败",
 				zap.Uint("nodeID", node.ID),
@@ -207,19 +226,6 @@ func (s *Scheduler) runHealthCheck() {
 		zap.Int("fail", failCount),
 		zap.Int("total", len(nodes)),
 	)
-}
-
-// tcpProbe 使用 TCP 连接探测节点可达性，返回 (ok, latencyMs)
-func tcpProbe(ip string, port int) (ok bool, latencyMs int) {
-	addr := net.JoinHostPort(ip, fmt.Sprintf("%d", port))
-	start := time.Now()
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-	elapsed := int(time.Since(start).Milliseconds())
-	if err != nil {
-		return false, elapsed
-	}
-	conn.Close()
-	return true, elapsed
 }
 
 func nodeTarget(n entity.Node) string {

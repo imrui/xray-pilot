@@ -236,6 +236,12 @@ export interface InstallToken {
   used: boolean
   node_id?: number
   used_by_ip?: string
+  /** 面板出网 IP；空字符串表示后端尚未探测到（前端文案降级） */
+  panel_outbound_ip?: string
+  /** 注册成功后 panel 主动 SSH 端口探针结果；undefined = 还没注册 */
+  reachable?: boolean
+  reachable_latency_ms?: number
+  reachable_message?: string
 }
 
 export interface CreateInstallTokenInput {
