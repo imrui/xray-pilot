@@ -71,8 +71,24 @@ func (r *NodeRepository) UpdateActive(id uint, active bool) error {
 	return DB.Model(&entity.Node{}).Where("id = ?", id).Update("active", active).Error
 }
 
+// Delete 删除节点并级联清理所有关联表
+//
+// GORM 多对多默认不会清理中间表，且 SQLite 在删除最大 ID 行后会复用 ID。
+// 这两点叠加会让"删节点 → 新建节点"撞到旧节点 ID 的 orphan 关联，新节点
+// 会"继承"旧节点的分组、协议密钥，造成数据串。本方法用事务保证三处一起删：
+//   - group_nodes（节点-分组多对多中间表）
+//   - node_profile_keys（节点-协议密钥绑定）
+//   - nodes（节点本身）
 func (r *NodeRepository) Delete(id uint) error {
-	return DB.Delete(&entity.Node{}, id).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DELETE FROM group_nodes WHERE node_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("node_id = ?", id).Delete(&entity.NodeProfileKey{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&entity.Node{}, id).Error
+	})
 }
 
 // UpdateSyncStatus 更新节点同步状态和配置哈希
