@@ -233,4 +233,8 @@ func TestBuildInstallCurlCommand_FormatsPanelAndToken(t *testing.T) {
 	if !strings.Contains(cmd, "INSTALL_TOKEN=abc123") {
 		t.Errorf("missing INSTALL_TOKEN in cmd: %s", cmd)
 	}
+	// v0.4.1：命令内不再注入 sudo，要求用户先切换到 root（前端文案提示）
+	if strings.Contains(cmd, "sudo") {
+		t.Errorf("unexpected sudo in cmd: %s", cmd)
+	}
 }

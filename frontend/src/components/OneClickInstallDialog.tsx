@@ -229,7 +229,7 @@ export function OneClickInstallDialog({ open, onClose, onRegistered }: Props) {
               <span className="font-mono text-soft">剩余 {remainingLabel}</span>
             </div>
             <p className="mt-2 text-xs text-soft">
-              在目标机器上以 root 执行下面这行命令；脚本完成自检后会自动注册回 panel，该对话框会自动关闭并刷新节点列表。
+              请以 root 用户执行下面这行命令（若当前为普通用户，先执行 <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">sudo su -</code> 切换）。脚本完成自检后会自动注册回 panel，该对话框会自动关闭并刷新节点列表。
             </p>
           </div>
 

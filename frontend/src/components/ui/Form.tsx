@@ -52,7 +52,7 @@ export function SelectField({ label, value, onChange, options, placeholder }: Se
 }
 
 interface BtnProps {
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent'
   loading?: boolean
   children: React.ReactNode
   onClick?: () => void
@@ -64,6 +64,9 @@ interface BtnProps {
 const btnClass: Record<string, string> = {
   primary: 'border border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)] focus-visible:ring-[var(--accent)]',
   secondary: 'border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text)] hover:border-[var(--accent)]/40 hover:bg-[var(--panel-muted)] focus-visible:ring-slate-400',
+  // accent: outline 风格，介于 primary（实心）与 secondary（中性灰）之间——
+  // 用于同一组按钮中需要"次要但与主色关联"的入口（如节点页的一键接入）
+  accent: 'border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white focus-visible:ring-[var(--accent)]',
   danger: 'border border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white focus-visible:ring-[var(--danger)]',
   ghost: 'border border-transparent bg-transparent text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)] focus-visible:ring-slate-400',
 }
