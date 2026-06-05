@@ -421,7 +421,7 @@ export default function Nodes() {
             <RefreshCw className="h-4 w-4" />
             同步待处理节点
           </Btn>
-          <Btn variant="secondary" onClick={() => setInstallOpen(true)}>
+          <Btn variant="accent" onClick={() => setInstallOpen(true)}>
             <Terminal className="h-4 w-4" />
             一键接入
           </Btn>
@@ -884,13 +884,25 @@ function NodeProtocolsDrawer({
 }) {
   const confirm = useConfirm()
   const qc = useQueryClient()
-  const [activeProfileId, setActiveProfileId] = useState<number | null>(null)
+  // explicitActiveId 用户主动点击激活的协议；下面派生 activeProfileId 时还会被
+  // "勾选恰好 1 个协议"的语义覆盖，让两种选中方式行为一致。
+  const [explicitActiveId, setExplicitActiveId] = useState<number | null>(null)
   const [selectedProfileIds, setSelectedProfileIds] = useState<number[]>([])
   const [loadedByProfile, setLoadedByProfile] = useState<Record<number, { settings: string; port: number }>>({})
   const [draftByProfile, setDraftByProfile] = useState<Record<number, { settings: string; port: number }>>({})
   const [filter, setFilter] = useState('')
   const [msg, setMsg] = useState('')
   const [msgType, setMsgType] = useState<'ok' | 'err'>('ok')
+
+  // 勾选 >1 个 = 批量；勾选恰好 1 个 = 视为激活该协议（让"复选框选 1 个"与
+  // "点击条目激活"语义合并，避免出现"勾选了但右侧编辑区不显示"的死区）
+  const isBatchMode = selectedProfileIds.length > 1
+  const activeProfileId =
+    isBatchMode
+      ? null
+      : selectedProfileIds.length === 1
+        ? selectedProfileIds[0]
+        : explicitActiveId
 
   const { data: nodeKeys } = useQuery({
     queryKey: ['nodeKeys', node.id],
@@ -930,7 +942,7 @@ function NodeProtocolsDrawer({
     if (loadedByProfile[id] === undefined && draftByProfile[id] === undefined) {
       setDraftByProfile((prev) => ({ ...prev, [id]: { settings: '{}', port: 0 } }))
     }
-    setActiveProfileId(id)
+    setExplicitActiveId(id)
   }
 
   const updateDraft = (profileId: number, patch: Partial<{ settings: string; port: number }>) => {
@@ -953,7 +965,11 @@ function NodeProtocolsDrawer({
   const activeProfile = activeProfileId !== null ? activeProfiles.find((p) => p.id === activeProfileId) : undefined
   const activeKey = activeProfileId !== null ? keyByProfileId.get(activeProfileId) : undefined
   const activeLocked = activeKey?.locked ?? false
-  const activeDraft = activeProfileId !== null ? (draftByProfile[activeProfileId] ?? loadedByProfile[activeProfileId]) : undefined
+  // 勾选 1 个但还没生成过草稿时，draft/loaded 都 undefined；给个默认占位让
+  // 端口/settings 编辑区能渲染出来（用户开始输入后会被 updateDraft 写入 state）
+  const activeDraft = activeProfileId !== null
+    ? (draftByProfile[activeProfileId] ?? loadedByProfile[activeProfileId] ?? { settings: '{}', port: 0 })
+    : undefined
 
   // 端口冲突前端实时检测（后端仍会硬校验兜底）
   const portConflict = useMemo(() => {
@@ -1101,7 +1117,7 @@ function NodeProtocolsDrawer({
 
   const targets = selectedProfileIds.length > 0 ? selectedProfileIds : activeProfileId !== null ? [activeProfileId] : []
   const unboundSelected = selectedProfileIds.filter((id) => !keyByProfileId.has(id))
-  const saveLabel = selectedProfileIds.length > 1
+  const saveLabel = isBatchMode
     ? unboundSelected.length === selectedProfileIds.length
       ? `批量绑定 (${selectedProfileIds.length})`
       : `批量保存 (${selectedProfileIds.length})`
@@ -1124,7 +1140,7 @@ function NodeProtocolsDrawer({
           <Btn
             loading={batchSave.isPending}
             onClick={() => batchSave.mutate()}
-            disabled={targets.length === 0 || (selectedProfileIds.length === 0 && activeLocked) || portConflict !== null}
+            disabled={targets.length === 0 || (!isBatchMode && activeLocked) || portConflict !== null}
           >
             {saveLabel}
           </Btn>
@@ -1231,12 +1247,12 @@ function NodeProtocolsDrawer({
             <>
               <FieldGroup
                 title={
-                  selectedProfileIds.length > 1
+                  isBatchMode
                     ? `批量目标 · ${selectedProfileIds.length} 个协议${unboundSelected.length > 0 ? `（含 ${unboundSelected.length} 个未绑）` : ''}`
                     : `当前协议 · ${activeProfile?.name ?? ''}${!keyByProfileId.has(activeProfileId ?? -1) ? '（未绑）' : ''}`
                 }
                 description={
-                  selectedProfileIds.length > 1
+                  isBatchMode
                     ? '批量保存会对所有勾选的协议生效；未绑协议会以模板默认参数完成绑定（可保存后逐个微调）。'
                     : activeProfile
                       ? `协议默认端口 ${activeProfile.port}（${activeProfile.protocol === 'hysteria2' ? 'UDP' : 'TCP'}）。端口留空或填 0 即继承默认。`
@@ -1244,21 +1260,21 @@ function NodeProtocolsDrawer({
                 }
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  {selectedProfileIds.length === 0 && activeProfile?.protocol === 'vless-reality' && (
+                  {!isBatchMode && activeProfile?.protocol === 'vless-reality' && (
                     <Btn variant="secondary" loading={keygen.isPending} onClick={() => keygen.mutate()} disabled={activeLocked}>
                       <Sparkles className="h-4 w-4" />
                       一键生成
                     </Btn>
                   )}
-                  <Btn variant="secondary" onClick={fillTemplate} disabled={selectedProfileIds.length === 0 && activeLocked}>
+                  <Btn variant="secondary" onClick={fillTemplate} disabled={!isBatchMode && activeLocked}>
                     填充模板
                   </Btn>
-                  {selectedProfileIds.length === 0 && activeKey && (
+                  {!isBatchMode && activeKey && (
                     <Btn variant="secondary" loading={lockToggle.isPending} onClick={() => lockToggle.mutate(!activeLocked)}>
                       {activeLocked ? '解除锁定' : '锁定协议'}
                     </Btn>
                   )}
-                  {selectedProfileIds.length === 0 && activeKey && (
+                  {!isBatchMode && activeKey && (
                     <Btn
                       variant="secondary"
                       disabled={activeLocked || remove.isPending}
@@ -1279,7 +1295,7 @@ function NodeProtocolsDrawer({
                 </div>
               </FieldGroup>
 
-              {selectedProfileIds.length === 0 && activeProfile && activeDraft && (
+              {!isBatchMode && activeProfile && activeDraft && (
                 <FieldGroup title="参数与端口" description="保存空对象 `{}` 表示继承协议默认参数；端口填 0 表示继承协议模板端口。">
                   <Field
                     label={`监听端口（留空继承模板 ${activeProfile.port}）`}
@@ -1301,7 +1317,7 @@ function NodeProtocolsDrawer({
                 </FieldGroup>
               )}
 
-              {selectedProfileIds.length > 1 && (
+              {isBatchMode && (
                 <FieldGroup title="批量草稿预览" description="每个协议保有独立草稿；按钮（如填充模板）的效果会写入所有选中协议。">
                   <div className="space-y-2">
                     {selectedProfileIds.map((id) => {

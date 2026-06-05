@@ -359,8 +359,12 @@ func buildInstallCurlCommand(panelURL, token string) string {
 	if bootstrapURL == "" {
 		bootstrapURL = defaultBootstrapURL
 	}
+	// 不再用 sudo 透传环境变量：
+	//   1. 部分发行版 sudo 默认 env_reset，PANEL_URL / INSTALL_TOKEN 会被丢
+	//   2. 用户未在 sudoers 时 sudo 直接报错，体验差
+	// 改为前端文案明确提示"以 root 执行（普通用户先 sudo su - 切换）"。
 	return fmt.Sprintf(
-		"curl -fsSL %s | sudo PANEL_URL=%s INSTALL_TOKEN=%s bash",
+		"curl -fsSL %s | PANEL_URL=%s INSTALL_TOKEN=%s bash",
 		bootstrapURL, panelURL, token,
 	)
 }

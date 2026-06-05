@@ -200,9 +200,14 @@ export default function Groups() {
           side="right"
           className="max-w-[320px] whitespace-normal"
         >
-          <span className="inline-flex">
+          <button
+            type="button"
+            onClick={() => openEdit(g)}
+            title="点击编辑该分组"
+            className="inline-flex rounded-full transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
             <Badge label={`${g.node_count} 个节点`} variant="blue" />
-          </span>
+          </button>
         </Tooltip>
       ),
     },
