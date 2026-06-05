@@ -31,6 +31,11 @@ const (
 	KeyXrayLogAccess            = "xray.log_access"
 	KeyXrayLogError             = "xray.log_error"
 	KeyXrayLogLevel             = "xray.log_level"
+	// 面板出网 IP（用于一键接入时提示用户在节点防火墙放行 panel 的 IP）
+	// auto 由调度器每小时通过外部探针刷新；manual 是管理员手动覆盖；
+	// 最终生效值 = manual.TrimSpace() != "" ? manual : auto。
+	KeyPanelOutboundIPAuto   = "panel.outbound_ip_auto"
+	KeyPanelOutboundIPManual = "panel.outbound_ip_manual"
 )
 
 // 硬编码默认值（三级优先级最后兜底）
@@ -57,6 +62,8 @@ var settingDefaults = map[string]string{
 	KeyXrayLogAccess:            "none",
 	KeyXrayLogError:             "/var/log/xray/error.log",
 	KeyXrayLogLevel:             "warning",
+	KeyPanelOutboundIPAuto:      "",
+	KeyPanelOutboundIPManual:    "",
 }
 
 // SettingService 系统运行时配置服务

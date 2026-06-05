@@ -53,6 +53,7 @@ type InstallService struct {
 	nodeRepo   *repository.NodeRepository
 	logRepo    *repository.LogRepository
 	settingSvc *SettingService
+	panelSvc   *PanelService
 }
 
 func NewInstallService() *InstallService {
@@ -61,6 +62,7 @@ func NewInstallService() *InstallService {
 		nodeRepo:   repository.NewNodeRepository(),
 		logRepo:    repository.NewLogRepository(),
 		settingSvc: NewSettingService(),
+		panelSvc:   NewPanelService(),
 	}
 }
 
@@ -266,7 +268,28 @@ func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP strin
 		0,
 	)
 
-	return &dto.RegisterNodeResponse{NodeID: node.ID, Name: node.Name}, nil
+	// 注册成功后立刻 SSH 端口连通性自检；用于一键接入对话框 success 态
+	// 提示"panel 是否能 SSH 到节点"——若不通用户可立刻去放行防火墙。
+	reach, latencyMs := TCPProbe(node.IP, node.SSHPort)
+	var reachMsg string
+	if !reach {
+		panelIP := NewPanelService().EffectiveOutboundIP()
+		if panelIP != "" {
+			reachMsg = fmt.Sprintf("panel（出网 IP %s）无法通过 SSH 端口 %d 连接到节点 %s。请检查节点云厂商安全组 / ufw / firewalld / iptables 是否放行该 IP。", panelIP, node.SSHPort, node.IP)
+		} else {
+			reachMsg = fmt.Sprintf("panel 无法通过 SSH 端口 %d 连接到节点 %s。请检查节点防火墙是否放行 panel 出网 IP。", node.SSHPort, node.IP)
+		}
+	}
+	// 把探针结果写回 token（供前端轮询 GetToken 时读取）。失败不影响注册主流程。
+	_ = s.tokenRepo.UpdateReachability(t.ID, reach, latencyMs, reachMsg)
+
+	return &dto.RegisterNodeResponse{
+		NodeID:             node.ID,
+		Name:               node.Name,
+		Reachable:          reach,
+		ReachableLatencyMs: latencyMs,
+		ReachableMessage:   reachMsg,
+	}, nil
 }
 
 // ListActive 列出活跃 token；不带 curl 命令（避免反向暴露）
@@ -333,6 +356,15 @@ func (s *InstallService) toResponse(t *entity.NodeInstallToken, curl string) *dt
 	}
 	if curl != "" {
 		resp.CurlCommand = curl
+	}
+	// 面板出网 IP 总是带上，给前端 waiting 态展示防火墙提醒文案
+	resp.PanelOutboundIP = s.panelSvc.EffectiveOutboundIP()
+	// 探针结果（注册时写入；未注册的 token 为 nil）
+	if t.Reachable != nil {
+		v := *t.Reachable
+		resp.Reachable = &v
+		resp.ReachableLatencyMs = t.ReachableLatencyMs
+		resp.ReachableMessage = t.ReachableMessage
 	}
 	return resp
 }

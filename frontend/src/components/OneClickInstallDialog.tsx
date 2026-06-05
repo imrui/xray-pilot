@@ -72,12 +72,14 @@ export function OneClickInstallDialog({ open, onClose, onRegistered }: Props) {
       if (latest.used && latest.node_id) {
         if (!successFiredRef.current) {
           successFiredRef.current = true
+          setToken(latest) // 保留 reachable 等字段到 success 态展示
           setStep('success')
-          // 3 秒后通知父级
+          // 连通时 3 秒后自动关闭；不通时让用户多看一会再关
+          const closeDelay = latest.reachable === false ? 7000 : 3000
           window.setTimeout(() => {
             onRegistered?.(latest.node_id!)
             onClose()
-          }, 3000)
+          }, closeDelay)
         }
       }
       return latest
@@ -231,6 +233,11 @@ export function OneClickInstallDialog({ open, onClose, onRegistered }: Props) {
             <p className="mt-2 text-xs text-soft">
               请以 root 用户执行下面这行命令（若当前为普通用户，先执行 <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">sudo su -</code> 切换）。脚本完成自检后会自动注册回 panel，该对话框会自动关闭并刷新节点列表。
             </p>
+            <p className="mt-2 text-xs text-amber-500">
+              ⚠️ 同时确保节点防火墙允许面板{token.panel_outbound_ip ? (
+                <> IP <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono text-amber-400">{token.panel_outbound_ip}</code></>
+              ) : ' 出网 IP'}通过 SSH 端口访问（云厂商安全组 / ufw / firewalld / iptables 任一层拦截都会让后续同步失败）
+            </p>
           </div>
 
           <div className="rounded-xl border border-[var(--border)] bg-slate-950 p-4">
@@ -259,11 +266,27 @@ export function OneClickInstallDialog({ open, onClose, onRegistered }: Props) {
         </div>
       )}
 
-      {step === 'success' && (
+      {step === 'success' && token && (
         <div className="space-y-3 py-6 text-center">
           <Sparkles className="mx-auto h-10 w-10 text-emerald-500" />
           <p className="text-base font-semibold">节点已成功注册</p>
-          <p className="text-xs text-soft">正在刷新节点列表，3 秒后自动关闭…</p>
+          {token.reachable === true && (
+            <p className="text-xs text-emerald-500">
+              ✅ panel 已可正常 SSH 到节点{typeof token.reachable_latency_ms === 'number' && token.reachable_latency_ms > 0
+                ? `（延迟 ${token.reachable_latency_ms} ms）`
+                : ''}
+            </p>
+          )}
+          {token.reachable === false && (
+            <div className="mx-auto max-w-md space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-left">
+              <p className="text-xs font-semibold text-amber-500">⚠️ panel 暂时无法 SSH 到节点</p>
+              <p className="text-xs text-amber-400">
+                {token.reachable_message || 'SSH 端口探针失败，可能是防火墙未放行。'}
+              </p>
+              <p className="text-[11px] text-soft">放行后回节点列表点「同步」即可使配置生效。</p>
+            </div>
+          )}
+          <p className="text-xs text-soft">正在刷新节点列表，自动关闭…</p>
         </div>
       )}
 
