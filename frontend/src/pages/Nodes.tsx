@@ -9,7 +9,7 @@ import { protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
 import type { InboundProfile, Node, NodeKey, SyncStatus } from '@/types'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Btn, FieldGroup } from '@/components/ui/Form'
+import { Field, Btn, FieldGroup, SelectField } from '@/components/ui/Form'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
@@ -19,6 +19,16 @@ import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+
+// 节点级日志级别选项；空值表示继承系统设置（Settings 里的 xray.log_level）
+const NODE_LOG_LEVEL_OPTIONS = [
+  { value: '', label: '继承系统设置' },
+  { value: 'debug', label: 'debug（排障用，日志量大）' },
+  { value: 'info', label: 'info' },
+  { value: 'warning', label: 'warning' },
+  { value: 'error', label: 'error' },
+  { value: 'none', label: 'none（关闭）' },
+]
 
 const statusMeta: Record<SyncStatus, { label: string; variant: 'green' | 'yellow' | 'red' | 'gray'; tip: string }> = {
   synced: { label: '已同步', variant: 'green', tip: '配置已是最新' },
@@ -42,6 +52,7 @@ interface FormState {
   ssh_port: string
   ssh_user: string
   ssh_key_path: string
+  log_level: string
   remark: string
 }
 
@@ -54,6 +65,7 @@ const emptyForm = (): FormState => ({
   ssh_port: '22',
   ssh_user: 'root',
   ssh_key_path: '',
+  log_level: '',
   remark: '',
 })
 
@@ -216,6 +228,7 @@ export default function Nodes() {
       ssh_port: String(n.ssh_port),
       ssh_user: n.ssh_user,
       ssh_key_path: n.ssh_key_path,
+      log_level: n.log_level ?? '',
       remark: n.remark,
     }
     setForm(next)
@@ -725,6 +738,15 @@ export default function Nodes() {
             />
           </FieldGroup>
 
+          <FieldGroup title="Xray 运行参数" description="节点级覆盖，仅作用于本节点；留空则继承系统设置。">
+            <SelectField
+              label="日志级别"
+              value={form.log_level}
+              onChange={(v) => setForm((prev) => ({ ...prev, log_level: v }))}
+              options={NODE_LOG_LEVEL_OPTIONS}
+            />
+          </FieldGroup>
+
           {drawer.node && (
             <FieldGroup title="快捷动作" description="编辑抽屉内直接做连通性和配置确认。">
               <div className="flex flex-wrap gap-2">
@@ -1041,8 +1063,16 @@ function NodeProtocolsDrawer({
       const res = await nodeApi.keygen()
       const keys = res.data.data
       if (!keys) throw new Error('密钥生成失败')
+      // 继承协议模板的 SNI / 指纹，作为节点级可覆盖的初值带出（留空则订阅回退模板默认）
+      const tpl = (activeProfile?.settings ?? {}) as { sni?: string; fingerprint?: string }
       return JSON.stringify(
-        { private_key: keys.private_key, public_key: keys.public_key, short_ids: generateShortIds(6) },
+        {
+          private_key: keys.private_key,
+          public_key: keys.public_key,
+          short_ids: generateShortIds(6),
+          sni: tpl.sni ?? '',
+          fingerprint: tpl.fingerprint ?? '',
+        },
         null,
         2,
       )

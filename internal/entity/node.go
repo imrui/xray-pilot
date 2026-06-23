@@ -34,6 +34,10 @@ type Node struct {
 	ConfigHash string     // SHA256 of rendered Xray config，用于漂移检测
 	SyncStatus SyncStatus `gorm:"default:pending"`
 
+	// LogLevel 节点级 Xray 日志级别覆盖（debug/info/warning/error/none）。
+	// 空字符串表示继承系统设置 xray.log_level；用于单节点排障而不影响其他节点。
+	LogLevel string `gorm:"size:16"`
+
 	LastSyncAt    *time.Time
 	LastCheckAt   *time.Time
 	LastCheckOK   bool

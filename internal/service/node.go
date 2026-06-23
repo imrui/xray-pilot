@@ -42,6 +42,7 @@ func (s *NodeService) Create(req *dto.CreateNodeRequest) (*dto.NodeResponse, err
 		SSHPort:    req.SSHPort,
 		SSHUser:    req.SSHUser,
 		SSHKeyPath: req.SSHKeyPath,
+		LogLevel:   req.LogLevel,
 		Remark:     req.Remark,
 		Active:     true,
 		SyncStatus: entity.SyncStatusPending,
@@ -93,6 +94,10 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 	}
 	if req.SSHKeyPath != nil {
 		node.SSHKeyPath = *req.SSHKeyPath
+	}
+	// LogLevel 允许显式置空，置空后回退到系统设置的全局日志级别
+	if req.LogLevel != nil {
+		node.LogLevel = *req.LogLevel
 	}
 	if req.Remark != nil {
 		node.Remark = *req.Remark
@@ -177,6 +182,7 @@ func (s *NodeService) toNodeResponse(n *entity.Node) *dto.NodeResponse {
 		SSHPort:         n.SSHPort,
 		SSHUser:         n.SSHUser,
 		SSHKeyPath:      n.SSHKeyPath,
+		LogLevel:        n.LogLevel,
 		Active:          n.Active,
 		XrayActive:      n.XrayActive,
 		XrayVersion:     n.XrayVersion,

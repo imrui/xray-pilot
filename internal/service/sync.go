@@ -242,10 +242,15 @@ func (s *SyncService) buildConfig(node *entity.Node) (string, []string, error) {
 		return "", nil, fmt.Errorf("查询节点用户失败: %w", err)
 	}
 
+	// 日志级别：节点级覆盖优先，空则回退系统设置（便于单节点排障不影响其他节点）
+	logLevel := node.LogLevel
+	if logLevel == "" {
+		logLevel = s.settingSvc.Get(KeyXrayLogLevel)
+	}
 	logCfg := xray.LogConfig{
 		Access: s.settingSvc.Get(KeyXrayLogAccess),
 		Error:  s.settingSvc.Get(KeyXrayLogError),
-		Level:  s.settingSvc.Get(KeyXrayLogLevel),
+		Level:  logLevel,
 	}
 	return xray.GenerateConfig(node, profileKeys, users, logCfg)
 }

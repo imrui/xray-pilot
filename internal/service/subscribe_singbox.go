@@ -182,14 +182,8 @@ func buildSingboxVlessReality(user *entity.User, node *entity.Node, profile *ent
 		_ = json.Unmarshal([]byte(key.Settings), &km)
 	}
 
-	sni := ps.SNI
-	if sni == "" {
-		sni = "www.microsoft.com"
-	}
-	fp := ps.Fingerprint
-	if fp == "" {
-		fp = "chrome"
-	}
+	sni := types.EffectiveRealitySNI(&ps, &km)
+	fp := types.EffectiveRealityFingerprint(&ps, &km)
 	shortID := ""
 	if len(km.ShortIds) > 0 {
 		shortID = km.ShortIds[0]
