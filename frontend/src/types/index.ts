@@ -56,6 +56,7 @@ export interface Node {
   ssh_port: number
   ssh_user: string
   ssh_key_path: string
+  log_level: string       // 节点级日志级别覆盖，空则继承系统设置
   active: boolean
   xray_active: boolean    // xray 进程是否运行
   xray_version: string    // 远端 xray 版本

@@ -135,14 +135,9 @@ func (s *SubscribeService) buildVlessRealityURI(user *entity.User, node *entity.
 
 	publicKey := km.PublicKey
 	// 解密私钥只为服务端，公钥可明文存储
-	sni := ps.SNI
-	if sni == "" {
-		sni = "www.microsoft.com"
-	}
-	fp := ps.Fingerprint
-	if fp == "" {
-		fp = "chrome"
-	}
+	// SNI / 指纹走 helper：节点密钥覆盖 > 协议模板 > 默认
+	sni := types.EffectiveRealitySNI(&ps, &km)
+	fp := types.EffectiveRealityFingerprint(&ps, &km)
 
 	params := url.Values{}
 	params.Set("encryption", "none")
@@ -532,14 +527,8 @@ func (s *SubscribeService) buildClashProxy(user *entity.User, node *entity.Node,
 		if key.Settings != "" {
 			_ = json.Unmarshal([]byte(key.Settings), &km)
 		}
-		sni := ps.SNI
-		if sni == "" {
-			sni = "www.microsoft.com"
-		}
-		fp := ps.Fingerprint
-		if fp == "" {
-			fp = "chrome"
-		}
+		sni := types.EffectiveRealitySNI(&ps, &km)
+		fp := types.EffectiveRealityFingerprint(&ps, &km)
 		shortID := ""
 		if len(km.ShortIds) > 0 {
 			shortID = km.ShortIds[0]

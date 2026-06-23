@@ -307,15 +307,9 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 		shortIds = []string{""} // xray 要求至少一个元素
 	}
 
-	sni := ps.SNI
-	if sni == "" {
-		sni = "www.microsoft.com"
-	}
-
-	fingerprint := ps.Fingerprint
-	if fingerprint == "" {
-		fingerprint = "chrome"
-	}
+	// SNI / 指纹走 helper：节点密钥覆盖 > 协议模板 > 默认
+	sni := types.EffectiveRealitySNI(&ps, &km)
+	fingerprint := types.EffectiveRealityFingerprint(&ps, &km)
 
 	clients := buildVlessClients(users, "xtls-rprx-vision")
 

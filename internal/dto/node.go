@@ -10,6 +10,7 @@ type CreateNodeRequest struct {
 	SSHPort    int    `json:"ssh_port"`
 	SSHUser    string `json:"ssh_user"`
 	SSHKeyPath string `json:"ssh_key_path"`
+	LogLevel   string `json:"log_level"` // 节点级日志级别覆盖，空则继承系统设置
 	Remark     string `json:"remark"`
 }
 
@@ -23,6 +24,7 @@ type UpdateNodeRequest struct {
 	SSHPort    *int    `json:"ssh_port"`
 	SSHUser    *string `json:"ssh_user"`
 	SSHKeyPath *string `json:"ssh_key_path"`
+	LogLevel   *string `json:"log_level"`
 	Remark     *string `json:"remark"`
 }
 
@@ -39,6 +41,7 @@ type NodeResponse struct {
 	SSHPort         int      `json:"ssh_port"`
 	SSHUser         string   `json:"ssh_user"`
 	SSHKeyPath      string   `json:"ssh_key_path"`
+	LogLevel        string   `json:"log_level"`
 	Active          bool     `json:"active"`
 	XrayActive      bool     `json:"xray_active"`
 	XrayVersion     string   `json:"xray_version"`
