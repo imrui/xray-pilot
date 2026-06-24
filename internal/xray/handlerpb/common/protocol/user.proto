@@ -1,0 +1,19 @@
+// Xray-core protocol.User（vendored）
+// Source: https://github.com/XTLS/Xray-core/blob/main/common/protocol/user.proto
+// package 与 xray-core 逐字一致；go_package 改为本模块路径。
+//
+// Regeneration: 见 internal/xray/handlerpb/gen.sh
+syntax = "proto3";
+
+package xray.common.protocol;
+
+option go_package = "github.com/imrui/xray-pilot/internal/xray/handlerpb/common/protocol";
+
+import "common/serial/typed_message.proto";
+
+message User {
+  uint32 level = 1;
+  string email = 2;
+  // account 为协议特定账号（如 vless.Account / trojan.Account），包成 TypedMessage
+  xray.common.serial.TypedMessage account = 3;
+}

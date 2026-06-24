@@ -95,6 +95,7 @@ export default function Settings() {
   if (isLoading) return <div className="p-6 text-soft">加载中…</div>
 
   const feishuEnabled = (form['feishu.enabled'] ?? 'false') === 'true'
+  const liveApplyEnabled = (form['xray.live_apply_enabled'] ?? 'false') === 'true'
   const dirty = JSON.stringify(form) !== JSON.stringify(toForm(settings ?? {}))
 
   return (
@@ -145,6 +146,18 @@ export default function Settings() {
               onChange={(v) => setForm((p) => ({ ...p, 'xray.log_level': v }))}
               options={LOG_LEVEL_OPTIONS}
             />
+            <div className="flex items-start justify-between gap-4 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2.5">
+              <div>
+                <p className="text-sm font-medium text-[var(--text)]">gRPC 即时生效（用户增删不重启）</p>
+                <p className="mt-1 text-xs text-soft">
+                  开启后，禁用/删除用户走 xray gRPC 即时摘除，不重启 xray、不断开其他用户连接；失败自动回退到「标记漂移 + 重启同步」。建议先在测试节点验证。
+                </p>
+              </div>
+              <Switch
+                checked={liveApplyEnabled}
+                onChange={(next) => setForm((p) => ({ ...p, 'xray.live_apply_enabled': next ? 'true' : 'false' }))}
+              />
+            </div>
           </Section>
 
           <Section title="订阅配置" description="优先明确公网访问地址和备注模板，避免订阅链接依赖反代环境推断。">

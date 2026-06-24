@@ -249,6 +249,29 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 	return string(data), warnings, nil
 }
 
+// InboundTag 返回协议对应的 xray inbound tag（单一来源）。
+// 配置生成（buildXxxInbound）与 gRPC live-apply（按 tag 定位 inbound 增删用户）必须共用此函数，
+// 否则两侧 tag 命名漂移会导致 AlterInbound 找不到 inbound。
+// 第二返回值表示该协议是否有 gRPC 可管理的 xray inbound（Hysteria2 不在 xray-core，返回 false）。
+func InboundTag(protocol string, profileID uint) (string, bool) {
+	switch protocol {
+	case types.ProtocolVlessReality:
+		return fmt.Sprintf("vless-reality-%d", profileID), true
+	case types.ProtocolVlessWSTLS:
+		return fmt.Sprintf("vless-ws-%d", profileID), true
+	case types.ProtocolTrojan:
+		return fmt.Sprintf("trojan-%d", profileID), true
+	default:
+		return "", false
+	}
+}
+
+// mustInboundTag 供 buildXxxInbound 内部使用：协议已确定在三种受支持类型内，直接取 tag。
+func mustInboundTag(profile *entity.InboundProfile) string {
+	tag, _ := InboundTag(profile.Protocol, profile.ID)
+	return tag
+}
+
 // effectivePort 计算入站实际监听端口：节点级覆盖优先，回退协议模板端口。
 func effectivePort(profile *entity.InboundProfile, key *entity.NodeProfileKey) int {
 	if key != nil && key.Port > 0 {
@@ -317,7 +340,7 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 		Listen:   "0.0.0.0",
 		Port:     effectivePort(profile, key),
 		Protocol: "vless",
-		Tag:      fmt.Sprintf("vless-reality-%d", profile.ID),
+		Tag:      mustInboundTag(profile),
 		Settings: vlessInboundSettings{
 			Clients:    clients,
 			Decryption: "none",
@@ -374,7 +397,7 @@ func buildVlessWSTLSInbound(profile *entity.InboundProfile, key *entity.NodeProf
 		Listen:   "0.0.0.0",
 		Port:     effectivePort(profile, key),
 		Protocol: "vless",
-		Tag:      fmt.Sprintf("vless-ws-%d", profile.ID),
+		Tag:      mustInboundTag(profile),
 		Settings: vlessInboundSettings{
 			Clients:    clients,
 			Decryption: "none",
@@ -420,7 +443,7 @@ func buildTrojanInbound(profile *entity.InboundProfile, key *entity.NodeProfileK
 		Listen:         "0.0.0.0",
 		Port:           effectivePort(profile, key),
 		Protocol:       "trojan",
-		Tag:            fmt.Sprintf("trojan-%d", profile.ID),
+		Tag:            mustInboundTag(profile),
 		Settings:       trojanInboundSettings{Clients: clients},
 		StreamSettings: stream,
 	}, nil

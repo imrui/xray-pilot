@@ -1,0 +1,36 @@
+// Xray-core proxyman HandlerService（vendored，仅取 AlterInbound + 用户增删 operation）
+// Source: https://github.com/XTLS/Xray-core/blob/main/app/proxyman/command/command.proto
+// 上游 HandlerService 还有 AddInbound/RemoveInbound/Outbound 等 rpc 及 core/config.proto 依赖；
+// 本处只 vendize AlterInbound（按 inbound tag 增删用户），不引入 inbound/outbound 动态管理。
+// package 与 xray-core 逐字一致（service 全名 xray.app.proxyman.command.HandlerService 及
+// AddUserOperation/RemoveUserOperation 的 type URL 据此确定）；go_package 改为本模块路径。
+//
+// Regeneration: 见 internal/xray/handlerpb/gen.sh
+syntax = "proto3";
+
+package xray.app.proxyman.command;
+
+option go_package = "github.com/imrui/xray-pilot/internal/xray/handlerpb";
+
+import "common/protocol/user.proto";
+import "common/serial/typed_message.proto";
+
+message AddUserOperation {
+  xray.common.protocol.User user = 1;
+}
+
+message RemoveUserOperation {
+  string email = 1;
+}
+
+message AlterInboundRequest {
+  string tag = 1;
+  // operation 为 TypedMessage 包装的 AddUserOperation / RemoveUserOperation
+  xray.common.serial.TypedMessage operation = 2;
+}
+
+message AlterInboundResponse {}
+
+service HandlerService {
+  rpc AlterInbound(AlterInboundRequest) returns (AlterInboundResponse) {}
+}
