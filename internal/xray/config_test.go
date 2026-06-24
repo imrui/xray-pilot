@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/imrui/xray-pilot/internal/entity"
+	"github.com/imrui/xray-pilot/pkg/types"
 )
 
 // TestGenerateConfigIncludesStatsAndPolicy 验证生成的 xray 配置包含
@@ -44,5 +45,51 @@ func TestGenerateConfigIncludesStatsAndPolicy(t *testing.T) {
 	// 4. api.services 仍含 StatsService（与现有功能向后兼容）
 	if !strings.Contains(configJSON, "StatsService") {
 		t.Errorf("config missing api.services=StatsService")
+	}
+}
+
+// TestInboundTag 锁死 tag 命名——gRPC live-apply 按 tag 定位 inbound，命名漂移即失效。
+func TestInboundTag(t *testing.T) {
+	cases := []struct {
+		protocol   string
+		id         uint
+		wantTag    string
+		manageable bool
+	}{
+		{types.ProtocolVlessReality, 3, "vless-reality-3", true},
+		{types.ProtocolVlessWSTLS, 5, "vless-ws-5", true},
+		{types.ProtocolTrojan, 7, "trojan-7", true},
+		{types.ProtocolHysteria2, 9, "", false},
+		{"unknown", 1, "", false},
+	}
+	for _, c := range cases {
+		tag, ok := InboundTag(c.protocol, c.id)
+		if tag != c.wantTag || ok != c.manageable {
+			t.Errorf("InboundTag(%s,%d) = (%q,%v), want (%q,%v)", c.protocol, c.id, tag, ok, c.wantTag, c.manageable)
+		}
+	}
+}
+
+// TestGeneratedConfigUsesInboundTag 验证 GenerateConfig 生成的 inbound tag 与 InboundTag() 一致，
+// 锁住「配置生成」与「live-apply 定位」共用同一 tag 来源的不变式。
+func TestGeneratedConfigUsesInboundTag(t *testing.T) {
+	node := &entity.Node{ID: 1, Name: "n1", IP: "1.2.3.4"}
+	profile := &entity.InboundProfile{
+		ID:       42,
+		Protocol: types.ProtocolVlessReality,
+		Port:     443,
+		Active:   true,
+		Settings: `{"sni":"www.microsoft.com","private_key":"dummy-priv"}`,
+	}
+	key := entity.NodeProfileKey{ProfileID: profile.ID, Profile: profile, Settings: `{"public_key":"pk","short_ids":["ab"]}`}
+	logCfg := LogConfig{Level: "warning"}
+
+	configJSON, warnings, err := GenerateConfig(node, []entity.NodeProfileKey{key}, nil, logCfg)
+	if err != nil {
+		t.Fatalf("generate config: %v (warnings=%v)", err, warnings)
+	}
+	wantTag, _ := InboundTag(types.ProtocolVlessReality, profile.ID)
+	if !strings.Contains(configJSON, `"tag": "`+wantTag+`"`) {
+		t.Errorf("生成配置未含预期 inbound tag %q\n%s", wantTag, configJSON)
 	}
 }

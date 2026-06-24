@@ -1,0 +1,18 @@
+// Xray-core vless.Account（vendored，仅取 id/flow/encryption）
+// Source: https://github.com/XTLS/Xray-core/blob/main/proxy/vless/account.proto
+// 上游 Account 还有 xorMode/seconds/padding/reverse 等字段，本处只 vendize 我们设置的 1-3 号字段；
+// proto3 按字段号编码，缺省字段不影响服务端解析。
+// package 与 xray-core 逐字一致（type URL = xray.proxy.vless.Account）；go_package 改为本模块路径。
+//
+// Regeneration: 见 internal/xray/handlerpb/gen.sh
+syntax = "proto3";
+
+package xray.proxy.vless;
+
+option go_package = "github.com/imrui/xray-pilot/internal/xray/handlerpb/proxy/vless";
+
+message Account {
+  string id = 1;         // UUID
+  string flow = 2;       // 如 xtls-rprx-vision（Reality），WS 为空
+  string encryption = 3; // 仅 none
+}

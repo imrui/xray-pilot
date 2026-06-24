@@ -31,6 +31,9 @@ const (
 	KeyXrayLogAccess            = "xray.log_access"
 	KeyXrayLogError             = "xray.log_error"
 	KeyXrayLogLevel             = "xray.log_level"
+	// 用户增删时是否走 gRPC 即时生效（不重启 xray）。off 时回退到「标记漂移 → 全量 SSH push + restart」旧路径。
+	// v0.4.5 首发默认 off，真节点验证「不掉线」后再翻 on。
+	KeyXrayLiveApply = "xray.live_apply_enabled"
 	// 面板出网 IP（用于一键接入时提示用户在节点防火墙放行 panel 的 IP）
 	// auto 由调度器每小时通过外部探针刷新；manual 是管理员手动覆盖；
 	// 最终生效值 = manual.TrimSpace() != "" ? manual : auto。
@@ -62,6 +65,7 @@ var settingDefaults = map[string]string{
 	KeyXrayLogAccess:            "none",
 	KeyXrayLogError:             "/var/log/xray/error.log",
 	KeyXrayLogLevel:             "warning",
+	KeyXrayLiveApply:            "false",
 	KeyPanelOutboundIPAuto:      "",
 	KeyPanelOutboundIPManual:    "",
 }

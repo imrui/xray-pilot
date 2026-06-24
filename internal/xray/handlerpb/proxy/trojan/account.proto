@@ -1,0 +1,14 @@
+// Xray-core trojan.Account（vendored）
+// Source: https://github.com/XTLS/Xray-core/blob/main/proxy/trojan/config.proto（Account 消息定义于 config.proto）
+// package 与 xray-core 逐字一致（type URL = xray.proxy.trojan.Account）；go_package 改为本模块路径。
+//
+// Regeneration: 见 internal/xray/handlerpb/gen.sh
+syntax = "proto3";
+
+package xray.proxy.trojan;
+
+option go_package = "github.com/imrui/xray-pilot/internal/xray/handlerpb/proxy/trojan";
+
+message Account {
+  string password = 1;
+}

@@ -20,6 +20,7 @@ type UserService struct {
 	userRepo    *repository.UserRepository
 	nodeRepo    *repository.NodeRepository
 	trafficRepo *repository.TrafficRepository
+	liveSync    *LiveSyncService
 }
 
 func NewUserService() *UserService {
@@ -27,7 +28,70 @@ func NewUserService() *UserService {
 		userRepo:    repository.NewUserRepository(),
 		nodeRepo:    repository.NewNodeRepository(),
 		trafficRepo: repository.NewTrafficRepository(),
+		liveSync:    NewLiveSyncService(),
 	}
+}
+
+// nodeSetIf 用户激活时返回其节点集，未激活返回空（未激活用户不应出现在任何节点运行时）。
+func nodeSetIf(active bool, ids []uint) []uint {
+	if !active {
+		return nil
+	}
+	return ids
+}
+
+// nodeIDsDiff 返回 a - b（在 a 中但不在 b 中的节点 ID）。
+func nodeIDsDiff(a, b []uint) []uint {
+	if len(a) == 0 {
+		return nil
+	}
+	set := make(map[uint]struct{}, len(b))
+	for _, id := range b {
+		set[id] = struct{}{}
+	}
+	out := make([]uint, 0)
+	for _, id := range a {
+		if _, ok := set[id]; !ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// applyUpdateLive 用户更新后的增量 live-apply：基于「旧/新 期望节点集」差集做增删，
+// 只触碰真正变化的节点（加入新分组的节点、移出分组的节点、启停切换）。
+// 用户名(email)变更涉及跨节点 email 改动，逻辑复杂且罕见，回退全量 restart 同步。
+func (s *UserService) applyUpdateLive(u *entity.User, oldNodeIDs []uint, oldActive bool, oldUsername string) {
+	if u.Username != oldUsername {
+		_ = s.nodeRepo.MarkAllDrifted()
+		return
+	}
+	desiredOld := nodeSetIf(oldActive, oldNodeIDs)
+	desiredNew := nodeSetIf(u.Active, s.userNodeIDs(u))
+	if toAdd := nodeIDsDiff(desiredNew, desiredOld); len(toAdd) > 0 {
+		s.liveSync.AddUserLive(toAdd, u.Username, u.UUID)
+	}
+	if toRemove := nodeIDsDiff(desiredOld, desiredNew); len(toRemove) > 0 {
+		s.liveSync.RemoveUserLive(toRemove, u.Username)
+	}
+}
+
+// userNodeIDs 返回用户所有分组覆盖到的激活节点 ID 集合（不做健康过滤，尽力对每个节点 live-apply）。
+// 用于用户增删时确定要即时操作的节点范围。
+func (s *UserService) userNodeIDs(user *entity.User) []uint {
+	groupIDs := extractGroupIDs(user.Groups)
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	nodes, err := s.nodeRepo.FindHealthyByGroupIDs(groupIDs, false)
+	if err != nil {
+		return nil
+	}
+	ids := make([]uint, 0, len(nodes))
+	for i := range nodes {
+		ids = append(ids, nodes[i].ID)
+	}
+	return ids
 }
 
 func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.UserResponse, error) {
@@ -71,7 +135,11 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 	if err != nil {
 		return nil, fmt.Errorf("读取用户失败: %w", err)
 	}
-	_ = s.nodeRepo.MarkAllDrifted()
+	if s.liveSync.Enabled() {
+		s.liveSync.AddUserLive(s.userNodeIDs(created), created.Username, created.UUID)
+	} else {
+		_ = s.nodeRepo.MarkAllDrifted()
+	}
 	return s.toResponse(created, baseURL), nil
 }
 
@@ -79,6 +147,18 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	user, err := s.userRepo.FindByID(id)
 	if err != nil {
 		return nil, errors.New("用户不存在")
+	}
+	// live-apply：在改动前捕获旧的节点集 / 活跃态 / 用户名，用于结束后做增量对账
+	liveOn := s.liveSync.Enabled()
+	var (
+		oldNodeIDs  []uint
+		oldActive   bool
+		oldUsername string
+	)
+	if liveOn {
+		oldNodeIDs = s.userNodeIDs(user)
+		oldActive = user.Active
+		oldUsername = user.Username
 	}
 	shouldMarkSync := false
 	if req.Username != nil {
@@ -166,14 +246,38 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		return nil, fmt.Errorf("读取用户失败: %w", err)
 	}
 	if shouldMarkSync {
-		_ = s.nodeRepo.MarkAllDrifted()
+		if liveOn {
+			s.applyUpdateLive(updated, oldNodeIDs, oldActive, oldUsername)
+		} else {
+			_ = s.nodeRepo.MarkAllDrifted()
+		}
 	}
 	return s.toResponse(updated, baseURL), nil
 }
 
 func (s *UserService) Delete(id uint) error {
+	// live-apply 需在删除前捕获用户的节点集与 email（删除后查不到分组关联）
+	var (
+		liveOn  = s.liveSync.Enabled()
+		nodeIDs []uint
+		email   string
+	)
+	if liveOn {
+		if user, err := s.userRepo.FindByID(id); err == nil {
+			nodeIDs = s.userNodeIDs(user)
+			email = user.Username
+		} else {
+			liveOn = false // 查不到用户，回退全量标记漂移
+		}
+	}
+
 	if err := s.userRepo.Delete(id); err != nil {
 		return err
+	}
+
+	if liveOn {
+		s.liveSync.RemoveUserLive(nodeIDs, email)
+		return nil
 	}
 	return s.nodeRepo.MarkAllDrifted()
 }
@@ -183,8 +287,18 @@ func (s *UserService) ToggleActive(id uint) error {
 	if err != nil {
 		return errors.New("用户不存在")
 	}
-	if err := s.userRepo.UpdateActive(id, !user.Active); err != nil {
+	newActive := !user.Active
+	if err := s.userRepo.UpdateActive(id, newActive); err != nil {
 		return err
+	}
+	// live-apply：启用 → AddUser，禁用 → RemoveUser
+	if s.liveSync.Enabled() {
+		if newActive {
+			s.liveSync.AddUserLive(s.userNodeIDs(user), user.Username, user.UUID)
+		} else {
+			s.liveSync.RemoveUserLive(s.userNodeIDs(user), user.Username)
+		}
+		return nil
 	}
 	return s.nodeRepo.MarkAllDrifted()
 }
@@ -227,7 +341,15 @@ func (s *UserService) ResetUUID(id uint, baseURL string) (*dto.UserResponse, err
 		return nil, fmt.Errorf("重置 UUID 失败: %w", err)
 	}
 	user.UUID = newUUID
-	_ = s.nodeRepo.MarkAllDrifted()
+	if s.liveSync.Enabled() {
+		// UUID 变更：email 不变，逐 inbound 先删旧账号再加新 UUID 账号。
+		// 未激活用户不在任何节点运行时（config 已过滤），UUID 变更无 config 影响 → no-op。
+		if user.Active {
+			s.liveSync.ReplaceUserLive(s.userNodeIDs(user), user.Username, newUUID)
+		}
+	} else {
+		_ = s.nodeRepo.MarkAllDrifted()
+	}
 	return s.toResponse(user, baseURL), nil
 }
 

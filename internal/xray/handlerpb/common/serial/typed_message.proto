@@ -1,0 +1,18 @@
+// Xray-core serial.TypedMessage（vendored）
+// Source: https://github.com/XTLS/Xray-core/blob/main/common/serial/typed_message.proto
+// 本地 vendize 以避免引入 xray-core 沉重依赖图（与 internal/xray/statspb 同一范式）。
+// package 必须与 xray-core 逐字一致（决定 TypedMessage.Type 的 type URL）；仅 go_package 改为本模块路径。
+//
+// Regeneration: 见 internal/xray/handlerpb/gen.sh
+syntax = "proto3";
+
+package xray.common.serial;
+
+option go_package = "github.com/imrui/xray-pilot/internal/xray/handlerpb/common/serial";
+
+message TypedMessage {
+  // type 为 message 的 protobuf 全名（如 xray.proxy.vless.Account），无前缀
+  string type = 1;
+  // value 为序列化后的 proto message 字节
+  bytes value = 2;
+}

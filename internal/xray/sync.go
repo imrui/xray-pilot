@@ -7,7 +7,14 @@ import (
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
 
-const xrayConfigPath = "/usr/local/etc/xray/config.json"
+// RemoteConfigPath 节点上 xray 配置文件路径；GRPCAPIAddress 为节点本地 gRPC API 监听地址
+// （API inbound 监听 127.0.0.1:10085，仅本地，通过 SSH 隧道访问）。
+const (
+	RemoteConfigPath = "/usr/local/etc/xray/config.json"
+	GRPCAPIAddress   = "127.0.0.1:10085"
+)
+
+const xrayConfigPath = RemoteConfigPath
 
 // SSHParams SSH 连接参数
 type SSHParams struct {
