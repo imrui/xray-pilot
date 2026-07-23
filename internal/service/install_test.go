@@ -117,6 +117,88 @@ func TestCreateToken_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+// 更换服务器模式：token 带 replace_node_id，注册时更新现有节点而非新建
+func TestReplaceToken_UpdatesExistingNode(t *testing.T) {
+	setupInstallTestEnv(t)
+	svc := NewInstallService()
+
+	// 既有节点（模拟故障待换机的节点）
+	created, err := NewNodeService().Create(&dto.CreateNodeRequest{
+		Name: "sg01",
+		IP:   "1.1.1.1",
+	})
+	if err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+
+	// 更换模式：不传 name（沿用现有节点名），同名校验应跳过
+	resp, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
+		ReplaceNodeID: &created.ID,
+		PanelURL:      "https://panel.example",
+	}, "admin")
+	if err != nil {
+		t.Fatalf("create replace token: %v", err)
+	}
+	if resp.ReplaceNodeID == nil || *resp.ReplaceNodeID != created.ID {
+		t.Fatalf("expected replace_node_id=%d in response, got %v", created.ID, resp.ReplaceNodeID)
+	}
+	if resp.NodeName != "sg01" {
+		t.Fatalf("expected node_name from existing node, got %q", resp.NodeName)
+	}
+
+	// 新机注册回调
+	tok, err := svc.AuthorizeToken(resp.Token, "192.0.2.2")
+	if err != nil {
+		t.Fatalf("authorize: %v", err)
+	}
+	if err := svc.BindTokenIP(tok, "192.0.2.2"); err != nil {
+		t.Fatalf("bind ip: %v", err)
+	}
+	regResp, err := svc.RegisterNode(tok, "192.0.2.2", &dto.RegisterNodeRequest{PublicIP: "192.0.2.2"})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if regResp.NodeID != created.ID {
+		t.Fatalf("expected node id unchanged %d, got %d", created.ID, regResp.NodeID)
+	}
+
+	// 节点 IP 已更新且未新建记录
+	node, err := repository.NewNodeRepository().FindByID(created.ID)
+	if err != nil {
+		t.Fatalf("find node: %v", err)
+	}
+	if node.IP != "192.0.2.2" {
+		t.Fatalf("expected ip updated to 2.2.2.2, got %s", node.IP)
+	}
+	if node.SyncStatus != "pending" || node.ConfigHash != "" {
+		t.Fatalf("expected pending status + empty hash, got %s / %q", node.SyncStatus, node.ConfigHash)
+	}
+	var count int64
+	repository.DB.Table("nodes").Where("name = ?", "sg01").Count(&count)
+	if count != 1 {
+		t.Fatalf("expected exactly 1 node named sg01, got %d", count)
+	}
+
+	// token 一次性
+	if _, err := svc.AuthorizeToken(resp.Token, "192.0.2.2"); !errors.Is(err, ErrInstallTokenUsed) {
+		t.Fatalf("expected ErrInstallTokenUsed on reuse, got %v", err)
+	}
+}
+
+// 更换模式：目标节点不存在应报错
+func TestReplaceToken_NodeNotFound(t *testing.T) {
+	setupInstallTestEnv(t)
+	svc := NewInstallService()
+	missing := uint(9999)
+	_, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
+		ReplaceNodeID: &missing,
+		PanelURL:      "https://panel.example",
+	}, "admin")
+	if !errors.Is(err, ErrReplaceNodeNotFound) {
+		t.Fatalf("expected ErrReplaceNodeNotFound, got %v", err)
+	}
+}
+
 func TestAuthorizeToken_OneShotAfterRegister(t *testing.T) {
 	setupInstallTestEnv(t)
 	svc := NewInstallService()

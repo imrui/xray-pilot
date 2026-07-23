@@ -106,6 +106,8 @@ export default function Nodes() {
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [installOpen, setInstallOpen] = useState(false)
+  // 更换服务器目标节点；非空时接入对话框进入更换模式
+  const [replaceNode, setReplaceNode] = useState<Node | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['nodes', page, pageSize],
@@ -626,6 +628,13 @@ export default function Nodes() {
                                 disabled: testSSH.isPending && testSSH.variables === n.id,
                               },
                               {
+                                label: '更换服务器',
+                                onSelect: () => {
+                                  setReplaceNode(n)
+                                  setInstallOpen(true)
+                                },
+                              },
+                              {
                                 label: '预览生成配置',
                                 onSelect: () => setPreviewNode(n),
                               },
@@ -787,8 +796,12 @@ export default function Nodes() {
       )}
       <OneClickInstallDialog
         open={installOpen}
-        onClose={() => setInstallOpen(false)}
+        onClose={() => {
+          setInstallOpen(false)
+          setReplaceNode(null)
+        }}
         onRegistered={() => invalidate()}
+        replaceNode={replaceNode}
       />
     </PageShell>
   )

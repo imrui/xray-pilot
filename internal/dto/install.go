@@ -4,12 +4,16 @@ import "time"
 
 // CreateInstallTokenRequest 管理员侧创建一次性安装 token 的请求
 type CreateInstallTokenRequest struct {
-	Name     string `json:"name"      binding:"required"` // 节点名
-	Region   string `json:"region"`                       // 地区
-	Owner    string `json:"owner"`                        // 所有者
-	Remark   string `json:"remark"`                       // 备注
-	SSHUser  string `json:"ssh_user"`                     // 默认 root
-	SSHPort  int    `json:"ssh_port"`                     // 默认 22
+	Name     string `json:"name"`     // 节点名（新建模式必填；更换模式忽略，沿用现有节点名）
+	Region   string `json:"region"`   // 地区
+	Owner    string `json:"owner"`    // 所有者
+	Remark   string `json:"remark"`   // 备注
+	SSHUser  string `json:"ssh_user"` // 默认 root
+	SSHPort  int    `json:"ssh_port"` // 默认 22
+
+	// ReplaceNodeID 更换服务器模式：非空表示给该现有节点换新机，
+	// 注册时更新节点 IP/SSH 而非新建记录（分组/密钥/覆盖全保留）。
+	ReplaceNodeID *uint `json:"replace_node_id"`
 
 	// PanelURL 用于拼装 curl 命令；前端通常传 window.location.origin。
 	// 不持久化到 token 表。
@@ -29,6 +33,9 @@ type InstallTokenResponse struct {
 	Used         bool      `json:"used"`
 	NodeID       *uint     `json:"node_id,omitempty"`
 	UsedByIP     string    `json:"used_by_ip,omitempty"`
+
+	// ReplaceNodeID 非空表示这是更换服务器模式的 token（前端据此切换文案）
+	ReplaceNodeID *uint `json:"replace_node_id,omitempty"`
 
 	// PanelOutboundIP 面板出网 IP（用于一键接入对话框提示用户在节点防火墙放行）
 	// 由系统设置中「面板出网 IP」决定：手动覆盖优先，否则取后台每小时自动探测的值；
