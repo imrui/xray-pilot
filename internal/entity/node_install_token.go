@@ -33,6 +33,11 @@ type NodeInstallToken struct {
 	// NodeID 注册成功后回填，便于审计追溯。
 	NodeID *uint `gorm:"index"`
 
+	// ReplaceNodeID 更换服务器模式（v0.4.6）：非空表示该 token 用于给现有节点
+	// 换新机。注册时不新建 Node，而是更新该节点的 IP/SSH/版本信息，
+	// 分组关联、协议密钥、端口/SNI 覆盖全部保留。
+	ReplaceNodeID *uint `gorm:"index"`
+
 	// CreatedByAdmin 创建该 token 的管理员标识（v0.5.0 多管理员落地前先存 username）
 	CreatedByAdmin string `gorm:"size:64"`
 

@@ -10,11 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
+	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
 
 const (
@@ -34,6 +36,7 @@ var (
 	ErrInstallTokenIPMismatch  = errors.New("安装 token 来源 IP 与首次绑定不一致")
 	ErrPanelSSHKeyMissing      = errors.New("panel 未配置 SSH 私钥（请在 系统设置 > 默认 SSH 私钥 配置路径，并确保对应 .pub 公钥文件存在）")
 	ErrInstallNodeAlreadyExist = errors.New("同名节点已存在，请更换节点名后重新生成 token")
+	ErrReplaceNodeNotFound     = errors.New("要更换的节点不存在")
 )
 
 // nodeMeta 是 NodeInstallToken.NodeMeta 字段反序列化后的结构。
@@ -102,16 +105,58 @@ func (s *InstallService) ReadPanelPubKey() (string, error) {
 // CreateToken 生成一次性 token，并把 node_meta 持久化进 JSON 字段。
 // 在生成前做关键前置校验：
 //   - panel SSH 公钥可读
-//   - 同名节点不存在（避免脚本注册时撞名）
+//   - 新建模式：同名节点不存在（避免脚本注册时撞名）
+//   - 更换模式（ReplaceNodeID 非空）：目标节点存在，元数据从现有节点带出
 func (s *InstallService) CreateToken(req *dto.CreateInstallTokenRequest, adminUsername string) (*dto.InstallTokenResponse, error) {
 	if _, err := s.ReadPanelPubKey(); err != nil {
 		return nil, err
 	}
-	if existing, err := s.nodeRepo.FindByName(req.Name); err == nil && existing != nil {
-		return nil, ErrInstallNodeAlreadyExist
-	}
 	if strings.TrimSpace(req.PanelURL) == "" {
 		return nil, errors.New("panel_url 不能为空")
+	}
+
+	var meta nodeMeta
+	if req.ReplaceNodeID != nil {
+		// 更换服务器模式：名称等元数据沿用现有节点，SSH 参数允许请求覆盖（新机可能不同）
+		node, err := s.nodeRepo.FindByID(*req.ReplaceNodeID)
+		if err != nil {
+			return nil, ErrReplaceNodeNotFound
+		}
+		meta = nodeMeta{
+			Name:    node.Name,
+			Region:  node.Region,
+			Owner:   node.Owner,
+			Remark:  node.Remark,
+			SSHUser: node.SSHUser,
+			SSHPort: node.SSHPort,
+		}
+		if req.SSHUser != "" {
+			meta.SSHUser = req.SSHUser
+		}
+		if req.SSHPort != 0 {
+			meta.SSHPort = req.SSHPort
+		}
+	} else {
+		if strings.TrimSpace(req.Name) == "" {
+			return nil, errors.New("节点名不能为空")
+		}
+		if existing, err := s.nodeRepo.FindByName(req.Name); err == nil && existing != nil {
+			return nil, ErrInstallNodeAlreadyExist
+		}
+		meta = nodeMeta{
+			Name:    req.Name,
+			Region:  req.Region,
+			Owner:   req.Owner,
+			Remark:  req.Remark,
+			SSHUser: req.SSHUser,
+			SSHPort: req.SSHPort,
+		}
+	}
+	if meta.SSHUser == "" {
+		meta.SSHUser = "root"
+	}
+	if meta.SSHPort == 0 {
+		meta.SSHPort = 22
 	}
 
 	ttl := time.Duration(req.TTLSeconds) * time.Second
@@ -120,21 +165,6 @@ func (s *InstallService) CreateToken(req *dto.CreateInstallTokenRequest, adminUs
 	}
 	if ttl > maxInstallTTL {
 		ttl = maxInstallTTL
-	}
-
-	meta := nodeMeta{
-		Name:    req.Name,
-		Region:  req.Region,
-		Owner:   req.Owner,
-		Remark:  req.Remark,
-		SSHUser: req.SSHUser,
-		SSHPort: req.SSHPort,
-	}
-	if meta.SSHUser == "" {
-		meta.SSHUser = "root"
-	}
-	if meta.SSHPort == 0 {
-		meta.SSHPort = 22
 	}
 	metaBytes, err := json.Marshal(&meta)
 	if err != nil {
@@ -153,6 +183,7 @@ func (s *InstallService) CreateToken(req *dto.CreateInstallTokenRequest, adminUs
 		CreatedAt:      now,
 		ExpiresAt:      now.Add(ttl),
 		CreatedByAdmin: adminUsername,
+		ReplaceNodeID:  req.ReplaceNodeID,
 	}
 	if err := s.tokenRepo.Create(t); err != nil {
 		return nil, fmt.Errorf("保存 token 失败: %w", err)
@@ -160,9 +191,13 @@ func (s *InstallService) CreateToken(req *dto.CreateInstallTokenRequest, adminUs
 
 	curl := buildInstallCurlCommand(strings.TrimRight(req.PanelURL, "/"), tokenStr)
 
+	action := "install_token_create"
+	if req.ReplaceNodeID != nil {
+		action = "replace_token_create"
+	}
 	s.logRepo.RecordWithActor(
-		"install_token_create",
-		fmt.Sprintf("node=%s", req.Name),
+		action,
+		fmt.Sprintf("node=%s", meta.Name),
 		fmt.Sprintf("admin:%s", adminUsername),
 		true,
 		fmt.Sprintf("ttl=%ds", int(ttl.Seconds())),
@@ -208,12 +243,20 @@ func (s *InstallService) BindTokenIP(t *entity.NodeInstallToken, ip string) erro
 	return nil
 }
 
-// RegisterNode 装机脚本回调创建 Node 记录 + 标记 token 已使用
+// RegisterNode 装机脚本回调 + 标记 token 已使用。
+// 新建模式创建 Node 记录；更换模式（token.ReplaceNodeID 非空）更新现有节点，
+// 分组关联 / 协议密钥 / 端口 SNI 覆盖全部保留。
 // 调用前应 AuthorizeToken 校验过 IP 匹配。
 func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP string, req *dto.RegisterNodeRequest) (*dto.RegisterNodeResponse, error) {
 	var meta nodeMeta
 	if err := json.Unmarshal([]byte(t.NodeMeta), &meta); err != nil {
 		return nil, fmt.Errorf("解析 token 节点元数据失败: %w", err)
+	}
+	if meta.SSHPort == 0 {
+		meta.SSHPort = 22
+	}
+	if meta.SSHUser == "" {
+		meta.SSHUser = "root"
 	}
 
 	// 公网 IP 优先用脚本上报的 PublicIP，缺失则回退源 IP（兼容脚本 ipify 调用失败）
@@ -223,43 +266,24 @@ func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP strin
 	}
 
 	now := time.Now()
-	node := &entity.Node{
-		Name:           meta.Name,
-		Region:         meta.Region,
-		Owner:          meta.Owner,
-		Remark:         meta.Remark,
-		IP:             ip,
-		SSHUser:        meta.SSHUser,
-		SSHPort:        meta.SSHPort,
-		Active:         true,
-		SyncStatus:     entity.SyncStatusPending,
-		ConnectionMode: "ssh",
-		RegisteredAt:   &now,
-		XrayVersion:    strings.TrimSpace(req.XrayVersion),
+	var (
+		node   *entity.Node
+		err    error
+		action = "install_node_register"
+	)
+	if t.ReplaceNodeID != nil {
+		node, err = s.registerReplace(t, ip, now, &meta, req)
+		action = "replace_node_register"
+	} else {
+		node, err = s.registerCreate(t, ip, now, &meta, req)
 	}
-	if node.SSHPort == 0 {
-		node.SSHPort = 22
-	}
-	if node.SSHUser == "" {
-		node.SSHUser = "root"
-	}
-
-	if err := s.nodeRepo.Create(node); err != nil {
-		return nil, fmt.Errorf("创建节点失败: %w", err)
-	}
-
-	if err := s.tokenRepo.MarkUsed(t.ID, node.ID, now); err != nil {
-		// 并发场景下别的并行 register 抢先了；删除刚创建的节点防止脏数据
-		_ = s.nodeRepo.Delete(node.ID)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrInstallTokenUsed
-		}
+	if err != nil {
 		return nil, err
 	}
 
 	short := tokenShortID(t.Token)
 	s.logRepo.RecordWithActor(
-		"install_node_register",
+		action,
 		fmt.Sprintf("node=%s id=%d", node.Name, node.ID),
 		fmt.Sprintf("system:install-token:%s", short),
 		true,
@@ -283,6 +307,21 @@ func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP strin
 	// 把探针结果写回 token（供前端轮询 GetToken 时读取）。失败不影响注册主流程。
 	_ = s.tokenRepo.UpdateReachability(t.ID, reach, latencyMs, reachMsg)
 
+	// 更换模式：新机可达时自动触发一次同步，把 Reality 密钥等配置推上去尽快恢复服务。
+	// 异步执行避免阻塞装机脚本；结果反映在节点列表的同步状态里，失败可手动重试。
+	if t.ReplaceNodeID != nil && reach {
+		nodeID := node.ID
+		go func() {
+			r := NewSyncService().SyncNode(nodeID)
+			if r != nil && !r.Success {
+				zap.L().Warn("更换服务器后自动同步失败，请手动同步",
+					zap.Uint("nodeID", nodeID),
+					zap.String("error", r.Error),
+				)
+			}
+		}()
+	}
+
 	return &dto.RegisterNodeResponse{
 		NodeID:             node.ID,
 		Name:               node.Name,
@@ -290,6 +329,81 @@ func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP strin
 		ReachableLatencyMs: latencyMs,
 		ReachableMessage:   reachMsg,
 	}, nil
+}
+
+// registerCreate 新建模式：创建 Node 记录 + 标记 token 已使用
+func (s *InstallService) registerCreate(t *entity.NodeInstallToken, ip string, now time.Time, meta *nodeMeta, req *dto.RegisterNodeRequest) (*entity.Node, error) {
+	node := &entity.Node{
+		Name:           meta.Name,
+		Region:         meta.Region,
+		Owner:          meta.Owner,
+		Remark:         meta.Remark,
+		IP:             ip,
+		SSHUser:        meta.SSHUser,
+		SSHPort:        meta.SSHPort,
+		Active:         true,
+		SyncStatus:     entity.SyncStatusPending,
+		ConnectionMode: "ssh",
+		RegisteredAt:   &now,
+		XrayVersion:    strings.TrimSpace(req.XrayVersion),
+	}
+
+	if err := s.nodeRepo.Create(node); err != nil {
+		return nil, fmt.Errorf("创建节点失败: %w", err)
+	}
+
+	if err := s.tokenRepo.MarkUsed(t.ID, node.ID, now); err != nil {
+		// 并发场景下别的并行 register 抢先了；删除刚创建的节点防止脏数据
+		_ = s.nodeRepo.Delete(node.ID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInstallTokenUsed
+		}
+		return nil, err
+	}
+	return node, nil
+}
+
+// registerReplace 更换模式：更新现有节点的 IP/SSH/版本信息，不新建记录。
+// Node ID 不变 → 分组关联、NodeProfileKey（Reality 私钥等）、端口/SNI 覆盖原样保留。
+func (s *InstallService) registerReplace(t *entity.NodeInstallToken, ip string, now time.Time, meta *nodeMeta, req *dto.RegisterNodeRequest) (*entity.Node, error) {
+	node, err := s.nodeRepo.FindByID(*t.ReplaceNodeID)
+	if err != nil {
+		return nil, ErrReplaceNodeNotFound
+	}
+
+	// 先占用 token（并发防重复注册），再更新节点
+	if err := s.tokenRepo.MarkUsed(t.ID, node.ID, now); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInstallTokenUsed
+		}
+		return nil, err
+	}
+
+	// 清理旧机 known_hosts 条目（SSH 按 IP 连接；同 IP 换机 host key 也会变，
+	// 新机走 TOFU 重新记录，不清理会导致同步时 host key 校验失败）
+	if node.IP != "" {
+		knownHostsPath := s.settingSvc.Get(KeySSHKnownHostsPath)
+		if err := xssh.RemoveKnownHost(knownHostsPath, node.IP); err != nil {
+			zap.L().Warn("清理 known_hosts 旧条目失败",
+				zap.String("addr", node.IP),
+				zap.Error(err),
+			)
+		}
+	}
+
+	node.IP = ip
+	node.SSHUser = meta.SSHUser
+	node.SSHPort = meta.SSHPort
+	node.XrayVersion = strings.TrimSpace(req.XrayVersion)
+	node.XrayActive = false
+	node.SyncStatus = entity.SyncStatusPending
+	node.ConfigHash = ""
+	node.RegisteredAt = &now
+
+	if err := s.nodeRepo.Update(node); err != nil {
+		return nil, fmt.Errorf("更新节点失败: %w", err)
+	}
+	return node, nil
 }
 
 // ListActive 列出活跃 token；不带 curl 命令（避免反向暴露）
@@ -341,11 +455,12 @@ func (s *InstallService) CleanupExpired() (int64, error) {
 
 func (s *InstallService) toResponse(t *entity.NodeInstallToken, curl string) *dto.InstallTokenResponse {
 	resp := &dto.InstallTokenResponse{
-		ID:        t.ID,
-		Token:     t.Token,
-		ExpiresAt: t.ExpiresAt,
-		Used:      t.IsUsed(),
-		UsedByIP:  t.UsedByIP,
+		ID:            t.ID,
+		Token:         t.Token,
+		ExpiresAt:     t.ExpiresAt,
+		Used:          t.IsUsed(),
+		UsedByIP:      t.UsedByIP,
+		ReplaceNodeID: t.ReplaceNodeID,
 	}
 	if t.NodeID != nil {
 		resp.NodeID = t.NodeID

@@ -236,6 +236,8 @@ export interface InstallToken {
   used: boolean
   node_id?: number
   used_by_ip?: string
+  /** 非空表示这是更换服务器模式的 token */
+  replace_node_id?: number
   /** 面板出网 IP；空字符串表示后端尚未探测到（前端文案降级） */
   panel_outbound_ip?: string
   /** 注册成功后 panel 主动 SSH 端口探针结果；undefined = 还没注册 */
@@ -245,10 +247,11 @@ export interface InstallToken {
 }
 
 export interface CreateInstallTokenInput {
-  name: string
+  name?: string            // 新建模式必填；更换模式忽略（沿用现有节点名）
   region?: string
   owner?: string
   remark?: string
+  replace_node_id?: number // 更换服务器模式：给该现有节点换新机，注册时更新而非新建
   ssh_user?: string
   ssh_port?: number
   panel_url: string
