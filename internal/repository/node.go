@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"time"
 
 	"github.com/imrui/xray-pilot/internal/entity"
@@ -46,15 +47,78 @@ func (r *NodeRepository) FindByName(name string) (*entity.Node, error) {
 	return &node, nil
 }
 
-func (r *NodeRepository) List(page, pageSize int) ([]entity.Node, int64, error) {
+// NodeListFilter 节点列表的服务端筛选条件。
+// 筛选必须在 DB 层做：前端拿到的只是当前页数据，客户端过滤会漏掉其他页。
+type NodeListFilter struct {
+	Keyword    string // 模糊匹配 name/ip/domain/region/owner
+	SyncStatus string // 精确匹配同步状态
+	Region     string
+	Owner      string
+	// Health 健康检测筛选：healthy / unhealthy / unchecked（空 = 不筛选）。
+	// 语义与仪表盘一致：异常 = 检测过且失败；从未检测过的不算异常。
+	Health string
+}
+
+func (f NodeListFilter) apply(db *gorm.DB) *gorm.DB {
+	if f.Keyword != "" {
+		kw := "%" + strings.ToLower(f.Keyword) + "%"
+		db = db.Where(
+			"LOWER(name) LIKE ? OR LOWER(ip) LIKE ? OR LOWER(domain) LIKE ? OR LOWER(region) LIKE ? OR LOWER(owner) LIKE ?",
+			kw, kw, kw, kw, kw,
+		)
+	}
+	if f.SyncStatus != "" {
+		db = db.Where("sync_status = ?", f.SyncStatus)
+	}
+	if f.Region != "" {
+		db = db.Where("region = ?", f.Region)
+	}
+	if f.Owner != "" {
+		db = db.Where("owner = ?", f.Owner)
+	}
+	switch f.Health {
+	case "healthy":
+		db = db.Where("last_check_at IS NOT NULL AND last_check_ok = ?", true)
+	case "unhealthy":
+		db = db.Where("last_check_at IS NOT NULL AND last_check_ok = ?", false)
+	case "unchecked":
+		db = db.Where("last_check_at IS NULL")
+	}
+	return db
+}
+
+func (r *NodeRepository) List(page, pageSize int, filter NodeListFilter) ([]entity.Node, int64, error) {
 	var total int64
-	if err := DB.Model(&entity.Node{}).Count(&total).Error; err != nil {
+	if err := filter.apply(DB.Model(&entity.Node{})).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var nodes []entity.Node
 	offset := (page - 1) * pageSize
-	err := DB.Order("id desc").Offset(offset).Limit(pageSize).Find(&nodes).Error
+	err := filter.apply(DB.Model(&entity.Node{})).
+		Order("id desc").Offset(offset).Limit(pageSize).Find(&nodes).Error
 	return nodes, total, err
+}
+
+// DistinctRegions 返回所有非空地区值，供列表筛选下拉使用（不受分页影响）
+func (r *NodeRepository) DistinctRegions() ([]string, error) {
+	var values []string
+	err := DB.Model(&entity.Node{}).
+		Where("region <> ''").
+		Distinct("region").
+		Order("region asc").
+		Pluck("region", &values).Error
+	return values, err
+}
+
+// DistinctOwners 返回所有非空所有者值，供列表筛选下拉使用（不受分页影响）
+func (r *NodeRepository) DistinctOwners() ([]string, error) {
+	var values []string
+	err := DB.Model(&entity.Node{}).
+		Where("owner <> ''").
+		Distinct("owner").
+		Order("owner asc").
+		Pluck("owner", &values).Error
+	return values, err
 }
 
 func (r *NodeRepository) FindAll() ([]entity.Node, error) {

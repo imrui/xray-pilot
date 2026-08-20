@@ -83,7 +83,18 @@ export default function Login() {
             </div>
           </div>
           <div className="mt-8 flex items-center justify-between border-t border-[var(--border)] pt-4 text-xs text-soft">
-            <span>© 2026 Xray Pilot. All rights reserved. {APP_VERSION}</span>
+            <span>
+              © 2026 Xray Pilot. All rights reserved.{' '}
+              <a
+                href="https://github.com/imrui/xray-pilot/releases"
+                target="_blank"
+                rel="noreferrer"
+                title="查看版本发布记录"
+                className="transition hover:text-[var(--text)] hover:underline"
+              >
+                {APP_VERSION}
+              </a>
+            </span>
             <a
               href="https://github.com/imrui/xray-pilot"
               target="_blank"
@@ -146,7 +157,18 @@ export default function Login() {
             </button>
           </form>
           <div className="mt-6 flex items-center justify-between border-t border-[var(--border)] pt-4 text-xs text-soft lg:hidden">
-            <span>© 2026 Xray Pilot. All rights reserved. {APP_VERSION}</span>
+            <span>
+              © 2026 Xray Pilot. All rights reserved.{' '}
+              <a
+                href="https://github.com/imrui/xray-pilot/releases"
+                target="_blank"
+                rel="noreferrer"
+                title="查看版本发布记录"
+                className="transition hover:text-[var(--text)] hover:underline"
+              >
+                {APP_VERSION}
+              </a>
+            </span>
             <a
               href="https://github.com/imrui/xray-pilot"
               target="_blank"

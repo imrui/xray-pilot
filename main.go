@@ -25,6 +25,11 @@ import (
 //go:embed frontend/dist
 var frontendFS embed.FS
 
+// release-notes 打进二进制：更新日志接口的内容与发布版本天然一致，无需部署额外文件
+//
+//go:embed release-notes/v*.md
+var releaseNotesFS embed.FS
+
 var Version = "dev"
 
 func main() {
@@ -60,7 +65,12 @@ func main() {
 	gin.SetMode(config.Global.Server.Mode)
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
-	handler.RegisterRoutes(r)
+	notesFS, err := fs.Sub(releaseNotesFS, "release-notes")
+	if err != nil {
+		log.Warn("release-notes 资源加载失败，更新日志接口将返回空列表", zap.Error(err))
+		notesFS = nil
+	}
+	handler.RegisterRoutes(r, notesFS)
 
 	// 6. 挂载前端静态文件（embed）
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")

@@ -52,6 +52,22 @@ func Connect() error {
 		return fmt.Errorf("连接数据库失败: %w", err)
 	}
 
+	if cfg.Driver != "postgres" {
+		// SQLite 是单写者模型：前端批量操作（批量删除/切换节点等）并发发起
+		// 多个写请求时，连接池里多条连接同时开写事务会直接报
+		// "database is locked (5) (SQLITE_BUSY)"。收敛为单连接把所有语句
+		// 串行化，从根上消除进程内锁冲突；busy_timeout 兜底外部进程
+		// （如手动 sqlite3 CLI）持锁的场景。
+		sqlDB, err := db.DB()
+		if err != nil {
+			return fmt.Errorf("获取底层数据库连接失败: %w", err)
+		}
+		sqlDB.SetMaxOpenConns(1)
+		if err := db.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+			return fmt.Errorf("设置 busy_timeout 失败: %w", err)
+		}
+	}
+
 	if err := autoMigrate(db); err != nil {
 		return fmt.Errorf("数据库迁移失败: %w", err)
 	}

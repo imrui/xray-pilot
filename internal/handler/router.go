@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"io/fs"
+
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterRoutes 注册所有路由
-func RegisterRoutes(r *gin.Engine) {
+// RegisterRoutes 注册所有路由。
+// releaseNotesFS 为内嵌的 release-notes 目录（可为 nil，此时更新日志接口返回空列表）。
+func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
 	userH := NewUserHandler()
 	groupH := NewGroupHandler()
 	nodeH := NewNodeHandler()
@@ -18,6 +21,7 @@ func RegisterRoutes(r *gin.Engine) {
 	trafficH := NewTrafficHandler()
 	backupH := NewBackupHandler()
 	installH := NewInstallHandler()
+	releaseNotesH := NewReleaseNotesHandler(releaseNotesFS)
 
 	// 订阅（无需鉴权）
 	r.GET("/sub/:token", subH.Subscribe)
@@ -57,6 +61,7 @@ func RegisterRoutes(r *gin.Engine) {
 
 		// 节点管理
 		api.GET("/nodes", nodeH.List)
+		api.GET("/nodes/filter-options", nodeH.FilterOptions)
 		api.POST("/nodes", nodeH.Create)
 		// 固定路径路由必须在 :id 之前注册
 		api.POST("/nodes/sync-all", nodeH.SyncAll)
@@ -102,6 +107,7 @@ func RegisterRoutes(r *gin.Engine) {
 
 		// 系统信息（只读）
 		api.GET("/system/info", systemH.GetSystemInfo)
+		api.GET("/system/release-notes", releaseNotesH.List)
 		api.GET("/system/diagnostics", systemH.GetDiagnostics)
 		api.GET("/system/sync-summary", systemH.GetSyncSummary)
 		api.GET("/system/feishu-status", systemH.GetFeishuStatus)
