@@ -48,12 +48,29 @@ func (h *NodeHandler) Create(c *gin.Context) {
 func (h *NodeHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	nodes, total, err := h.svc.List(page, pageSize)
+	filter := repository.NodeListFilter{
+		Keyword:    c.Query("keyword"),
+		SyncStatus: c.Query("sync_status"),
+		Region:     c.Query("region"),
+		Owner:      c.Query("owner"),
+		Health:     c.Query("health"),
+	}
+	nodes, total, err := h.svc.List(page, pageSize, filter)
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return
 	}
 	response.PageSuccess(c, total, nodes)
+}
+
+// FilterOptions 返回节点列表筛选下拉的全量候选值（地区/所有者）
+func (h *NodeHandler) FilterOptions(c *gin.Context) {
+	regions, owners, err := h.svc.FilterOptions()
+	if err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"regions": regions, "owners": owners})
 }
 
 func (h *NodeHandler) Get(c *gin.Context) {

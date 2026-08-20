@@ -80,9 +80,22 @@ export const groupApi = {
 }
 
 // ---- 节点 API ----
+// 节点列表筛选参数：筛选在服务端执行，避免只过滤当前页数据
+export interface NodeListParams extends PageParams {
+  keyword?: string
+  sync_status?: string
+  region?: string
+  owner?: string
+  /** 健康检测筛选：healthy / unhealthy / unchecked */
+  health?: string
+}
+
 export const nodeApi = {
-  list: (params?: PageParams) =>
+  list: (params?: NodeListParams) =>
     request.get<ApiResponse<PageResult<Node>>>('/nodes', { params }),
+
+  filterOptions: () =>
+    request.get<ApiResponse<{ regions: string[]; owners: string[] }>>('/nodes/filter-options'),
 
   get: (id: number) =>
     request.get<ApiResponse<Node>>(`/nodes/${id}`),
@@ -211,6 +224,15 @@ export const systemApi = {
 
   updateSettings: (data: Record<string, string>) =>
     request.put<ApiResponse<Record<string, string>>>('/system/settings', data),
+
+  // 更新日志：内容编译期内嵌于后端二进制，按版本号降序返回
+  getReleaseNotes: () =>
+    request.get<ApiResponse<ReleaseNote[]>>('/system/release-notes'),
+}
+
+export interface ReleaseNote {
+  version: string
+  content: string
 }
 
 // ---- 流量统计 ----

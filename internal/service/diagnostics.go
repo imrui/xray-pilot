@@ -1,11 +1,15 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/imrui/xray-pilot/config"
+	"github.com/imrui/xray-pilot/internal/entity"
+	"github.com/imrui/xray-pilot/internal/repository"
 )
 
 type DiagnosticStatus string
@@ -49,6 +53,7 @@ func (s *DiagnosticsService) Run() DiagnosticsResult {
 		s.checkSSHDefaultKeyPath(),
 		s.checkKnownHostsPath(),
 		s.checkWorkingConfig(),
+		s.checkDuplicateSubscribeNodes(),
 	}
 
 	var result DiagnosticsResult
@@ -236,6 +241,76 @@ func (s *DiagnosticsService) checkWorkingConfig() DiagnosticItem {
 	_ = f.Close()
 
 	item.Detail = "当前进程可以读取 config.yaml。"
+	return item
+}
+
+// checkDuplicateSubscribeNodes 检测订阅输出里"除名称外完全相同"的节点。
+//
+// V2rayN / Shadowrocket 等客户端更新订阅时会按配置内容（忽略备注名）去重，
+// 两个节点若连接地址、端口、密钥材料全部一致，客户端只会保留一个——表现为
+// "订阅页有 N 个节点，客户端只更新到 N-1 个"。典型成因：复制节点时误配了
+// 相同的域名/IP，或更换服务器后旧节点未删。
+func (s *DiagnosticsService) checkDuplicateSubscribeNodes() DiagnosticItem {
+	item := DiagnosticItem{
+		Key:    "subscribe_duplicate_nodes",
+		Label:  "订阅节点重复检测",
+		Status: DiagnosticOK,
+	}
+
+	nodeRepo := repository.NewNodeRepository()
+	profileRepo := repository.NewInboundProfileRepository()
+	subSvc := NewSubscribeService()
+
+	nodes, err := nodeRepo.FindAll()
+	if err != nil {
+		item.Status = DiagnosticWarning
+		item.Detail = "查询节点失败，跳过重复检测。"
+		item.Suggestion = err.Error()
+		return item
+	}
+
+	// 同一用户在所有节点上的 UUID 相同，用固定占位用户构建 URI，
+	// 去掉备注片段后逐字对比，即可等价复现客户端的去重判定。
+	probe := &entity.User{UUID: "00000000-0000-0000-0000-000000000000", Username: "diagnostic"}
+	seen := map[string][]string{}
+	for i := range nodes {
+		node := &nodes[i]
+		keys, err := profileRepo.FindActiveKeysForNode(node.ID)
+		if err != nil {
+			continue
+		}
+		for _, key := range keys {
+			key := key
+			uri := subSvc.buildURI(probe, node, key.Profile, &key)
+			if uri == "" {
+				continue
+			}
+			if idx := strings.Index(uri, "#"); idx >= 0 {
+				uri = uri[:idx]
+			}
+			label := node.Name
+			if key.Profile != nil {
+				label = fmt.Sprintf("%s(%s)", node.Name, key.Profile.Protocol)
+			}
+			seen[uri] = append(seen[uri], label)
+		}
+	}
+
+	var dups []string
+	for _, names := range seen {
+		if len(names) > 1 {
+			dups = append(dups, strings.Join(names, " / "))
+		}
+	}
+	if len(dups) > 0 {
+		sort.Strings(dups)
+		item.Status = DiagnosticWarning
+		item.Detail = "以下节点生成的订阅链接除名称外完全相同，V2rayN / Shadowrocket 等客户端更新订阅时会自动去重，导致客户端节点数少于订阅页。"
+		item.Suggestion = "检查这些节点的连接地址（IP/域名）、端口与协议密钥是否被误配成相同值：" + strings.Join(dups, "；")
+		return item
+	}
+
+	item.Detail = "未发现除名称外完全相同的订阅节点。"
 	return item
 }
 

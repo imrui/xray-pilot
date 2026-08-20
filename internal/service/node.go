@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -33,17 +34,18 @@ func NewNodeService() *NodeService {
 }
 
 func (s *NodeService) Create(req *dto.CreateNodeRequest) (*dto.NodeResponse, error) {
+	// 文本字段统一去首尾空格：域名/IP 混入空格会生成错误的订阅地址且难以肉眼发现
 	node := &entity.Node{
-		Name:       req.Name,
-		Region:     req.Region,
-		Owner:      req.Owner,
-		IP:         req.IP,
-		Domain:     req.Domain,
+		Name:       strings.TrimSpace(req.Name),
+		Region:     strings.TrimSpace(req.Region),
+		Owner:      strings.TrimSpace(req.Owner),
+		IP:         strings.TrimSpace(req.IP),
+		Domain:     strings.TrimSpace(req.Domain),
 		SSHPort:    req.SSHPort,
-		SSHUser:    req.SSHUser,
-		SSHKeyPath: req.SSHKeyPath,
+		SSHUser:    strings.TrimSpace(req.SSHUser),
+		SSHKeyPath: strings.TrimSpace(req.SSHKeyPath),
 		LogLevel:   req.LogLevel,
-		Remark:     req.Remark,
+		Remark:     strings.TrimSpace(req.Remark),
 		Active:     true,
 		SyncStatus: entity.SyncStatusPending,
 	}
@@ -66,41 +68,43 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 	}
 
 	// 记录变更前的连接地址，用于清理 known_hosts
+	// 比较用 TrimSpace 后的值：修掉历史脏数据的空格（如 " tw03.xxx"）也算地址变更，
+	// 需要触发重新同步和 known_hosts 清理
 	oldAddr := node.ConnectAddr()
-	ipChanged := req.IP != nil && *req.IP != node.IP
-	domainChanged := req.Domain != nil && *req.Domain != node.Domain
+	ipChanged := req.IP != nil && strings.TrimSpace(*req.IP) != node.IP
+	domainChanged := req.Domain != nil && strings.TrimSpace(*req.Domain) != node.Domain
 
 	if req.Name != nil {
-		node.Name = *req.Name
+		node.Name = strings.TrimSpace(*req.Name)
 	}
 	if req.Region != nil {
-		node.Region = *req.Region
+		node.Region = strings.TrimSpace(*req.Region)
 	}
 	if req.Owner != nil {
-		node.Owner = *req.Owner
+		node.Owner = strings.TrimSpace(*req.Owner)
 	}
 	if req.IP != nil {
-		node.IP = *req.IP
+		node.IP = strings.TrimSpace(*req.IP)
 	}
 	if req.Domain != nil {
-		node.Domain = *req.Domain
+		node.Domain = strings.TrimSpace(*req.Domain)
 	}
 	if req.SSHPort != nil && *req.SSHPort != 0 {
 		node.SSHPort = *req.SSHPort
 	}
 	// SSHUser/SSHKeyPath 允许显式置空，置空后运行时会回退到系统默认设置。
 	if req.SSHUser != nil {
-		node.SSHUser = *req.SSHUser
+		node.SSHUser = strings.TrimSpace(*req.SSHUser)
 	}
 	if req.SSHKeyPath != nil {
-		node.SSHKeyPath = *req.SSHKeyPath
+		node.SSHKeyPath = strings.TrimSpace(*req.SSHKeyPath)
 	}
 	// LogLevel 允许显式置空，置空后回退到系统设置的全局日志级别
 	if req.LogLevel != nil {
 		node.LogLevel = *req.LogLevel
 	}
 	if req.Remark != nil {
-		node.Remark = *req.Remark
+		node.Remark = strings.TrimSpace(*req.Remark)
 	}
 
 	// IP 或 Domain 变更：清理旧的 known_hosts 条目，并标记漂移触发重新同步
@@ -142,8 +146,8 @@ func (s *NodeService) GetByID(id uint) (*dto.NodeResponse, error) {
 	return s.toNodeResponse(node), nil
 }
 
-func (s *NodeService) List(page, pageSize int) ([]dto.NodeResponse, int64, error) {
-	nodes, total, err := s.nodeRepo.List(page, pageSize)
+func (s *NodeService) List(page, pageSize int, filter repository.NodeListFilter) ([]dto.NodeResponse, int64, error) {
+	nodes, total, err := s.nodeRepo.List(page, pageSize, filter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -152,6 +156,20 @@ func (s *NodeService) List(page, pageSize int) ([]dto.NodeResponse, int64, error
 		result = append(result, *s.toNodeResponse(&nodes[i]))
 	}
 	return result, total, nil
+}
+
+// FilterOptions 返回筛选下拉所需的全量地区/所有者候选值。
+// 单独提供而非塞进 List 响应：下拉选项不应随筛选条件和分页变化。
+func (s *NodeService) FilterOptions() (regions, owners []string, err error) {
+	regions, err = s.nodeRepo.DistinctRegions()
+	if err != nil {
+		return nil, nil, err
+	}
+	owners, err = s.nodeRepo.DistinctOwners()
+	if err != nil {
+		return nil, nil, err
+	}
+	return regions, owners, nil
 }
 
 func (s *NodeService) GetDriftedNodes() ([]dto.NodeResponse, error) {

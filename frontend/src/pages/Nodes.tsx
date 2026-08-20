@@ -101,7 +101,10 @@ export default function Nodes() {
   const [previewNode, setPreviewNode] = useState<Node | null>(null)
   const [protocolNode, setProtocolNode] = useState<Node | null>(null)
   const [search, setSearch] = useState('')
+  // 搜索防抖后的关键字：筛选走服务端查询（跨全部分页），避免请求随键入频繁触发
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'synced' | 'drifted' | 'failed' | 'pending'>('all')
+  const [healthFilter, setHealthFilter] = useState<'all' | 'healthy' | 'unhealthy' | 'unchecked'>('all')
   const [regionFilter, setRegionFilter] = useState<string>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
@@ -109,9 +112,30 @@ export default function Nodes() {
   // 更换服务器目标节点；非空时接入对话框进入更换模式
   const [replaceNode, setReplaceNode] = useState<Node | null>(null)
 
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  // 筛选条件变化时回到第 1 页，否则可能停留在超出结果集的空页
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, statusFilter, healthFilter, regionFilter, ownerFilter])
+
   const { data, isLoading } = useQuery({
-    queryKey: ['nodes', page, pageSize],
-    queryFn: () => nodeApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
+    queryKey: ['nodes', page, pageSize, debouncedSearch, statusFilter, healthFilter, regionFilter, ownerFilter],
+    queryFn: () =>
+      nodeApi
+        .list({
+          page,
+          page_size: pageSize,
+          keyword: debouncedSearch || undefined,
+          sync_status: statusFilter === 'all' ? undefined : statusFilter,
+          health: healthFilter === 'all' ? undefined : healthFilter,
+          region: regionFilter === 'all' ? undefined : regionFilter,
+          owner: ownerFilter === 'all' ? undefined : ownerFilter,
+        })
+        .then((r) => r.data.data!),
   })
   const { data: profilesData } = useQuery({
     queryKey: ['profiles-for-nodes'],
@@ -132,19 +156,32 @@ export default function Nodes() {
     enabled: (data?.list?.length ?? 0) > 0,
   })
 
-  const regions = useMemo(() => {
-    return Array.from(new Set((data?.list ?? []).map((n) => n.region).filter(Boolean)))
-  }, [data?.list])
-
-  const owners = useMemo(() => {
-    return Array.from(new Set((data?.list ?? []).map((n) => n.owner).filter(Boolean)))
-  }, [data?.list])
+  // 下拉候选值来自专用接口（全量），不能从当前页数据推导——否则翻页后选项残缺
+  const { data: filterOptions } = useQuery({
+    queryKey: ['node-filter-options'],
+    queryFn: () => nodeApi.filterOptions().then((r) => r.data.data!),
+  })
+  const regions = filterOptions?.regions ?? []
+  const owners = filterOptions?.owners ?? []
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['nodes'] })
 
   const save = useMutation({
     mutationFn: () => {
-      const payload = { ...form, ssh_port: Number(form.ssh_port) || 22 }
+      // 所有文本字段去除首尾空格：域名/IP 带空格会生成错误的订阅地址，
+      // 且客户端更新订阅时该节点会连不上（曾出现 " tw03.xxx" 线上事故）
+      const payload = {
+        name: form.name.trim(),
+        region: form.region.trim(),
+        owner: form.owner.trim(),
+        ip: form.ip.trim(),
+        domain: form.domain.trim(),
+        ssh_user: form.ssh_user.trim(),
+        ssh_key_path: form.ssh_key_path.trim(),
+        log_level: form.log_level,
+        remark: form.remark.trim(),
+        ssh_port: Number(form.ssh_port) || 22,
+      }
       return drawer.node ? nodeApi.update(drawer.node.id, payload) : nodeApi.create(payload)
     },
     onSuccess: () => {
@@ -254,24 +291,12 @@ export default function Nodes() {
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [k]: e.target.value }))
 
+  // 筛选已由服务端完成，这里只做当前页内的名称排序
   const filteredNodes = useMemo(() => {
-    return [...(data?.list ?? [])]
-      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
-      .filter((n) => {
-        const keyword = search.trim().toLowerCase()
-        const matchesKeyword =
-          keyword === '' ||
-          n.name.toLowerCase().includes(keyword) ||
-          n.ip.toLowerCase().includes(keyword) ||
-          n.domain.toLowerCase().includes(keyword) ||
-          n.region.toLowerCase().includes(keyword) ||
-          n.owner.toLowerCase().includes(keyword)
-        const matchesStatus = statusFilter === 'all' || n.sync_status === statusFilter
-        const matchesRegion = regionFilter === 'all' || n.region === regionFilter
-        const matchesOwner = ownerFilter === 'all' || n.owner === ownerFilter
-        return matchesKeyword && matchesStatus && matchesRegion && matchesOwner
-      })
-  }, [data?.list, search, statusFilter, regionFilter, ownerFilter])
+    return [...(data?.list ?? [])].sort((a, b) =>
+      a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }),
+    )
+  }, [data?.list])
 
   const allVisibleSelected = filteredNodes.length > 0 && filteredNodes.every((n) => selectedIds.includes(n.id))
   const dirty = JSON.stringify(form) !== JSON.stringify(initialForm) && drawer.open
@@ -409,6 +434,19 @@ export default function Nodes() {
           </label>
           <label className="flex h-11 min-w-[130px] items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm">
             <Filter className="h-4 w-4 text-faint" />
+            <select
+              value={healthFilter}
+              onChange={(e) => setHealthFilter(e.target.value as typeof healthFilter)}
+              className="w-full bg-transparent text-sm outline-none"
+            >
+              <option value="all">全部健康度</option>
+              <option value="healthy">健康</option>
+              <option value="unhealthy">检测异常</option>
+              <option value="unchecked">未检测</option>
+            </select>
+          </label>
+          <label className="flex h-11 min-w-[130px] items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm">
+            <Filter className="h-4 w-4 text-faint" />
             <select value={regionFilter} onChange={(e) => setRegionFilter(e.target.value)} className="w-full bg-transparent text-sm outline-none">
               <option value="all">全部地区</option>
               {regions.map((region) => (
@@ -484,7 +522,26 @@ export default function Nodes() {
                     tone: 'danger',
                   })
                   if (!ok) return
-                  await Promise.all(selectedNodes.map((n) => nodeApi.remove(n.id)))
+                  // 串行删除：并发写会触发 SQLite 锁冲突，且逐个执行才能统计失败明细
+                  let success = 0
+                  const failures: string[] = []
+                  for (const n of selectedNodes) {
+                    try {
+                      await nodeApi.remove(n.id)
+                      success += 1
+                    } catch (e) {
+                      failures.push(`${n.name}: ${(e as Error).message}`)
+                    }
+                  }
+                  pushToast(
+                    failures.length === 0
+                      ? { title: `已删除 ${success} 个节点`, variant: 'success' }
+                      : {
+                          title: `批量删除完成：成功 ${success}，失败 ${failures.length}`,
+                          description: failures.join('；'),
+                          variant: 'warning',
+                        },
+                  )
                   setSelectedIds([])
                   invalidate()
                 }}
@@ -545,16 +602,20 @@ export default function Nodes() {
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2">
+                        <HealthDot node={n} />
                         <span className="font-semibold">{n.name}</span>
                         <span className="text-xs text-faint">#{n.id}</span>
                       </div>
                       <div className="text-xs text-soft">
                         {n.region || '--'}
+                        {n.last_check_at && !n.last_check_ok && (
+                          <span className="ml-1.5 text-rose-500">· 健康检测异常</span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
-                      <div className="font-medium text-[var(--text)]">{n.ip}</div>
-                      <div className="text-xs text-soft">{n.domain || '—'}</div>
+                      <CopyableAddress value={n.ip} strong />
+                      <CopyableAddress value={n.domain} />
                     </td>
                     <td className="px-4 py-3.5">
                       <Tooltip
@@ -1393,6 +1454,59 @@ function NodeProtocolsDrawer({
         </div>
       </div>
     </Drawer>
+  )
+}
+
+// HealthDot 节点健康状态圆点，语义与仪表盘"节点健康"卡片一致：
+// 绿 = 最近一次检测通过；红 = 检测过但失败；灰 = 从未检测过
+function HealthDot({ node }: { node: Node }) {
+  const meta = !node.last_check_at
+    ? { color: 'bg-slate-300 dark:bg-slate-500', label: '未检测', detail: '尚未进行健康检测，可点击「测试 SSH」主动触发' }
+    : node.last_check_ok
+      ? {
+          color: 'bg-emerald-500',
+          label: '健康',
+          detail: `延迟 ${node.last_latency_ms > 0 ? `${node.last_latency_ms}ms` : '—'} · 最后检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')}`,
+        }
+      : {
+          color: 'bg-rose-500',
+          label: '检测异常',
+          detail: `最后检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')} 失败，建议测试 SSH 排查`,
+        }
+  return (
+    <Tooltip content={`健康检测：${meta.label} · ${meta.detail}`} side="right" className="max-w-[280px] whitespace-normal">
+      <span tabIndex={0} className={`inline-flex h-2.5 w-2.5 shrink-0 rounded-full ${meta.color}`} aria-label={`健康检测：${meta.label}`} />
+    </Tooltip>
+  )
+}
+
+// CopyableAddress 连接地址单元格的一行（IP 或域名），带快速复制按钮
+function CopyableAddress({ value, strong }: { value: string; strong?: boolean }) {
+  if (!value) return <div className="text-xs text-soft">—</div>
+  return (
+    <div
+      className={`flex items-center gap-1.5 ${
+        strong ? 'font-medium text-[var(--text)]' : 'text-xs text-soft'
+      }`}
+    >
+      <span className="truncate">{value}</span>
+      <button
+        type="button"
+        title={`复制 ${value}`}
+        aria-label={`复制 ${value}`}
+        onClick={async () => {
+          const ok = await copyText(value)
+          pushToast(
+            ok
+              ? { title: '已复制', description: value, variant: 'success' }
+              : { title: '复制失败', description: '请手动选中复制', variant: 'warning' },
+          )
+        }}
+        className="shrink-0 text-faint transition hover:text-[var(--accent)]"
+      >
+        <Copy className="h-3.5 w-3.5" />
+      </button>
+    </div>
   )
 }
 

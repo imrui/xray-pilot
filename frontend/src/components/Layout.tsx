@@ -5,6 +5,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import {
   ChevronLeft,
   ChevronRight,
+  History,
   LayoutDashboard,
   Layers,
   LogOut,
@@ -28,6 +29,7 @@ import { Logo } from '@/components/icons/Logo'
 import { APP_VERSION } from '@/lib/version'
 import { systemApi } from '@/lib/api'
 import { SyncReminderBanner } from '@/components/SyncReminderBanner'
+import { ChangelogDrawer } from '@/components/ChangelogDrawer'
 
 const navGroups = [
   {
@@ -64,6 +66,7 @@ export default function Layout() {
   const { theme, toggleTheme } = useThemeStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const [changelogOpen, setChangelogOpen] = useState(false)
   const { data: syncSummary } = useQuery({
     queryKey: ['sync-summary'],
     queryFn: () => systemApi.getSyncSummary().then((r) => r.data.data!),
@@ -214,9 +217,14 @@ export default function Layout() {
 
           <div className="border-t border-[var(--border)] p-3">
             {!collapsed && (
-              <div className="px-1 pb-2 text-[11px] uppercase tracking-[0.12em] text-faint">
+              <button
+                type="button"
+                onClick={() => setChangelogOpen(true)}
+                title="查看更新日志"
+                className="w-full px-1 pb-2 text-left text-[11px] uppercase tracking-[0.12em] text-faint transition hover:text-[var(--text)]"
+              >
                 © 2026 Xray Pilot. {APP_VERSION}
-              </div>
+              </button>
             )}
             <button
               onClick={() => setCollapsed((s) => !s)}
@@ -289,6 +297,13 @@ export default function Layout() {
                       <DropdownMenu.Item className="cursor-default rounded-md px-2.5 py-2 text-sm text-soft outline-none">
                         个人中心
                       </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        onSelect={() => setChangelogOpen(true)}
+                        className="flex cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-2 text-sm text-soft outline-none transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                      >
+                        <History className="h-4 w-4" />
+                        更新日志
+                      </DropdownMenu.Item>
                       <DropdownMenu.Separator className="my-1 h-px bg-[var(--border)]" />
                       <DropdownMenu.Item
                         onSelect={handleLogout}
@@ -312,6 +327,8 @@ export default function Layout() {
           </div>
         </main>
       </div>
+
+      <ChangelogDrawer open={changelogOpen} onClose={() => setChangelogOpen(false)} />
     </div>
   )
 }
