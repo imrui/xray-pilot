@@ -6,6 +6,10 @@ const (
 	ProtocolVlessWSTLS   = "vless-ws-tls"
 	ProtocolTrojan       = "trojan"
 	ProtocolHysteria2    = "hysteria2"
+	// http / socks 是面向运行时程序的明文代理入站（IP 白名单 + 可选认证），
+	// 不面向订阅用户：订阅 URI / Clash / sing-box 输出一律不包含这两种协议。
+	ProtocolHTTP  = "http"
+	ProtocolSocks = "socks"
 )
 
 // 传输层常量，用于节点内端口冲突判定
@@ -97,4 +101,57 @@ func EffectiveRealityFingerprint(profile *VlessRealitySettings, key *RealityKeyM
 type TLSCertMaterial struct {
 	CertPath string `json:"cert_path"`
 	KeyPath  string `json:"key_path"`
+}
+
+// ProxyAccount http/socks 代理的认证账号
+type ProxyAccount struct {
+	User string `json:"user"`
+	Pass string `json:"pass"`
+}
+
+// ProxyInboundSettings http/socks 代理协议配置（协议模板与节点密钥共用同一结构）。
+// AllowedIPs 为来源 IP 白名单（支持单 IP 与 CIDR），通过 xray routing 规则实现：
+// 白名单内 → direct，其余同 inbound 流量 → blackhole。
+// AllowedIPs 与 Accounts 至少配置一项，否则配置生成会拒绝（防止公网开放代理）。
+// AllowPrivate 控制白名单来源能否通过代理访问内网目标（geoip:private），
+// 默认 false——放开意味着被入侵的白名单程序可触达云元数据地址与节点本机服务。
+// 用指针以区分"未设置（继承模板）"与"显式 false（覆盖模板的 true）"。
+type ProxyInboundSettings struct {
+	AllowedIPs   []string       `json:"allowed_ips,omitempty"`
+	Accounts     []ProxyAccount `json:"accounts,omitempty"`
+	AllowPrivate *bool          `json:"allow_private,omitempty"`
+}
+
+// EffectiveProxyAllowedIPs 返回代理实际使用的白名单：节点密钥覆盖 > 协议模板。
+// 所有消费方（xray inbound 生成、routing 规则生成）必须统一走此 helper。
+func EffectiveProxyAllowedIPs(profile, key *ProxyInboundSettings) []string {
+	if key != nil && len(key.AllowedIPs) > 0 {
+		return key.AllowedIPs
+	}
+	if profile != nil {
+		return profile.AllowedIPs
+	}
+	return nil
+}
+
+// EffectiveProxyAccounts 返回代理实际使用的认证账号：节点密钥覆盖 > 协议模板。
+func EffectiveProxyAccounts(profile, key *ProxyInboundSettings) []ProxyAccount {
+	if key != nil && len(key.Accounts) > 0 {
+		return key.Accounts
+	}
+	if profile != nil {
+		return profile.Accounts
+	}
+	return nil
+}
+
+// EffectiveProxyAllowPrivate 返回代理是否放行内网目标：节点密钥覆盖 > 协议模板 > 默认 false。
+func EffectiveProxyAllowPrivate(profile, key *ProxyInboundSettings) bool {
+	if key != nil && key.AllowPrivate != nil {
+		return *key.AllowPrivate
+	}
+	if profile != nil && profile.AllowPrivate != nil {
+		return *profile.AllowPrivate
+	}
+	return false
 }
