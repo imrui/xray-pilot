@@ -142,3 +142,74 @@ func TestEffectiveKeyPort(t *testing.T) {
 		})
 	}
 }
+
+// TestSubscriptionExcludesProxyProtocols 锁死协议边界：http/socks 代理仅供运行时程序使用，
+// 绝不能出现在用户订阅输出（base64 / Clash）。若未来有人给 buildURI/buildClashProxy
+// 误加这两种协议的分支，此测试会失败。
+func TestSubscriptionExcludesProxyProtocols(t *testing.T) {
+	setupServiceTestDB(t)
+
+	group := entity.Group{Name: "g", Active: true}
+	if err := repository.DB.Create(&group).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	node := entity.Node{Name: "node-a", IP: "1.1.1.1", Active: true, LastCheckOK: true}
+	if err := repository.DB.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := repository.DB.Model(&group).Association("Nodes").Append(&node); err != nil {
+		t.Fatalf("append node: %v", err)
+	}
+
+	user := entity.User{Username: "tt", UUID: "123e4567-e89b-12d3-a456-426614174000", Token: "token-proxy", Active: true}
+	if err := repository.DB.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := repository.DB.Model(&user).Association("Groups").Replace([]entity.Group{group}); err != nil {
+		t.Fatalf("replace user groups: %v", err)
+	}
+
+	// 节点同时绑定 1 个用户协议 + 2 个代理协议
+	profiles := []entity.InboundProfile{
+		{Name: "vless", Protocol: "vless-ws-tls", Port: 443, Settings: `{"host":"cdn.example.com","path":"/ws"}`, Active: true},
+		{Name: "http 代理", Protocol: "http", Port: 18080, Settings: `{"allowed_ips":["203.0.113.10"]}`, Active: true},
+		{Name: "socks 代理", Protocol: "socks", Port: 11080, Settings: `{"allowed_ips":["203.0.113.10"]}`, Active: true},
+	}
+	if err := repository.DB.Create(&profiles).Error; err != nil {
+		t.Fatalf("create profiles: %v", err)
+	}
+	for _, p := range profiles {
+		key := entity.NodeProfileKey{NodeID: node.ID, ProfileID: p.ID, Settings: `{}`}
+		if err := repository.DB.Create(&key).Error; err != nil {
+			t.Fatalf("create key: %v", err)
+		}
+	}
+
+	svc := NewSubscribeService()
+
+	// base64 订阅：仅 1 条 vless 链接，不含代理端口
+	encoded, err := svc.GenerateSubscription(user.Token)
+	if err != nil {
+		t.Fatalf("generate subscription: %v", err)
+	}
+	decoded, _ := base64.StdEncoding.DecodeString(encoded)
+	lines := strings.Split(strings.TrimSpace(string(decoded)), "\n")
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "vless://") {
+		t.Fatalf("订阅应只含 1 条 vless 链接, got %q", string(decoded))
+	}
+	if strings.Contains(string(decoded), "18080") || strings.Contains(string(decoded), "11080") {
+		t.Fatalf("订阅泄漏了代理端口: %q", string(decoded))
+	}
+
+	// Clash 输出：仅 1 个 proxy 条目
+	clash, err := svc.GenerateClash(user.Token)
+	if err != nil {
+		t.Fatalf("generate clash: %v", err)
+	}
+	if got := strings.Count(clash, "- name:"); got != 1 {
+		t.Fatalf("Clash 输出应只含 1 个代理条目, got %d:\n%s", got, clash)
+	}
+	if strings.Contains(clash, "18080") || strings.Contains(clash, "11080") {
+		t.Fatalf("Clash 输出泄漏了代理端口:\n%s", clash)
+	}
+}

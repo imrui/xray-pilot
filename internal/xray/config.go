@@ -3,7 +3,9 @@ package xray
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
+	"strings"
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/pkg/crypto"
@@ -58,7 +60,8 @@ type Routing struct {
 
 type RoutingRule struct {
 	Type        string   `json:"type,omitempty"`
-	IP          []string `json:"ip,omitempty"`
+	IP          []string `json:"ip,omitempty"`     // 目标 IP 匹配
+	Source      []string `json:"source,omitempty"` // 来源 IP 匹配（http/socks 白名单用）
 	InboundTag  []string `json:"inboundTag,omitempty"`
 	OutboundTag string   `json:"outboundTag"`
 }
@@ -150,6 +153,18 @@ type dokodemoSettings struct {
 	Address string `json:"address"`
 }
 
+// http 代理入站结构（accounts 为空即无认证，依赖白名单路由拦截）
+type httpInboundSettings struct {
+	Accounts []types.ProxyAccount `json:"accounts,omitempty"`
+}
+
+// socks 代理入站结构
+type socksInboundSettings struct {
+	Auth     string               `json:"auth"` // "password" / "noauth"
+	Accounts []types.ProxyAccount `json:"accounts,omitempty"`
+	UDP      bool                 `json:"udp"`
+}
+
 // ---- 配置生成 ----
 
 // LogConfig xray 日志配置（由 SettingService 提供）
@@ -177,6 +192,9 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 
 	var inbounds []Inbound
 	var warnings []string
+	// http/socks 入站的白名单路由规则。分两组：allow_private 的 direct 规则
+	// 必须排在 geoip:private 屏蔽之前才放得开内网目标，其余排在之后。
+	var proxyRulesBefore, proxyRulesAfter []RoutingRule
 
 	// usedPorts 兜底拦截同节点端口冲突（key: "传输层/端口"）。
 	// 正常流程在保存密钥时已校验，此处防御旧数据或手工改库导致 Xray 起不来。
@@ -198,6 +216,11 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 		}
 		usedPorts[portKey] = key.Profile.Name
 		inbounds = append(inbounds, inbound)
+		if key.Profile.Protocol == types.ProtocolHTTP || key.Profile.Protocol == types.ProtocolSocks {
+			before, after := proxyRoutingRules(key.Profile, &key)
+			proxyRulesBefore = append(proxyRulesBefore, before...)
+			proxyRulesAfter = append(proxyRulesAfter, after...)
+		}
 	}
 
 	// gRPC API 入站（供远端管理，监听本地 10085）
@@ -230,10 +253,10 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 		},
 		Routing: &Routing{
 			DomainStrategy: "IPIfNonMatch",
-			Rules: []RoutingRule{
-				{InboundTag: []string{"api-inbound"}, OutboundTag: "api"},
-				{Type: "field", IP: []string{"geoip:private"}, OutboundTag: "block"},
-			},
+			// 规则顺序敏感：默认代理白名单 direct 排在 geoip:private 屏蔽之后，
+			// 白名单来源无法通过代理访问内网地址；仅 allow_private=true 的入站
+			// 其 direct 规则前置（proxyRulesBefore）放行内网目标
+			Rules: buildRoutingRules(proxyRulesBefore, proxyRulesAfter),
 		},
 		Inbounds: inbounds,
 		Outbounds: []Outbound{
@@ -252,7 +275,8 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 // InboundTag 返回协议对应的 xray inbound tag（单一来源）。
 // 配置生成（buildXxxInbound）与 gRPC live-apply（按 tag 定位 inbound 增删用户）必须共用此函数，
 // 否则两侧 tag 命名漂移会导致 AlterInbound 找不到 inbound。
-// 第二返回值表示该协议是否有 gRPC 可管理的 xray inbound（Hysteria2 不在 xray-core，返回 false）。
+// 第二返回值表示该协议是否需要 gRPC per-user 账号管理
+// （Hysteria2 不在 xray-core；http/socks 虽在 xray 中但账号来自协议配置而非用户系统，均返回 false 让 live-apply 跳过）。
 func InboundTag(protocol string, profileID uint) (string, bool) {
 	switch protocol {
 	case types.ProtocolVlessReality:
@@ -261,12 +285,16 @@ func InboundTag(protocol string, profileID uint) (string, bool) {
 		return fmt.Sprintf("vless-ws-%d", profileID), true
 	case types.ProtocolTrojan:
 		return fmt.Sprintf("trojan-%d", profileID), true
+	case types.ProtocolHTTP:
+		return fmt.Sprintf("http-proxy-%d", profileID), false
+	case types.ProtocolSocks:
+		return fmt.Sprintf("socks-proxy-%d", profileID), false
 	default:
 		return "", false
 	}
 }
 
-// mustInboundTag 供 buildXxxInbound 内部使用：协议已确定在三种受支持类型内，直接取 tag。
+// mustInboundTag 供 buildXxxInbound 内部使用：协议已确定在受支持类型内，直接取 tag。
 func mustInboundTag(profile *entity.InboundProfile) string {
 	tag, _ := InboundTag(profile.Protocol, profile.ID)
 	return tag
@@ -288,6 +316,8 @@ func buildInbound(node *entity.Node, profile *entity.InboundProfile, key *entity
 		return buildVlessWSTLSInbound(profile, key, users)
 	case types.ProtocolTrojan:
 		return buildTrojanInbound(profile, key, users)
+	case types.ProtocolHTTP, types.ProtocolSocks:
+		return buildProxyInbound(profile, key)
 	default:
 		return Inbound{}, fmt.Errorf("不支持的协议: %s", profile.Protocol)
 	}
@@ -447,6 +477,118 @@ func buildTrojanInbound(profile *entity.InboundProfile, key *entity.NodeProfileK
 		Settings:       trojanInboundSettings{Clients: clients},
 		StreamSettings: stream,
 	}, nil
+}
+
+// buildProxyInbound 构建 http/socks 明文代理入站（供运行时程序使用，非订阅协议）。
+// 安全护栏：白名单与认证至少配置一项，否则拒绝生成——公网 VPS 上开放无鉴权
+// 代理会被扫描滥用。白名单条目在此校验合法性，坏条目只跳过该入站（转为
+// warning），不会让 xray 整体起不来。
+func buildProxyInbound(profile *entity.InboundProfile, key *entity.NodeProfileKey) (Inbound, error) {
+	ps, km, err := parseProxySettings(profile, key)
+	if err != nil {
+		return Inbound{}, err
+	}
+
+	// 白名单 / 认证账号走 helper：节点密钥覆盖 > 协议模板（消费方单一来源）
+	allowedIPs := types.EffectiveProxyAllowedIPs(ps, km)
+	accounts := types.EffectiveProxyAccounts(ps, km)
+	if len(allowedIPs) == 0 && len(accounts) == 0 {
+		return Inbound{}, fmt.Errorf("必须配置 allowed_ips 白名单或 accounts 认证之一，拒绝生成公网开放代理")
+	}
+	if err := validateAllowedIPs(allowedIPs); err != nil {
+		return Inbound{}, err
+	}
+
+	var settings interface{}
+	switch profile.Protocol {
+	case types.ProtocolHTTP:
+		settings = httpInboundSettings{Accounts: accounts}
+	case types.ProtocolSocks:
+		auth := "noauth"
+		if len(accounts) > 0 {
+			auth = "password"
+		}
+		settings = socksInboundSettings{Auth: auth, Accounts: accounts, UDP: false}
+	}
+
+	return Inbound{
+		Listen:   "0.0.0.0",
+		Port:     effectivePort(profile, key),
+		Protocol: profile.Protocol, // "http" / "socks" 与 xray 协议名一致
+		Tag:      mustInboundTag(profile),
+		Settings: settings,
+	}, nil
+}
+
+// parseProxySettings 解析 http/socks 的协议模板与节点密钥配置（同一结构）。
+func parseProxySettings(profile *entity.InboundProfile, key *entity.NodeProfileKey) (*types.ProxyInboundSettings, *types.ProxyInboundSettings, error) {
+	var ps types.ProxyInboundSettings
+	if err := parseSettings(profile.Settings, &ps); err != nil {
+		return nil, nil, fmt.Errorf("解析协议配置失败: %w", err)
+	}
+	var km types.ProxyInboundSettings
+	if key != nil {
+		if err := parseSettings(key.Settings, &km); err != nil {
+			return nil, nil, fmt.Errorf("解析节点密钥配置失败: %w", err)
+		}
+	}
+	return &ps, &km, nil
+}
+
+// validateAllowedIPs 校验白名单条目为合法 IP 或 CIDR。
+// 非法条目会让 xray 路由初始化失败进而整体起不来，必须在生成期拦截。
+func validateAllowedIPs(ips []string) error {
+	for _, entry := range ips {
+		if strings.Contains(entry, "/") {
+			if _, _, err := net.ParseCIDR(entry); err != nil {
+				return fmt.Errorf("白名单条目 %q 不是合法 CIDR", entry)
+			}
+			continue
+		}
+		if net.ParseIP(entry) == nil {
+			return fmt.Errorf("白名单条目 %q 不是合法 IP", entry)
+		}
+	}
+	return nil
+}
+
+// buildRoutingRules 组装最终路由规则，顺序：api → allow_private 代理 direct →
+// geoip:private 屏蔽 → 普通代理白名单规则。
+func buildRoutingRules(proxyBefore, proxyAfter []RoutingRule) []RoutingRule {
+	rules := []RoutingRule{{InboundTag: []string{"api-inbound"}, OutboundTag: "api"}}
+	rules = append(rules, proxyBefore...)
+	rules = append(rules, RoutingRule{Type: "field", IP: []string{"geoip:private"}, OutboundTag: "block"})
+	return append(rules, proxyAfter...)
+}
+
+// proxyRoutingRules 生成 http/socks 入站的白名单路由规则：
+// 白名单来源 → direct；其余同 inbound 流量 → blackhole。
+// 返回 (before, after)：before 需置于 geoip:private 屏蔽之前（allow_private 放行内网），
+// after 置于其后（默认，内网目标被屏蔽）。
+// 白名单为空（纯认证模式）时由 accounts 认证兜底，仅 allow_private 时需前置整入站 direct。
+// 仅在 buildProxyInbound 成功后调用，settings 已校验过，解析失败静默返回空。
+func proxyRoutingRules(profile *entity.InboundProfile, key *entity.NodeProfileKey) (before, after []RoutingRule) {
+	ps, km, err := parseProxySettings(profile, key)
+	if err != nil {
+		return nil, nil
+	}
+	allowedIPs := types.EffectiveProxyAllowedIPs(ps, km)
+	allowPrivate := types.EffectiveProxyAllowPrivate(ps, km)
+	tag := mustInboundTag(profile)
+
+	if len(allowedIPs) == 0 {
+		if allowPrivate {
+			return []RoutingRule{{Type: "field", InboundTag: []string{tag}, OutboundTag: "direct"}}, nil
+		}
+		return nil, nil
+	}
+
+	direct := RoutingRule{Type: "field", InboundTag: []string{tag}, Source: allowedIPs, OutboundTag: "direct"}
+	block := RoutingRule{Type: "field", InboundTag: []string{tag}, OutboundTag: "block"}
+	if allowPrivate {
+		return []RoutingRule{direct}, []RoutingRule{block}
+	}
+	return nil, []RoutingRule{direct, block}
 }
 
 func buildAPIInbound() Inbound {

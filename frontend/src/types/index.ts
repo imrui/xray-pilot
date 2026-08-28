@@ -71,7 +71,8 @@ export interface Node {
 }
 
 // InboundProfile 协议接入配置模板
-export type Protocol = 'vless-reality' | 'vless-ws-tls' | 'trojan' | 'hysteria2'
+// http / socks 为面向运行时程序的代理协议（IP 白名单 + 可选认证），不出现在用户订阅
+export type Protocol = 'vless-reality' | 'vless-ws-tls' | 'trojan' | 'hysteria2' | 'http' | 'socks'
 
 export interface InboundProfile {
   id: number

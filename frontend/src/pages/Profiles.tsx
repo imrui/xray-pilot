@@ -24,6 +24,20 @@ const defaultSettings: Record<Protocol, string> = {
   'vless-ws-tls': JSON.stringify({ host: 'cdn.example.com', path: '/ws' }, null, 2),
   trojan: JSON.stringify({ sni: 'example.com' }, null, 2),
   hysteria2: JSON.stringify({ sni: 'example.com', up_mbps: 100, down_mbps: 100 }, null, 2),
+  // http/socks：allowed_ips 与 accounts 至少配置一项，否则后端拒绝生成（防公网开放代理）；
+  // allow_private 为 true 时白名单来源可通过代理访问内网目标（默认拦截）
+  http: JSON.stringify({ allowed_ips: ['101.42.9.109', '113.108.128.120/29'], accounts: [], allow_private: false }, null, 2),
+  socks: JSON.stringify({ allowed_ips: ['101.42.9.109', '113.108.128.120/29'], accounts: [], allow_private: false }, null, 2),
+}
+
+// 协议切换时填入的默认监听端口；http/socks 避开常见扫描端口
+const defaultPort: Record<Protocol, string> = {
+  'vless-reality': '443',
+  'vless-ws-tls': '443',
+  trojan: '443',
+  hysteria2: '2096',
+  http: '18080',
+  socks: '11080',
 }
 
 function stringifySettings(settings: unknown) {
@@ -48,7 +62,8 @@ interface FormState {
 }
 
 const emptyForm = (): FormState => ({
-  name: '',
+  // 配置名默认用协议类型标签填充，用户可直接保存或改成自定义名
+  name: protocolLabel('vless-reality'),
   protocol: 'vless-reality',
   port: '443',
   settings: defaultSettings['vless-reality'],
@@ -565,8 +580,10 @@ export default function Profiles() {
     setForm((p) => ({
       ...p,
       protocol: v,
+      // 配置名仍是自动填充值（空或等于旧协议标签）时跟随切换，用户改过则保留
+      name: p.name === '' || p.name === protocolLabel(p.protocol) ? protocolLabel(proto) : p.name,
       settings: defaultSettings[proto] ?? '',
-      port: proto === 'hysteria2' ? '2096' : '443',
+      port: defaultPort[proto] ?? '443',
     }))
   }
 
