@@ -59,15 +59,16 @@ func nodeIDsDiff(a, b []uint) []uint {
 }
 
 // applyUpdateLive 用户更新后的增量 live-apply：基于「旧/新 期望节点集」差集做增删，
-// 只触碰真正变化的节点（加入新分组的节点、移出分组的节点、启停切换）。
+// 只触碰真正变化的节点（加入新分组的节点、移出分组的节点、启停切换、过期/续期）。
+// 期望集用 EffectiveActive（启用且未过期），与配置生成的用户过滤语义一致。
 // 用户名(email)变更涉及跨节点 email 改动，逻辑复杂且罕见，回退全量 restart 同步。
-func (s *UserService) applyUpdateLive(u *entity.User, oldNodeIDs []uint, oldActive bool, oldUsername string) {
+func (s *UserService) applyUpdateLive(u *entity.User, oldNodeIDs []uint, oldEffectiveActive bool, oldUsername string) {
 	if u.Username != oldUsername {
 		_ = s.nodeRepo.MarkAllDrifted()
 		return
 	}
-	desiredOld := nodeSetIf(oldActive, oldNodeIDs)
-	desiredNew := nodeSetIf(u.Active, s.userNodeIDs(u))
+	desiredOld := nodeSetIf(oldEffectiveActive, oldNodeIDs)
+	desiredNew := nodeSetIf(u.EffectiveActive(time.Now()), s.userNodeIDs(u))
 	if toAdd := nodeIDsDiff(desiredNew, desiredOld); len(toAdd) > 0 {
 		s.liveSync.AddUserLive(toAdd, u.Username, u.UUID)
 	}
@@ -136,7 +137,10 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 		return nil, fmt.Errorf("读取用户失败: %w", err)
 	}
 	if s.liveSync.Enabled() {
-		s.liveSync.AddUserLive(s.userNodeIDs(created), created.Username, created.UUID)
+		// 创建即过期的用户不在任何节点运行时（配置生成已过滤），无需 live-apply
+		if created.EffectiveActive(time.Now()) {
+			s.liveSync.AddUserLive(s.userNodeIDs(created), created.Username, created.UUID)
+		}
 	} else {
 		_ = s.nodeRepo.MarkAllDrifted()
 	}
@@ -151,13 +155,13 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	// live-apply：在改动前捕获旧的节点集 / 活跃态 / 用户名，用于结束后做增量对账
 	liveOn := s.liveSync.Enabled()
 	var (
-		oldNodeIDs  []uint
-		oldActive   bool
-		oldUsername string
+		oldNodeIDs         []uint
+		oldEffectiveActive bool
+		oldUsername        string
 	)
 	if liveOn {
 		oldNodeIDs = s.userNodeIDs(user)
-		oldActive = user.Active
+		oldEffectiveActive = user.EffectiveActive(time.Now())
 		oldUsername = user.Username
 	}
 	shouldMarkSync := false
@@ -215,6 +219,7 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		}
 		if (user.ExpiresAt == nil) != (expiresAt == nil) || (user.ExpiresAt != nil && expiresAt != nil && !user.ExpiresAt.Equal(*expiresAt)) {
 			shouldMarkSync = true
+			user.ExpiredSweptAt = nil // 过期时间变更（续期）后允许调度器重新处理
 		}
 		user.ExpiresAt = expiresAt
 	}
@@ -247,7 +252,7 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	}
 	if shouldMarkSync {
 		if liveOn {
-			s.applyUpdateLive(updated, oldNodeIDs, oldActive, oldUsername)
+			s.applyUpdateLive(updated, oldNodeIDs, oldEffectiveActive, oldUsername)
 		} else {
 			_ = s.nodeRepo.MarkAllDrifted()
 		}
@@ -291,16 +296,57 @@ func (s *UserService) ToggleActive(id uint) error {
 	if err := s.userRepo.UpdateActive(id, newActive); err != nil {
 		return err
 	}
-	// live-apply：启用 → AddUser，禁用 → RemoveUser
+	// live-apply：启用 → AddUser（已过期用户不加，配置生成也不含它），禁用 → RemoveUser
 	if s.liveSync.Enabled() {
 		if newActive {
-			s.liveSync.AddUserLive(s.userNodeIDs(user), user.Username, user.UUID)
+			if !user.IsExpired(time.Now()) {
+				s.liveSync.AddUserLive(s.userNodeIDs(user), user.Username, user.UUID)
+			}
 		} else {
 			s.liveSync.RemoveUserLive(s.userNodeIDs(user), user.Username)
 		}
 		return nil
 	}
 	return s.nodeRepo.MarkAllDrifted()
+}
+
+// SweepResult 一次过期摘除的汇总
+type SweepResult struct {
+	Swept     []string // 已处理的用户名
+	LiveApply bool     // 本次是否走 gRPC 即时摘除（false = 标记漂移等待 restart 同步）
+}
+
+// SweepExpired 把已过期但仍启用的用户从节点运行时摘除（给调度器周期调用）。
+//   - live-apply on：逐用户 RemoveUserLive（失败节点已在 livesync 内标记漂移兜底）
+//   - live-apply off：MarkAllDrifted 一次，交给 restart 同步路径
+//
+// 处理过的用户打 ExpiredSweptAt 标记，不重复扫；续期会清标记。
+// 订阅层的 403 拦截与本方法互补：前者挡新取订阅，后者断已连会话。
+func (s *UserService) SweepExpired(now time.Time) (*SweepResult, error) {
+	users, err := s.userRepo.FindExpiredUnswept(now)
+	if err != nil {
+		return nil, fmt.Errorf("查询过期用户失败: %w", err)
+	}
+	result := &SweepResult{LiveApply: s.liveSync.Enabled()}
+	if len(users) == 0 {
+		return result, nil
+	}
+	if !result.LiveApply {
+		if err := s.nodeRepo.MarkAllDrifted(); err != nil {
+			return nil, fmt.Errorf("标记节点漂移失败: %w", err)
+		}
+	}
+	for i := range users {
+		u := &users[i]
+		if result.LiveApply {
+			s.liveSync.RemoveUserLive(s.userNodeIDs(u), u.Username)
+		}
+		if err := s.userRepo.MarkExpiredSwept(u.ID, now); err != nil {
+			return result, fmt.Errorf("标记用户 %s 已摘除失败: %w", u.Username, err)
+		}
+		result.Swept = append(result.Swept, u.Username)
+	}
+	return result, nil
 }
 
 func (s *UserService) List(page, pageSize int, baseURL string) ([]dto.UserResponse, int64, error) {
@@ -343,8 +389,8 @@ func (s *UserService) ResetUUID(id uint, baseURL string) (*dto.UserResponse, err
 	user.UUID = newUUID
 	if s.liveSync.Enabled() {
 		// UUID 变更：email 不变，逐 inbound 先删旧账号再加新 UUID 账号。
-		// 未激活用户不在任何节点运行时（config 已过滤），UUID 变更无 config 影响 → no-op。
-		if user.Active {
+		// 未激活/已过期用户不在任何节点运行时（config 已过滤），UUID 变更无 config 影响 → no-op。
+		if user.EffectiveActive(time.Now()) {
 			s.liveSync.ReplaceUserLive(s.userNodeIDs(user), user.Username, newUUID)
 		}
 	} else {

@@ -32,8 +32,10 @@ const (
 	KeyXrayLogError             = "xray.log_error"
 	KeyXrayLogLevel             = "xray.log_level"
 	// 用户增删时是否走 gRPC 即时生效（不重启 xray）。off 时回退到「标记漂移 → 全量 SSH push + restart」旧路径。
-	// v0.4.5 首发默认 off，真节点验证「不掉线」后再翻 on。
+	// v0.4.5 首发默认 off；v0.4.9 起默认 on（真节点已验证不掉线）。老面板 DB 中已有的值不受影响。
 	KeyXrayLiveApply = "xray.live_apply_enabled"
+	// 流量明细（traffic_samples）保留天数，0 = 不清理。累计流量不受影响。
+	KeyTrafficSampleRetentionDays = "traffic.sample_retention_days"
 	// 面板出网 IP（用于一键接入时提示用户在节点防火墙放行 panel 的 IP）
 	// auto 由调度器每小时通过外部探针刷新；manual 是管理员手动覆盖；
 	// 最终生效值 = manual.TrimSpace() != "" ? manual : auto。
@@ -43,31 +45,32 @@ const (
 
 // 硬编码默认值（三级优先级最后兜底）
 var settingDefaults = map[string]string{
-	KeySchedulerDriftInterval:   "300",
-	KeySchedulerHealthInterval:  "120",
-	KeySchedulerTrafficInterval: "300",
-	KeyBackupDir:                "data/backup",
-	KeyBackupIntervalHours:      "24",
-	KeyBackupRetentionDays:      "30",
-	KeySSHDefaultPort:           "22",
-	KeySSHDefaultUser:           "root",
-	KeySSHDefaultKeyPath:        "",
-	KeySSHKnownHostsPath:        "/var/lib/xray-pilot/known_hosts",
-	KeySubscriptionBaseURL:      "",
-	KeySubscriptionRemarkFormat: "{node_name} ({username}) [{protocol} - {transport}]",
-	KeyFeishuEnabled:            "false",
-	KeyFeishuAppID:              "",
-	KeyFeishuAppSecret:          "",
-	KeyFeishuVerificationToken:  "",
-	KeyFeishuEncryptKey:         "",
-	KeyFeishuBaseURL:            "",
-	KeyFeishuBotName:            "xray-pilot",
-	KeyXrayLogAccess:            "none",
-	KeyXrayLogError:             "/var/log/xray/error.log",
-	KeyXrayLogLevel:             "warning",
-	KeyXrayLiveApply:            "false",
-	KeyPanelOutboundIPAuto:      "",
-	KeyPanelOutboundIPManual:    "",
+	KeySchedulerDriftInterval:     "300",
+	KeySchedulerHealthInterval:    "120",
+	KeySchedulerTrafficInterval:   "300",
+	KeyBackupDir:                  "data/backup",
+	KeyBackupIntervalHours:        "24",
+	KeyBackupRetentionDays:        "30",
+	KeySSHDefaultPort:             "22",
+	KeySSHDefaultUser:             "root",
+	KeySSHDefaultKeyPath:          "",
+	KeySSHKnownHostsPath:          "/var/lib/xray-pilot/known_hosts",
+	KeySubscriptionBaseURL:        "",
+	KeySubscriptionRemarkFormat:   "{node_name} ({username}) [{protocol} - {transport}]",
+	KeyFeishuEnabled:              "false",
+	KeyFeishuAppID:                "",
+	KeyFeishuAppSecret:            "",
+	KeyFeishuVerificationToken:    "",
+	KeyFeishuEncryptKey:           "",
+	KeyFeishuBaseURL:              "",
+	KeyFeishuBotName:              "xray-pilot",
+	KeyXrayLogAccess:              "none",
+	KeyXrayLogError:               "/var/log/xray/error.log",
+	KeyXrayLogLevel:               "warning",
+	KeyXrayLiveApply:              "true",
+	KeyTrafficSampleRetentionDays: "90",
+	KeyPanelOutboundIPAuto:        "",
+	KeyPanelOutboundIPManual:      "",
 }
 
 // SettingService 系统运行时配置服务

@@ -229,7 +229,7 @@ func (s *TrafficService) GetTotalsForUsers(ids []uint) (map[uint]entity.UserTraf
 	return s.trafficRepo.ListTotalsByUserIDs(ids)
 }
 
-// RunOnce 给 scheduler 用的封装：执行一次 PollAll，统一记日志
+// RunOnce 给 scheduler 用的封装：执行一次 PollAll + 明细 retention 清理，统一记日志
 func (s *TrafficService) RunOnce(ctx context.Context) {
 	start := time.Now()
 	result := s.PollAll(ctx)
@@ -241,6 +241,37 @@ func (s *TrafficService) RunOnce(ctx context.Context) {
 		zap.Duration("elapsed", time.Since(start)),
 	)
 	if len(result.Errors) > 0 {
-		s.logRepo.Record("traffic_poll", "all", result.FailedNodes == 0, fmt.Sprintf("失败 %d/%d: %v", result.FailedNodes, result.PolledNodes, result.Errors), time.Since(start).Milliseconds())
+		s.logRepo.RecordWithActor("traffic_poll", "all", trafficPollActor, result.FailedNodes == 0, fmt.Sprintf("失败 %d/%d: %v", result.FailedNodes, result.PolledNodes, result.Errors), time.Since(start).Milliseconds())
+	}
+	s.PurgeExpiredSamples(time.Now())
+}
+
+const trafficPollActor = "system:scheduler:traffic_poll"
+
+// retentionCutoff 由保留天数算出明细清理的截止时间；days <= 0 表示不清理
+func retentionCutoff(days int, now time.Time) (time.Time, bool) {
+	if days <= 0 {
+		return time.Time{}, false
+	}
+	return now.AddDate(0, 0, -days), true
+}
+
+// PurgeExpiredSamples 按 traffic.sample_retention_days 清理过期明细（累计不受影响）。
+// 挂在每次采集之后执行，无需独立调度周期。
+func (s *TrafficService) PurgeExpiredSamples(now time.Time) {
+	cutoff, ok := retentionCutoff(s.settingSvc.GetInt(KeyTrafficSampleRetentionDays), now)
+	if !ok {
+		return
+	}
+	start := time.Now()
+	deleted, err := s.trafficRepo.PurgeSamplesBefore(cutoff)
+	if err != nil {
+		zap.L().Named("traffic").Warn("流量明细清理失败", zap.Error(err))
+		s.logRepo.RecordWithActor("traffic_retention", "all", trafficPollActor, false, err.Error(), time.Since(start).Milliseconds())
+		return
+	}
+	if deleted > 0 {
+		zap.L().Named("traffic").Info("流量明细清理完成", zap.Int64("deleted", deleted), zap.Time("cutoff", cutoff))
+		s.logRepo.RecordWithActor("traffic_retention", "all", trafficPollActor, true, fmt.Sprintf("deleted=%d cutoff=%s", deleted, cutoff.Format(time.RFC3339)), time.Since(start).Milliseconds())
 	}
 }
