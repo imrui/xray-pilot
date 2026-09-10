@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,6 +16,7 @@ import (
 // Scheduler 管理所有定时任务
 type Scheduler struct {
 	syncSvc    *service.SyncService
+	userSvc    *service.UserService
 	trafficSvc *service.TrafficService
 	backupSvc  *service.BackupService
 	settingSvc *service.SettingService
@@ -28,6 +30,7 @@ type Scheduler struct {
 func New() *Scheduler {
 	return &Scheduler{
 		syncSvc:    service.NewSyncService(),
+		userSvc:    service.NewUserService(),
 		trafficSvc: service.NewTrafficService(),
 		backupSvc:  service.NewBackupService(),
 		settingSvc: service.NewSettingService(),
@@ -52,6 +55,18 @@ func (s *Scheduler) Start(ctx context.Context) {
 			s.runDriftCheck,
 		)
 	}
+
+	// 过期用户摘除：复用漂移检测周期（漂移检测禁用时退化为固定 5 分钟，
+	// 过期摘除是正确性项，不随漂移检测一起关闭）
+	sweepInterval := time.Duration(driftInterval) * time.Second
+	if sweepInterval <= 0 {
+		sweepInterval = 5 * time.Minute
+	}
+	go s.runLoop(ctx, "expired_user_sweep",
+		sweepInterval,
+		20*time.Second,
+		s.runExpiredUserSweep,
+	)
 
 	if healthInterval > 0 {
 		go s.runLoop(ctx, "health_check",
@@ -162,6 +177,28 @@ func (s *Scheduler) runLoop(ctx context.Context, name string, interval time.Dura
 			task()
 		}
 	}
+}
+
+// ---- 过期用户摘除 ----
+
+func (s *Scheduler) runExpiredUserSweep() {
+	const actor = "system:scheduler:expired_user_sweep"
+	start := time.Now()
+	result, err := s.userSvc.SweepExpired(start)
+	if err != nil {
+		s.log.Warn("过期用户摘除失败", zap.Error(err))
+		s.logRepo.RecordWithActor("expired_user_sweep", "all", actor, false, err.Error(), time.Since(start).Milliseconds())
+		return
+	}
+	if len(result.Swept) == 0 {
+		return
+	}
+	mode := "live-apply"
+	if !result.LiveApply {
+		mode = "标记漂移，等待同步"
+	}
+	s.log.Info("过期用户已摘除", zap.Strings("users", result.Swept), zap.String("mode", mode))
+	s.logRepo.RecordWithActor("expired_user_sweep", strings.Join(result.Swept, ","), actor, true, mode, time.Since(start).Milliseconds())
 }
 
 // ---- 漂移检测 ----

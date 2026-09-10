@@ -95,7 +95,7 @@ export default function Settings() {
   if (isLoading) return <div className="p-6 text-soft">加载中…</div>
 
   const feishuEnabled = (form['feishu.enabled'] ?? 'false') === 'true'
-  const liveApplyEnabled = (form['xray.live_apply_enabled'] ?? 'false') === 'true'
+  const liveApplyEnabled = (form['xray.live_apply_enabled'] ?? 'true') === 'true'
   const dirty = JSON.stringify(form) !== JSON.stringify(toForm(settings ?? {}))
 
   return (
@@ -328,6 +328,7 @@ export default function Settings() {
               <Field label="漂移检测间隔（秒，0 禁用）" type="number" value={form['scheduler.drift_check_interval'] ?? '300'} onChange={f('scheduler.drift_check_interval')} />
               <Field label="健康检测间隔（秒，0 禁用）" type="number" value={form['scheduler.health_check_interval'] ?? '120'} onChange={f('scheduler.health_check_interval')} />
               <Field label="流量采集间隔（秒，0 禁用）" type="number" value={form['scheduler.traffic_poll_interval'] ?? '300'} onChange={f('scheduler.traffic_poll_interval')} />
+              <Field label="流量明细保留天数（0 不清理，累计不受影响）" type="number" value={form['traffic.sample_retention_days'] ?? '90'} onChange={f('traffic.sample_retention_days')} />
               <Field label="数据库备份间隔（小时，0 禁用）" type="number" value={form['backup.interval_hours'] ?? '24'} onChange={f('backup.interval_hours')} />
             </div>
           </Section>

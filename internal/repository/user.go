@@ -180,12 +180,19 @@ func (r *UserRepository) FindActiveUsersByNodeID(nodeID uint) ([]entity.User, er
 	return users, err
 }
 
-// GetExpiredUsers 查询已过期的用户
-func (r *UserRepository) GetExpiredUsers() ([]entity.User, error) {
+// FindExpiredUnswept 查询已过期、仍处于启用态且尚未被调度器摘除的用户
+func (r *UserRepository) FindExpiredUnswept(now time.Time) ([]entity.User, error) {
 	var users []entity.User
-	now := time.Now()
-	err := preloadUserGroups(DB).Where("active = ? AND expires_at IS NOT NULL AND expires_at <= ?", true, now).Find(&users).Error
+	err := preloadUserGroups(DB).
+		Where("active = ? AND expires_at IS NOT NULL AND expires_at <= ? AND expired_swept_at IS NULL", true, now).
+		Order("id asc").
+		Find(&users).Error
 	return users, err
+}
+
+// MarkExpiredSwept 记录过期用户已被摘除
+func (r *UserRepository) MarkExpiredSwept(id uint, at time.Time) error {
+	return DB.Model(&entity.User{}).Where("id = ?", id).Update("expired_swept_at", at).Error
 }
 
 // Count 返回用户总数

@@ -82,10 +82,24 @@ func TestUpdateDiffScenarios(t *testing.T) {
 			t.Errorf("add=%v rm=%v, want add=[1 2] rm=[]", add, rm)
 		}
 	})
-	t.Run("仅过期变更_节点活跃态不变_无增删", func(t *testing.T) {
+	t.Run("仅延长有效期_仍有效_无增删", func(t *testing.T) {
 		add, rm := diff(true, []uint{1, 2}, true, []uint{1, 2})
 		if !eq(add, nil) || !eq(rm, nil) {
 			t.Errorf("add=%v rm=%v, want 空（仅非节点字段变更应无 live-apply）", add, rm)
+		}
+	})
+	// 以下两例的 active 入参代表 EffectiveActive（启用 且 未过期），
+	// 覆盖 v0.4.9 过期/续期场景：期望集必须随过期状态变化，否则续期后用户不会被加回运行时。
+	t.Run("过期用户续期_加回所有节点", func(t *testing.T) {
+		add, rm := diff(false, []uint{1, 2}, true, []uint{1, 2})
+		if !eq(add, []uint{1, 2}) || !eq(rm, nil) {
+			t.Errorf("add=%v rm=%v, want add=[1 2] rm=[]", add, rm)
+		}
+	})
+	t.Run("有效用户改为已过期_从所有节点摘除", func(t *testing.T) {
+		add, rm := diff(true, []uint{1, 2}, false, []uint{1, 2})
+		if !eq(add, nil) || !eq(rm, []uint{1, 2}) {
+			t.Errorf("add=%v rm=%v, want add=[] rm=[1 2]", add, rm)
 		}
 	})
 }
