@@ -21,7 +21,9 @@ type LoginRequest struct {
 
 // LoginResponse 管理员登录响应
 type LoginResponse struct {
-	Token string `json:"token"`
+	Token    string `json:"token"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
 }
 
 // SyncSummaryResponse 后台全局待同步摘要

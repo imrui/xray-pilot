@@ -1,5 +1,5 @@
 import request from './axios'
-import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuPushResult, TrafficSummary } from '@/types'
+import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuPushResult, TrafficSummary, Admin, AdminRole, LoginResponse } from '@/types'
 
 // ---- 通用分页参数 ----
 interface PageParams {
@@ -192,7 +192,8 @@ export const profileApi = {
 
 // ---- 日志 API ----
 export const logApi = {
-  list: (params?: PageParams) =>
+  // actor 为前缀过滤：如 "admin:" 只看人工操作，"system:scheduler:" 只看调度器
+  list: (params?: PageParams & { actor?: string }) =>
     request.get<ApiResponse<PageResult<SyncLog>>>('/logs', { params }),
 
   cleanup: (days: number) =>
@@ -233,6 +234,30 @@ export const systemApi = {
 export interface ReleaseNote {
   version: string
   content: string
+}
+
+// ---- 认证 / 当前管理员 ----
+export const authApi = {
+  login: (username: string, password: string) =>
+    request.post<ApiResponse<LoginResponse>>('/auth/login', { username, password }),
+  me: () =>
+    request.get<ApiResponse<{ id: number; username: string; role: AdminRole }>>('/me'),
+  changePassword: (old_password: string, new_password: string) =>
+    request.put<ApiResponse<null>>('/me/password', { old_password, new_password }),
+}
+
+// ---- 管理员账号（仅 super_admin）----
+export const adminApi = {
+  list: () =>
+    request.get<ApiResponse<Admin[]>>('/admins'),
+  create: (data: { username: string; password: string; role: AdminRole }) =>
+    request.post<ApiResponse<Admin>>('/admins', data),
+  update: (id: number, data: { role?: AdminRole; active?: boolean }) =>
+    request.put<ApiResponse<Admin>>(`/admins/${id}`, data),
+  remove: (id: number) =>
+    request.delete<ApiResponse<null>>(`/admins/${id}`),
+  setPassword: (id: number, password: string) =>
+    request.put<ApiResponse<null>>(`/admins/${id}/password`, { password }),
 }
 
 // ---- 流量统计 ----
@@ -301,6 +326,8 @@ export const backupApi = {
   download: async (name: string) => {
     const res = await request.get(`/system/backups/${encodeURIComponent(name)}/download`, {
       responseType: 'blob',
+      // 备份文件可达数十 MB，经 CDN/反代传输远超实例默认 10s 超时；下载请求不设超时
+      timeout: 0,
     })
     let filename = name
     const cd = String((res.headers as Record<string, unknown>)['content-disposition'] ?? '')

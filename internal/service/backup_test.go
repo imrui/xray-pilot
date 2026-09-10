@@ -55,7 +55,7 @@ func TestRunBackupCreatesValidFile(t *testing.T) {
 	dir := setupBackupTestEnv(t)
 	svc := NewBackupService()
 
-	file, err := svc.RunBackup()
+	file, err := svc.RunBackup("test")
 	if err != nil {
 		t.Fatalf("run backup: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestListBackupsSortedDesc(t *testing.T) {
 	svc := NewBackupService()
 
 	for i := 0; i < 3; i++ {
-		if _, err := svc.RunBackup(); err != nil {
+		if _, err := svc.RunBackup("test"); err != nil {
 			t.Fatalf("backup %d: %v", i, err)
 		}
 		// VACUUM INTO 文件名使用秒级时间戳，必须显式间隔避免冲突
@@ -135,7 +135,7 @@ func TestCleanupRetention(t *testing.T) {
 	svc := NewBackupService()
 
 	// 先生成一个真实备份（保留）
-	current, err := svc.RunBackup()
+	current, err := svc.RunBackup("test")
 	if err != nil {
 		t.Fatalf("backup: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestDeleteBackup(t *testing.T) {
 	_ = dir
 	svc := NewBackupService()
 
-	file, err := svc.RunBackup()
+	file, err := svc.RunBackup("test")
 	if err != nil {
 		t.Fatalf("backup: %v", err)
 	}

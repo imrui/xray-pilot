@@ -61,9 +61,24 @@ func (s *BackupService) backupDir() (string, error) {
 	return abs, nil
 }
 
-// RunBackup 执行一次完整备份，返回生成的文件元信息
+// actorSchedulerBackup 调度器自动备份的操作日志 actor
+const actorSchedulerBackup = "system:scheduler:backup_run"
+
+// RunBackup 执行一次完整备份并记操作日志，返回生成的文件元信息。actor 为触发方（管理员 / 调度器）
 // 仅当 driver == sqlite 时有效；其他 driver 返回 errors.New("仅支持 SQLite")
-func (s *BackupService) RunBackup() (*BackupFile, error) {
+func (s *BackupService) RunBackup(actor string) (*BackupFile, error) {
+	start := time.Now()
+	file, err := s.runBackup()
+	if err != nil {
+		zap.L().Named("backup").Error("备份失败", zap.Error(err))
+		s.logRepo.RecordWithActor("backup", "all", actor, false, err.Error(), time.Since(start).Milliseconds())
+		return nil, err
+	}
+	s.logRepo.RecordWithActor("backup", file.Name, actor, true, fmt.Sprintf("备份 %s (%d 字节)", file.Name, file.Size), time.Since(start).Milliseconds())
+	return file, nil
+}
+
+func (s *BackupService) runBackup() (*BackupFile, error) {
 	if config.Global.Database.Driver != "sqlite" && config.Global.Database.Driver != "" {
 		return nil, errors.New("仅支持 SQLite 数据库的备份；Postgres 请使用 pg_dump")
 	}
@@ -194,16 +209,12 @@ func (s *BackupService) CleanupRetention() (int, error) {
 	return deleted, nil
 }
 
-// RunOnce 给 scheduler 使用：备份一次 + 清理过期，统一记日志
+// RunOnce 给 scheduler 使用：备份一次 + 清理过期
 func (s *BackupService) RunOnce() {
-	start := time.Now()
-	file, err := s.RunBackup()
-	if err != nil {
-		zap.L().Named("backup").Error("备份失败", zap.Error(err))
-		s.logRepo.Record("backup", "all", false, err.Error(), time.Since(start).Milliseconds())
+	if _, err := s.RunBackup(actorSchedulerBackup); err != nil {
 		return
 	}
-	deleted, _ := s.CleanupRetention()
-	msg := fmt.Sprintf("备份 %s (%d 字节)；清理过期 %d 个", file.Name, file.Size, deleted)
-	s.logRepo.Record("backup", file.Name, true, msg, time.Since(start).Milliseconds())
+	if deleted, _ := s.CleanupRetention(); deleted > 0 {
+		s.logRepo.RecordWithActor("backup_retention", "all", actorSchedulerBackup, true, fmt.Sprintf("清理过期备份 %d 个", deleted), 0)
+	}
 }

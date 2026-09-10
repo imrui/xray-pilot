@@ -32,7 +32,7 @@ func (h *BackupHandler) List(c *gin.Context) {
 // Run POST /api/system/backups
 // 手动触发一次备份
 func (h *BackupHandler) Run(c *gin.Context) {
-	file, err := h.svc.RunBackup()
+	file, err := h.svc.RunBackup(actorFrom(c))
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return

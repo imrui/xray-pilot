@@ -12,7 +12,7 @@ import "time"
 //	system:feishu-webhook             - 飞书事件回调触发
 //	system:agent:<node_id>            - 未来 v0.7.0+ agent 上报触发（占位）
 //
-// Actor 为空表示老调用点（未迁移）；新代码必须用 LogRepository.RecordWithActor 写入。
+// v0.5.0 起所有调用点均带 actor；Actor 为空只可能是 v0.5.0 之前写入的历史记录。
 type SyncLog struct {
 	ID         uint      `gorm:"primaryKey"            json:"id"`
 	Action     string    `                             json:"action"` // 操作类型，如 sync / keygen / toggle

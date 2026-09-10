@@ -25,6 +25,8 @@ ssh:
   default_key_path: ""  # 例如: /etc/xray-pilot/ssh/id_ed25519
   known_hosts_path: "/var/lib/xray-pilot/known_hosts"
 
+# 管理员种子：仅首次启动（admin_users 表为空）时写入数据库，第一个为超级管理员。
+# 之后管理员在面板「系统设置 → 管理员账号」维护，本段被忽略。
 admins:
   - username: admin
-    password: "change-me-now"  # 启动时会自动 hash 到内存中
+    password: "change-me-now"

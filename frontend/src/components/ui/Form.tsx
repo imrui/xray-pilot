@@ -13,12 +13,12 @@ export function Field({ label, error, className, ...props }: FieldProps) {
       <input
         className={cn(
           'h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] placeholder:text-faint transition-all duration-200 focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]',
-          error && 'border-red-400/40 focus:border-red-500 focus:ring-red-500/10',
+          error && 'border-[var(--danger-border)] focus:border-[var(--danger)] focus:ring-[var(--danger-soft)]',
           className
         )}
         {...props}
       />
-      {error && <p className="mt-1 text-[11px] font-medium text-red-500">{error}</p>}
+      {error && <p className="mt-1 text-[11px] font-medium text-[var(--danger)]">{error}</p>}
     </div>
   )
 }
@@ -59,16 +59,17 @@ interface BtnProps {
   type?: 'button' | 'submit'
   disabled?: boolean
   className?: string
+  title?: string
 }
 
 const btnClass: Record<string, string> = {
   primary: 'border border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)] focus-visible:ring-[var(--accent)]',
-  secondary: 'border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text)] hover:border-[var(--accent)]/40 hover:bg-[var(--panel-muted)] focus-visible:ring-slate-400',
+  secondary: 'border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text)] hover:border-[var(--accent)]/40 hover:bg-[var(--panel-muted)] focus-visible:ring-[var(--border-strong)]',
   // accent: outline 风格，介于 primary（实心）与 secondary（中性灰）之间——
   // 用于同一组按钮中需要"次要但与主色关联"的入口（如节点页的一键接入）
   accent: 'border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white focus-visible:ring-[var(--accent)]',
   danger: 'border border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white focus-visible:ring-[var(--danger)]',
-  ghost: 'border border-transparent bg-transparent text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)] focus-visible:ring-slate-400',
+  ghost: 'border border-transparent bg-transparent text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)] focus-visible:ring-[var(--border-strong)]',
 }
 
 export function Btn({ variant = 'primary', loading, children, className, ...props }: BtnProps) {
@@ -107,5 +108,26 @@ export function FieldGroup({
       </div>
       <div className="space-y-4">{children}</div>
     </section>
+  )
+}
+
+// Switch 开关：原先 Users / Groups / Nodes / Profiles / Settings 各自复制一份，v0.5.0 收敛到这里
+export function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative h-6 w-11 rounded-full border transition ${
+        checked ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--border-strong)] bg-[var(--border-strong)]'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition ${
+          checked ? 'left-[22px]' : 'left-0.5'
+        }`}
+      />
+    </button>
   )
 }

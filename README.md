@@ -225,6 +225,8 @@ For Linux service deployments, the recommended SSH key location is `/etc/xray-pi
 
 Runtime settings such as scheduler intervals, SSH defaults, subscription formatting, and Xray log options are stored in the database-backed system settings table and managed from the web UI.
 
+Admin accounts live in the database since v0.5.0. The `admins` section only seeds the table on first start (the first entry becomes the super admin); afterwards manage accounts from **Settings → Admin accounts**.
+
 Environment variable override:
 
 ```bash

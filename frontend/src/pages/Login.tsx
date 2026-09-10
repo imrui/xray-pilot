@@ -3,15 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowRight, LockKeyhole, Moon, Sparkles, Sun } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { useThemeStore } from '@/store/theme'
-import request from '@/lib/axios'
-import type { ApiResponse } from '@/types'
+import { authApi } from '@/lib/api'
 import { GitHubMark } from '@/components/icons/GitHubMark'
 import { Logo } from '@/components/icons/Logo'
 import { APP_VERSION } from '@/lib/version'
 
 export default function Login() {
   const navigate = useNavigate()
-  const setToken = useAuthStore((s) => s.setToken)
+  const setSession = useAuthStore((s) => s.setSession)
   const { theme, toggleTheme } = useThemeStore()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -23,18 +22,17 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      const res = await request.post<ApiResponse<{ token: string }>>('/auth/login', {
-        username,
-        password,
-      })
-      if (res.data.code === 0 && res.data.data?.token) {
-        setToken(res.data.data.token)
+      const res = await authApi.login(username, password)
+      const data = res.data.data
+      if (res.data.code === 0 && data?.token) {
+        setSession(data.token, data.username, data.role)
         navigate('/')
       } else {
         setError(res.data.message || '登录失败')
       }
-    } catch {
-      setError('网络错误，请稍后重试')
+    } catch (e) {
+      // axios 拦截器已弹 toast；登录页额外内联提示后端返回的原因（用户名或密码错误 / 账号已禁用）
+      setError(e instanceof Error && e.message ? e.message : '网络错误，请稍后重试')
     } finally {
       setLoading(false)
     }
@@ -42,7 +40,7 @@ export default function Login() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--app-bg)] px-4 py-10">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(21,143,118,0.08),transparent_22%),radial-gradient(circle_at_bottom_right,rgba(24,33,47,0.07),transparent_28%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,var(--accent-glow),transparent_22%),radial-gradient(circle_at_bottom_right,rgba(24,33,47,0.07),transparent_28%)]" />
       <button
         onClick={toggleTheme}
         className="absolute right-6 top-6 z-20 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--panel)] text-soft transition hover:text-[var(--text)]"
@@ -139,7 +137,7 @@ export default function Login() {
                 required
               />
             </div>
-            {error && <p className="text-center text-[12px] font-medium text-red-500">{error}</p>}
+            {error && <p className="text-center text-[12px] font-medium text-[var(--danger)]">{error}</p>}
             <button
               type="submit"
               disabled={loading}

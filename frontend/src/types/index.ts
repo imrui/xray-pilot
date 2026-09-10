@@ -101,10 +101,28 @@ export interface SyncLog {
   id: number
   action: string
   target: string
+  actor: string // admin:<username> / system:scheduler:<task> / system:install-token:<id> / system:feishu-webhook；v0.5.0 之前的历史记录为空
   success: boolean
   message: string
   duration_ms: number
   created_at: string
+}
+
+export type AdminRole = 'super_admin' | 'admin'
+
+export interface Admin {
+  id: number
+  username: string
+  role: AdminRole
+  active: boolean
+  last_login_at?: string
+  created_at: string
+}
+
+export interface LoginResponse {
+  token: string
+  username: string
+  role: AdminRole
 }
 
 export interface ApiResponse<T = unknown> {

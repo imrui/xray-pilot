@@ -50,7 +50,8 @@ type SchedulerConfig struct {
 	HealthCheckInterval int `mapstructure:"health_check_interval"`
 }
 
-// AdminUser 管理员账号（存储在 config.yaml，不入库）
+// AdminUser 管理员账号种子（config.yaml）。
+// v0.5.0 起管理员入库（admin_users 表），此处仅在表为空时作首次种子；表非空后本段被忽略。
 type AdminUser struct {
 	Username     string `mapstructure:"username"`
 	Password     string `mapstructure:"password"`      // 明文密码（启动时自动 bcrypt hash）
@@ -131,9 +132,9 @@ func Load() error {
 `, key)
 	}
 
-	// 若未配置管理员，自动添加默认管理员（仅开发用）
+	// 若未配置管理员，自动添加默认管理员种子（首次启动入库后请在面板内修改密码）
 	if len(Global.Admins) == 0 {
-		fmt.Println("[xray-pilot] 警告：未配置 admins，将使用默认管理员 admin/admin，请在 config.yaml 中修改")
+		fmt.Println("[xray-pilot] 警告：未配置 admins，首次启动将种入默认管理员 admin/admin，请登录后立即修改密码")
 		Global.Admins = []AdminUser{{Username: "admin", Password: "admin"}}
 	}
 

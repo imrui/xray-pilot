@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Copy, FileCode, Filter, PencilLine, Plus, RefreshCw, Search, Sparkles, Terminal, Wifi } from 'lucide-react'
+import { AlertTriangle, Copy, FileCode, Filter, Lock, PencilLine, Plus, RefreshCw, Search, Sparkles, Terminal, Wifi } from 'lucide-react'
 import { OneClickInstallDialog } from '@/components/OneClickInstallDialog'
 import { nodeApi, profileApi } from '@/lib/api'
 import { generateShortIds } from '@/lib/keygen'
@@ -9,7 +9,8 @@ import { protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
 import type { InboundProfile, Node, NodeKey, SyncStatus } from '@/types'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Btn, FieldGroup, SelectField } from '@/components/ui/Form'
+import { Field, Btn, FieldGroup, SelectField, Switch } from '@/components/ui/Form'
+import { HintTip } from '@/components/ui/HintTip'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
@@ -69,25 +70,6 @@ const emptyForm = (): FormState => ({
   remark: '',
 })
 
-function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full border transition ${
-        checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-slate-200 dark:border-[var(--border)] dark:bg-white/10'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition ${
-          checked ? 'left-[22px]' : 'left-0.5'
-        }`}
-      />
-    </button>
-  )
-}
 
 export default function Nodes() {
   const confirm = useConfirm()
@@ -470,6 +452,7 @@ export default function Nodes() {
         </div>
 
         <div className="flex items-center gap-2">
+          <HintTip content="只有在「配置节点密钥」中保存过的协议才会参与该节点的配置生成；保存空对象 {} 表示继承协议默认参数。" />
           <Btn variant="secondary" loading={syncDrifted.isPending} onClick={() => syncDrifted.mutate()}>
             <RefreshCw className="h-4 w-4" />
             同步待处理节点
@@ -484,10 +467,6 @@ export default function Nodes() {
           </Btn>
         </div>
       </div>
-
-      <p className="text-xs text-soft">
-        协议绑定提示：只有在“配置节点密钥”中保存过的协议，才会参与该节点的配置生成；保存空对象 <code>{'{}'}</code> 表示继承协议默认参数。
-      </p>
 
       {selectedNodes.length > 0 && (
         <SurfaceCard className="p-3">
@@ -590,7 +569,7 @@ export default function Nodes() {
                 </tr>
               ) : (
                 filteredNodes.map((n) => (
-                  <tr key={n.id} className="transition hover:bg-white/5">
+                  <tr key={n.id} className="transition hover:bg-[var(--panel-muted)]">
                     <td className="px-4 py-3.5">
                       <input
                         type="checkbox"
@@ -609,7 +588,7 @@ export default function Nodes() {
                       <div className="text-xs text-soft">
                         {n.region || '--'}
                         {n.last_check_at && !n.last_check_ok && (
-                          <span className="ml-1.5 text-rose-500">· 健康检测异常</span>
+                          <span className="ml-1.5 text-[var(--danger)]">· 健康检测异常</span>
                         )}
                       </div>
                     </td>
@@ -646,7 +625,7 @@ export default function Nodes() {
                       <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-soft">
                         <span
                           className={`h-2 w-2 rounded-full ${
-                            n.xray_version ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-500'
+                            n.xray_version ? 'bg-[var(--success)]' : 'bg-[var(--border-strong)]'
                           }`}
                         />
                         <span>{n.xray_version ? `Xray ${n.xray_version}` : 'Xray —'}</span>
@@ -667,7 +646,7 @@ export default function Nodes() {
                             disabled={getConfiguredProfiles(n.id).length === 0}
                             className={`inline-flex h-9 items-center gap-1 rounded-md border px-3 text-xs font-medium transition ${
                               n.sync_status === 'failed'
-                                ? 'border-amber-500/40 bg-amber-500/12 text-amber-300 hover:bg-amber-500/18'
+                                ? 'border-[var(--warning-border)] bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning-soft)]'
                                 : 'border-[var(--border)] bg-[var(--panel-strong)] text-[var(--accent)] hover:bg-[var(--panel-muted)]'
                             } ${getConfiguredProfiles(n.id).length === 0 ? 'cursor-not-allowed opacity-45 hover:bg-inherit' : ''}`}
                           >
@@ -717,7 +696,7 @@ export default function Nodes() {
                           />
                         </div>
                         {n.sync_status === 'failed' && (
-                          <div className="inline-flex items-center gap-1 text-[11px] text-amber-300">
+                          <div className="inline-flex items-center gap-1 text-[11px] text-[var(--warning)]">
                             <AlertTriangle className="h-3.5 w-3.5" />
                             建议先测试 SSH
                           </div>
@@ -833,7 +812,7 @@ export default function Nodes() {
             </FieldGroup>
           )}
 
-          {err && <p className="text-sm text-rose-500">{err}</p>}
+          {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
         </div>
       </Drawer>
 
@@ -922,22 +901,22 @@ function PreviewConfigModal({ node, activeProfiles, onClose }: { node: Node; act
         </div>
         {isLoading && <p className="py-8 text-center text-sm text-soft">生成中…</p>}
         {error && (
-          <div className="rounded-2xl border border-rose-500/20 bg-rose-500/8 p-4">
-            <p className="text-sm font-medium text-rose-500">生成失败</p>
-            <p className="mt-1 text-xs text-rose-400">{(error as Error).message}</p>
+          <div className="rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-soft)] p-4">
+            <p className="text-sm font-medium text-[var(--danger)]">生成失败</p>
+            <p className="mt-1 text-xs text-[var(--danger)]">{(error as Error).message}</p>
           </div>
         )}
         {data && (
           <>
             {(data.warnings ?? []).length > 0 && (
-              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/8 p-4">
-                <p className="mb-2 text-xs font-medium text-amber-400">部分协议生成失败，不影响其他协议：</p>
+              <div className="rounded-2xl border border-[var(--warning-border)] bg-[var(--warning-soft)] p-4">
+                <p className="mb-2 text-xs font-medium text-[var(--warning)]">部分协议生成失败，不影响其他协议：</p>
                 {data.warnings.map((w, i) => (
-                  <p key={i} className="text-xs text-amber-300">{w}</p>
+                  <p key={i} className="text-xs text-[var(--warning)]">{w}</p>
                 ))}
               </div>
             )}
-            <pre className="max-h-[68vh] overflow-auto rounded-lg border border-[var(--border)] bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100 whitespace-pre">
+            <pre className="max-h-[68vh] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--code-bg)] p-4 font-mono text-xs leading-5 text-[var(--code-text)] whitespace-pre">
               {data.config}
             </pre>
           </>
@@ -1254,7 +1233,7 @@ function NodeProtocolsDrawer({
       <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
         {/* 左侧：协议清单 */}
         <div className="space-y-3">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-muted)] p-3 text-xs text-soft">
+          <div className="border-l-2 border-[var(--accent)] pl-3 text-xs text-soft">
             <div className="font-medium text-[var(--text)]">
               <span className="text-faint">#{node.id}</span>
               <span className="mx-2">{node.name}</span>
@@ -1317,7 +1296,7 @@ function NodeProtocolsDrawer({
                   <button type="button" onClick={() => activateProfile(p.id)} className="flex min-w-0 flex-1 flex-col gap-1 text-left">
                     <span className="flex items-center gap-1.5">
                       <Badge label={protocolLabel(p.protocol)} variant={protocolBadgeVariant(p.protocol)} />
-                      {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存" />}
+                      {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" title="未保存" />}
                     </span>
                     <span className="flex items-center gap-1.5 truncate text-xs text-soft">
                       <span className="truncate font-medium text-[var(--text)]">{p.name}</span>
@@ -1325,7 +1304,7 @@ function NodeProtocolsDrawer({
                       {k ? (
                         <>
                           <span>{k.port > 0 ? `端口 ${effPort}` : `默认 ${effPort}`}</span>
-                          {k.locked && <span className="text-amber-500">🔒</span>}
+                          {k.locked && <Lock className="h-3.5 w-3.5 text-[var(--warning)]" aria-label="已锁定" />}
                         </>
                       ) : (
                         <span className="text-faint">未绑</span>
@@ -1408,7 +1387,7 @@ function NodeProtocolsDrawer({
                     placeholder={`${activeProfile.port}`}
                     type="number"
                   />
-                  {portConflict && <p className="text-xs text-rose-500">端口冲突：{portConflict}（保存会被后端拒绝）</p>}
+                  {portConflict && <p className="text-xs text-[var(--danger)]">端口冲突：{portConflict}（保存会被后端拒绝）</p>}
                   <textarea
                     value={activeDraft.settings}
                     onChange={(e) => updateDraft(activeProfileId!, { settings: e.target.value })}
@@ -1417,7 +1396,7 @@ function NodeProtocolsDrawer({
                     className="min-h-[240px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
                     placeholder='{} 表示继承协议默认参数'
                   />
-                  {activeLocked && <p className="text-xs text-amber-500">当前节点协议已锁定，需先解锁才能修改、删除或重新生成。</p>}
+                  {activeLocked && <p className="text-xs text-[var(--warning)]">当前节点协议已锁定，需先解锁才能修改、删除或重新生成。</p>}
                 </FieldGroup>
               )}
 
@@ -1448,7 +1427,7 @@ function NodeProtocolsDrawer({
                 </FieldGroup>
               )}
 
-              {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>{msg}</p>}
+              {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>{msg}</p>}
             </>
           )}
         </div>
@@ -1461,15 +1440,15 @@ function NodeProtocolsDrawer({
 // 绿 = 最近一次检测通过；红 = 检测过但失败；灰 = 从未检测过
 function HealthDot({ node }: { node: Node }) {
   const meta = !node.last_check_at
-    ? { color: 'bg-slate-300 dark:bg-slate-500', label: '未检测', detail: '尚未进行健康检测，可点击「测试 SSH」主动触发' }
+    ? { color: 'bg-[var(--border-strong)]', label: '未检测', detail: '尚未进行健康检测，可点击「测试 SSH」主动触发' }
     : node.last_check_ok
       ? {
-          color: 'bg-emerald-500',
+          color: 'bg-[var(--success)]',
           label: '健康',
           detail: `延迟 ${node.last_latency_ms > 0 ? `${node.last_latency_ms}ms` : '—'} · 最后检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')}`,
         }
       : {
-          color: 'bg-rose-500',
+          color: 'bg-[var(--danger)]',
           label: '检测异常',
           detail: `最后检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')} 失败，建议测试 SSH 排查`,
         }

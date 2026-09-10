@@ -6,13 +6,21 @@ import type { SyncLog } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
 import { Btn } from '@/components/ui/Form'
-import { PageHeader, PageShell, SurfaceCard } from '@/components/ui/Page'
+import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 20
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const CLEANUP_PRESETS = [1, 3, 7, 30, 90, 180]
+// actor 前缀筛选：与后端 entity.SyncLog 的 actor 格式约定一致
+const ACTOR_FILTERS: Array<{ value: string; label: string }> = [
+  { value: '', label: '全部来源' },
+  { value: 'admin:', label: '管理员操作' },
+  { value: 'system:scheduler:', label: '后台调度' },
+  { value: 'system:install-token:', label: '节点接入' },
+  { value: 'system:feishu-webhook', label: '飞书回调' },
+]
 
 export default function Logs() {
   const confirm = useConfirm()
@@ -21,10 +29,11 @@ export default function Logs() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [cleanupMode, setCleanupMode] = useState<string>('7')
   const [cleanupDays, setCleanupDays] = useState('7')
+  const [actorFilter, setActorFilter] = useState('')
 
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['logs', page, pageSize],
-    queryFn: () => logApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
+    queryKey: ['logs', page, pageSize, actorFilter],
+    queryFn: () => logApi.list({ page, page_size: pageSize, actor: actorFilter || undefined }).then((r) => r.data.data!),
     refetchInterval: 10_000,
   })
 
@@ -69,9 +78,10 @@ export default function Logs() {
     {
       key: 'created_at',
       label: '时间',
-      render: (l: SyncLog) => <span className="font-mono text-xs tabular-nums text-soft">{new Date(l.created_at).toLocaleString('zh-CN')}</span>,
+      render: (l: SyncLog) => <span className="whitespace-nowrap font-mono text-xs tabular-nums text-soft">{new Date(l.created_at).toLocaleString('zh-CN')}</span>,
     },
     { key: 'action', label: '操作', render: (l: SyncLog) => <span className="font-mono text-xs">{l.action}</span> },
+    { key: 'actor', label: '来源', render: (l: SyncLog) => <ActorCell actor={l.actor} /> },
     { key: 'target', label: '目标', render: (l: SyncLog) => <span className="text-xs text-soft">{l.target}</span> },
     { key: 'success', label: '结果', render: (l: SyncLog) => <Badge label={l.success ? '成功' : classifyFailureReason(l.message)} variant={l.success ? 'green' : 'red'} /> },
     { key: 'duration_ms', label: '耗时', render: (l: SyncLog) => <span className="text-xs text-soft">{l.duration_ms ? `${l.duration_ms}ms` : '—'}</span> },
@@ -79,7 +89,7 @@ export default function Logs() {
       key: 'message',
       label: '消息',
       render: (l: SyncLog) => (
-        <div className="max-w-xl space-y-1 text-xs">
+        <div className="min-w-[24rem] max-w-xl space-y-1 text-xs">
           {!l.success && <span className="font-medium text-[var(--text)]">{classifyFailureReason(l.message)}</span>}
           <span className="block whitespace-normal break-all text-soft">{l.message || '—'}</span>
         </div>
@@ -89,15 +99,29 @@ export default function Logs() {
 
   return (
     <PageShell>
-      <PageHeader
-        title="操作日志"
-        description="集中查看同步、健康检测和系统动作。日志页保持偏冷静的信息密度，方便快速定位失败动作和耗时异常。"
-      />
-
+      <div className="flex flex-wrap items-center gap-2">
+        {ACTOR_FILTERS.map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            onClick={() => {
+              setActorFilter(f.value)
+              setPage(1)
+            }}
+            className={
+              actorFilter === f.value
+                ? 'inline-flex h-8 items-center rounded-md bg-[var(--accent-soft)] px-3 text-xs font-semibold text-[var(--accent)]'
+                : 'inline-flex h-8 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:text-[var(--text)]'
+            }
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <SurfaceCard className="p-4">
+        <div className="min-w-0 space-y-3">
           <Table columns={columns} data={data?.list ?? []} loading={isLoading} />
-          <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border)] pt-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="inline-flex items-center gap-2 text-sm text-soft">
               分页
               <select
@@ -117,18 +141,18 @@ export default function Logs() {
             </label>
             <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
           </div>
-        </SurfaceCard>
+        </div>
 
-        <SurfaceCard className="p-5 xl:sticky xl:top-6 xl:self-start">
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+        <SurfaceCard className="p-5 xl:sticky xl:top-0 xl:self-start">
+          <div className="space-y-4">
+            <div className="border-t border-[var(--border)] pt-4">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Activity className="h-4 w-4 text-[var(--accent)]" />
                 观察重点
               </div>
               <p className="mt-2 text-sm leading-6 text-soft">优先看失败记录、异常耗时，以及重复出现的节点或动作名，这些通常能最快暴露部署问题。</p>
             </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+            <div className="border-t border-[var(--border)] pt-4">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Clock3 className="h-4 w-4 text-[var(--accent)]" />
                 自动刷新
@@ -144,7 +168,7 @@ export default function Logs() {
                 </Btn>
               </div>
             </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+            <div className="border-t border-[var(--border)] pt-4">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Trash2 className="h-4 w-4 text-[var(--accent)]" />
                 清理日志
@@ -188,6 +212,39 @@ export default function Logs() {
       </div>
     </PageShell>
   )
+}
+
+// ActorCell 把 actor 字符串渲染为「类型徽章 + 主体」；空值为 v0.5.0 之前的历史记录
+function ActorCell({ actor }: { actor: string }) {
+  if (!actor) return <span className="text-xs text-faint">—</span>
+  if (actor.startsWith('admin:')) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs">
+        <Badge label="管理员" variant="blue" />
+        <span className="font-mono">{actor.slice('admin:'.length)}</span>
+      </span>
+    )
+  }
+  if (actor.startsWith('system:scheduler:')) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs">
+        <Badge label="调度" variant="gray" />
+        <span className="font-mono text-soft">{actor.slice('system:scheduler:'.length)}</span>
+      </span>
+    )
+  }
+  if (actor.startsWith('system:install-token:')) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs">
+        <Badge label="接入" variant="gray" />
+        <span className="font-mono text-soft">{actor.slice('system:install-token:'.length)}</span>
+      </span>
+    )
+  }
+  if (actor === 'system:feishu-webhook') {
+    return <Badge label="飞书" variant="gray" />
+  }
+  return <span className="font-mono text-xs text-soft">{actor}</span>
 }
 
 function classifyFailureReason(message: string) {

@@ -43,7 +43,7 @@ export function ChangelogDrawer({ open, onClose }: { open: boolean; onClose: () 
   return (
     <Drawer open={open} onClose={onClose} title="更新日志" description="版本发布记录，随当前运行版本内置。点击左侧版本号快速定位。" width="xl">
       {isLoading && <p className="py-10 text-center text-sm text-soft">加载中…</p>}
-      {error && <p className="py-10 text-center text-sm text-rose-500">{(error as Error).message}</p>}
+      {error && <p className="py-10 text-center text-sm text-[var(--danger)]">{(error as Error).message}</p>}
       {data && data.length === 0 && <p className="py-10 text-center text-sm text-soft">暂无更新日志</p>}
       {data && data.length > 0 && (
         <div className="grid gap-6 md:grid-cols-[150px_minmax(0,1fr)]">
@@ -65,7 +65,7 @@ export function ChangelogDrawer({ open, onClose }: { open: boolean; onClose: () 
                     )}
                   >
                     <span>{note.version}</span>
-                    {index === 0 && <span className="text-[10px] text-emerald-500">最新</span>}
+                    {index === 0 && <span className="text-[10px] text-[var(--success)]">最新</span>}
                   </button>
                 )
               })}

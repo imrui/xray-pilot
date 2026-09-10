@@ -30,7 +30,7 @@ function StatCard({
           {change && (
             <div
               className={`mt-3 text-sm ${
-                changeTone === 'positive' ? 'text-emerald-400' : changeTone === 'negative' ? 'text-rose-400' : 'text-soft'
+                changeTone === 'negative' ? 'text-[var(--danger)]' : 'text-soft'
               }`}
             >
               {change}
@@ -46,8 +46,8 @@ function StatCard({
 }
 
 function logIcon(log: SyncLog) {
-  if (log.success) return <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400"><Activity className="h-4 w-4" /></div>
-  return <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-500/10 text-rose-400"><AlertTriangle className="h-4 w-4" /></div>
+  if (log.success) return <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--success-soft)] text-[var(--success)]"><Activity className="h-4 w-4" /></div>
+  return <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--danger-soft)] text-[var(--danger)]"><AlertTriangle className="h-4 w-4" /></div>
 }
 
 function syncBadge(node: Node) {
@@ -69,14 +69,14 @@ function NodeHealthRow({ node }: { node: Node }) {
     <div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3">
-          <div className={`h-2.5 w-2.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+          <div className={`h-2.5 w-2.5 rounded-full ${ok ? 'bg-[var(--success)]' : 'bg-[var(--danger)]'}`} />
           <span className="text-sm font-medium">{node.name}</span>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-soft">
           <span>{node.online_user_count} 人</span>
           <span className="text-faint">|</span>
           <span className="inline-flex items-center gap-1.5">
-            <span className={`h-2 w-2 rounded-full ${node.xray_version ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-500'}`} />
+            <span className={`h-2 w-2 rounded-full ${node.xray_version ? 'bg-[var(--success)]' : 'bg-[var(--border-strong)]'}`} />
             <span>{node.xray_version ? `Xray ${node.xray_version}` : 'Xray —'}</span>
           </span>
         </div>
@@ -189,9 +189,9 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="grid gap-5 xl:min-h-[calc(100vh-24rem)] xl:grid-cols-[minmax(0,1fr)_520px]">
-        <SurfaceCard className="flex h-full min-h-[360px] flex-col overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+      <div className="grid gap-4 xl:min-h-[calc(100vh-24rem)] xl:grid-cols-3">
+        <SurfaceCard className="flex h-full min-h-[360px] flex-col overflow-hidden xl:col-span-2">
+          <div className="flex h-14 items-center justify-between border-b border-[var(--border)] px-5">
             <h3 className="text-lg font-semibold">最近操作</h3>
             <a href="/logs" className="text-sm text-[var(--accent)] transition hover:opacity-80">查看全部</a>
           </div>
@@ -219,7 +219,7 @@ export default function Dashboard() {
         </SurfaceCard>
 
         <SurfaceCard className="flex h-full min-h-[360px] flex-col overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+          <div className="flex h-14 items-center justify-between border-b border-[var(--border)] px-5">
             <h3 className="text-lg font-semibold">节点健康</h3>
             <Btn variant="ghost" onClick={() => void nodesQuery.refetch()}>
               <RefreshCcw className="h-4 w-4" />

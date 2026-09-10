@@ -37,6 +37,14 @@ func Unauthorized(c *gin.Context) {
 	})
 }
 
+// Forbidden 已登录但无权限
+func Forbidden(c *gin.Context, message string) {
+	c.JSON(http.StatusForbidden, dto.Response{
+		Code:    403,
+		Message: message,
+	})
+}
+
 // PageSuccess 返回分页成功响应
 func PageSuccess(c *gin.Context, total int64, list any) {
 	Success(c, dto.PageResult{

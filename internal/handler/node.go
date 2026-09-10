@@ -139,7 +139,7 @@ func (h *NodeHandler) Sync(c *gin.Context) {
 		response.BadRequest(c, "无效的节点ID")
 		return
 	}
-	result := h.syncSvc.SyncNode(uint(id))
+	result := h.syncSvc.SyncNode(uint(id), actorFrom(c))
 	if !result.Success {
 		response.Fail(c, 500, result.Error)
 		return
@@ -171,7 +171,7 @@ func (h *NodeHandler) PreviewConfig(c *gin.Context) {
 
 // SyncAll 全量同步所有激活节点
 func (h *NodeHandler) SyncAll(c *gin.Context) {
-	results := h.syncSvc.SyncAll()
+	results := h.syncSvc.SyncAll(actorFrom(c))
 	success, failed := 0, 0
 	for _, r := range results {
 		if r.Success {
@@ -190,7 +190,7 @@ func (h *NodeHandler) SyncAll(c *gin.Context) {
 
 // SyncDrifted 仅同步漂移/失败节点
 func (h *NodeHandler) SyncDrifted(c *gin.Context) {
-	results := h.syncSvc.SyncDrifted()
+	results := h.syncSvc.SyncDrifted(actorFrom(c))
 	success, failed := 0, 0
 	for _, r := range results {
 		if r.Success {

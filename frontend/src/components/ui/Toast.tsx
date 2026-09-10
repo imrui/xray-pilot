@@ -3,9 +3,9 @@ import { X } from 'lucide-react'
 type ToastVariant = 'success' | 'error' | 'warning'
 
 const toastClass: Record<ToastVariant, string> = {
-  success: 'border-emerald-500/35 bg-[var(--panel-strong)] text-[var(--text)]',
-  error: 'border-rose-500/35 bg-[var(--panel-strong)] text-[var(--text)]',
-  warning: 'border-amber-500/35 bg-[var(--panel-strong)] text-[var(--text)]',
+  success: 'border-[var(--success-border)] bg-[var(--panel-strong)] text-[var(--text)]',
+  error: 'border-[var(--danger-border)] bg-[var(--panel-strong)] text-[var(--text)]',
+  warning: 'border-[var(--warning-border)] bg-[var(--panel-strong)] text-[var(--text)]',
 }
 
 export function Toast({
