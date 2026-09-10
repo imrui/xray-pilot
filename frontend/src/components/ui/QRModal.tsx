@@ -23,7 +23,7 @@ export function QRModal({ open, onClose, url, title = '订阅二维码' }: QRMod
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] p-4 backdrop-blur-sm">
       <div className="panel-strong w-full max-w-sm rounded-[28px]">
         <div className="flex items-center justify-between border-b border-[var(--border)] p-6">
           <h3 className="text-lg font-semibold tracking-[-0.03em]">{title}</h3>
@@ -43,7 +43,7 @@ export function QRModal({ open, onClose, url, title = '订阅二维码' }: QRMod
               <input readOnly value={url} className="flex-1 rounded-2xl border bg-[var(--panel-muted)] px-3 py-3 text-xs text-soft" />
               <button
                 onClick={handleCopy}
-                className="shrink-0 flex items-center gap-1.5 rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-105"
+                className="shrink-0 flex items-center gap-1.5 rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-[var(--accent-contrast)] transition hover:brightness-105"
               >
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 {copied ? '已复制' : '复制'}

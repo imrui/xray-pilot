@@ -157,8 +157,11 @@ func (s *FeishuService) BuildHelpText() string {
 	return "支持的指令：订阅、链接、二维码、帮助。发送“订阅”可获取个人订阅信息，发送“二维码”可打开订阅页查看二维码。"
 }
 
+// actorFeishuWebhook 飞书事件回调触发的操作日志 actor
+const actorFeishuWebhook = "system:feishu-webhook"
+
 func (s *FeishuService) RecordWebhookDebug(openID, unionID, keyword string) {
-	s.logRepo.Record("feishu_webhook", "message", true, fmt.Sprintf("收到飞书消息，keyword=%s open_id=%s union_id=%s", keyword, maskID(openID), maskID(unionID)), 0)
+	s.logRepo.RecordWithActor("feishu_webhook", "message", actorFeishuWebhook, true, fmt.Sprintf("收到飞书消息，keyword=%s open_id=%s union_id=%s", keyword, maskID(openID), maskID(unionID)), 0)
 }
 
 func (s *FeishuService) BuildUnboundText() string {
@@ -328,7 +331,7 @@ func (s *FeishuService) sendSubscriptionContent(receiveID, receiveIDType string,
 			{
 				"tag": "div",
 				"text": map[string]string{
-					"tag": "lark_md",
+					"tag":     "lark_md",
 					"content": "**客户端订阅链接**\n导入 v2rayN、Clash 等客户端时，请复制下方链接；如需二维码或节点详情，请打开订阅页。",
 				},
 			},
@@ -431,7 +434,7 @@ func (s *FeishuService) lookupUserByEmail(email string) (*feishuEmailLookupResul
 	}, nil
 }
 
-func (s *FeishuService) BindUserByEmail(userID uint, email string) (*entity.User, error) {
+func (s *FeishuService) BindUserByEmail(userID uint, email string, actor string) (*entity.User, error) {
 	if !s.IsEnabled() {
 		return nil, fmt.Errorf("飞书集成当前未启用")
 	}
@@ -450,11 +453,11 @@ func (s *FeishuService) BindUserByEmail(userID uint, email string) (*entity.User
 		return nil, fmt.Errorf("请先填写飞书邮箱")
 	}
 
-	s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), true, "开始按邮箱绑定飞书："+maskEmail(email), 0)
+	s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, true, "开始按邮箱绑定飞书："+maskEmail(email), 0)
 
 	lookup, err := s.lookupUserByEmail(email)
 	if err != nil {
-		s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), false, err.Error(), 0)
+		s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, false, err.Error(), 0)
 		return nil, err
 	}
 
@@ -464,9 +467,9 @@ func (s *FeishuService) BindUserByEmail(userID uint, email string) (*entity.User
 	user.FeishuEnabled = true
 	user.FeishuEmail = normalizedEmail
 	if lookup.OpenID != "" {
-		profile, err := s.GetUserProfile(lookup.OpenID)
+		profile, err := s.GetUserProfile(lookup.OpenID, actor)
 		if err != nil {
-			s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), false, err.Error(), 0)
+			s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, false, err.Error(), 0)
 			return nil, err
 		}
 		user.FeishuOpenID = strings.TrimSpace(profile.OpenID)
@@ -478,19 +481,19 @@ func (s *FeishuService) BindUserByEmail(userID uint, email string) (*entity.User
 		user.FeishuBoundAt = nil
 	}
 	if err := s.userRepo.Update(user); err != nil {
-		s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), false, err.Error(), 0)
+		s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, false, err.Error(), 0)
 		return nil, err
 	}
 
 	if user.FeishuOpenID != "" {
-		s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), true, fmt.Sprintf("飞书绑定成功，email=%s open_id=%s", maskEmail(user.FeishuEmail), maskID(user.FeishuOpenID)), 0)
+		s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, true, fmt.Sprintf("飞书绑定成功，email=%s open_id=%s", maskEmail(user.FeishuEmail), maskID(user.FeishuOpenID)), 0)
 	} else {
-		s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), true, fmt.Sprintf("飞书邮箱校验成功，等待用户首次私聊完成身份绑定，email=%s", maskEmail(user.FeishuEmail)), 0)
+		s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, true, fmt.Sprintf("飞书邮箱校验成功，等待用户首次私聊完成身份绑定，email=%s", maskEmail(user.FeishuEmail)), 0)
 	}
 	return user, nil
 }
 
-func (s *FeishuService) UnbindUser(userID uint) (*entity.User, error) {
+func (s *FeishuService) UnbindUser(userID uint, actor string) (*entity.User, error) {
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("用户不存在")
@@ -504,11 +507,11 @@ func (s *FeishuService) UnbindUser(userID uint) (*entity.User, error) {
 		return nil, err
 	}
 
-	s.logRepo.Record("feishu_unbind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), true, "清除飞书绑定信息", 0)
+	s.logRepo.RecordWithActor("feishu_unbind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, true, "清除飞书绑定信息", 0)
 	return user, nil
 }
 
-func (s *FeishuService) PushSubscriptionToUserID(userID uint) (*dto.FeishuPushResponse, error) {
+func (s *FeishuService) PushSubscriptionToUserID(userID uint, actor string) (*dto.FeishuPushResponse, error) {
 	if !s.IsEnabled() {
 		return nil, fmt.Errorf("飞书集成当前未启用")
 	}
@@ -533,16 +536,16 @@ func (s *FeishuService) PushSubscriptionToUserID(userID uint) (*dto.FeishuPushRe
 	if err := s.sendSubscriptionContent(receiveID, receiveType, user); err != nil {
 		result.Failed = 1
 		result.Errors = []string{fmt.Sprintf("用户 %s 推送失败：%v", user.Username, err)}
-		s.logRepo.Record("feishu_push", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), false, err.Error(), 0)
+		s.logRepo.RecordWithActor("feishu_push", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, false, err.Error(), 0)
 		return result, nil
 	}
 
 	result.Sent = 1
-	s.logRepo.Record("feishu_push", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), true, "飞书订阅推送成功", 0)
+	s.logRepo.RecordWithActor("feishu_push", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, true, "飞书订阅推送成功", 0)
 	return result, nil
 }
 
-func (s *FeishuService) PushSubscriptionToUsers(userIDs []uint) (*dto.FeishuPushResponse, error) {
+func (s *FeishuService) PushSubscriptionToUsers(userIDs []uint, actor string) (*dto.FeishuPushResponse, error) {
 	if !s.IsEnabled() {
 		return nil, fmt.Errorf("飞书集成当前未启用")
 	}
@@ -568,16 +571,17 @@ func (s *FeishuService) PushSubscriptionToUsers(userIDs []uint) (*dto.FeishuPush
 		if err := s.sendSubscriptionContent(receiveID, receiveType, user); err != nil {
 			result.Failed++
 			result.Errors = append(result.Errors, fmt.Sprintf("用户 %s 推送失败：%v", user.Username, err))
-			s.logRepo.Record("feishu_push", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), false, err.Error(), 0)
+			s.logRepo.RecordWithActor("feishu_push", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, false, err.Error(), 0)
 			continue
 		}
 		result.Sent++
-		s.logRepo.Record("feishu_push", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), true, "飞书订阅推送成功", 0)
+		s.logRepo.RecordWithActor("feishu_push", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, true, "飞书订阅推送成功", 0)
 	}
 	return result, nil
 }
 
-func (s *FeishuService) GetUserProfile(openID string) (*FeishuUserProfile, error) {
+// GetUserProfile 拉取飞书用户资料；actor 为触发方（管理员绑定 / 飞书 webhook）
+func (s *FeishuService) GetUserProfile(openID string, actor string) (*FeishuUserProfile, error) {
 	token, err := s.getTenantAccessToken()
 	if err != nil {
 		return nil, err
@@ -596,7 +600,7 @@ func (s *FeishuService) GetUserProfile(openID string) (*FeishuUserProfile, error
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		s.logRepo.Record("feishu_profile_fetch", "contact_api", false, "调用飞书用户资料接口失败："+err.Error(), 0)
+		s.logRepo.RecordWithActor("feishu_profile_fetch", "contact_api", actor, false, "调用飞书用户资料接口失败："+err.Error(), 0)
 		return nil, fmt.Errorf("获取飞书用户资料失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -609,14 +613,14 @@ func (s *FeishuService) GetUserProfile(openID string) (*FeishuUserProfile, error
 		} `json:"data"`
 	}
 	if decodeErr := json.NewDecoder(resp.Body).Decode(&payload); decodeErr != nil {
-		s.logRepo.Record("feishu_profile_fetch", "contact_api", false, "解析飞书用户资料失败："+decodeErr.Error(), 0)
+		s.logRepo.RecordWithActor("feishu_profile_fetch", "contact_api", actor, false, "解析飞书用户资料失败："+decodeErr.Error(), 0)
 		return nil, fmt.Errorf("解析飞书用户资料失败: %w", decodeErr)
 	}
 	if resp.StatusCode >= 300 || payload.Code != 0 {
-		s.logRepo.Record("feishu_profile_fetch", "contact_api", false, "飞书用户资料接口返回错误："+payload.Msg, 0)
+		s.logRepo.RecordWithActor("feishu_profile_fetch", "contact_api", actor, false, "飞书用户资料接口返回错误："+payload.Msg, 0)
 		return nil, fmt.Errorf("获取飞书用户资料失败: %s", payload.Msg)
 	}
-	s.logRepo.Record("feishu_profile_fetch", "contact_api", true, fmt.Sprintf("成功获取飞书用户资料，open_id=%s email=%s enterprise_email=%s", maskID(openID), maskEmail(payload.Data.User.Email), maskEmail(payload.Data.User.EnterpriseEmail)), 0)
+	s.logRepo.RecordWithActor("feishu_profile_fetch", "contact_api", actor, true, fmt.Sprintf("成功获取飞书用户资料，open_id=%s email=%s enterprise_email=%s", maskID(openID), maskEmail(payload.Data.User.Email), maskEmail(payload.Data.User.EnterpriseEmail)), 0)
 	return &payload.Data.User, nil
 }
 
@@ -626,9 +630,9 @@ func (s *FeishuService) ResolveAuthorizedUser(openID, unionID string) (*entity.U
 		return user, nil
 	}
 
-	profile, profileErr := s.GetUserProfile(openID)
+	profile, profileErr := s.GetUserProfile(openID, actorFeishuWebhook)
 	if profileErr != nil {
-		s.logRepo.Record("feishu_bind", "webhook", false, "获取飞书资料失败："+profileErr.Error(), 0)
+		s.logRepo.RecordWithActor("feishu_bind", "webhook", actorFeishuWebhook, false, "获取飞书资料失败："+profileErr.Error(), 0)
 		return nil, profileErr
 	}
 
@@ -637,18 +641,18 @@ func (s *FeishuService) ResolveAuthorizedUser(openID, unionID string) (*entity.U
 		email = normalizeEmail(profile.EnterpriseEmail)
 	}
 	if email == "" {
-		s.logRepo.Record("feishu_bind", "webhook", false, fmt.Sprintf("飞书资料未返回邮箱，open_id=%s", maskID(openID)), 0)
+		s.logRepo.RecordWithActor("feishu_bind", "webhook", actorFeishuWebhook, false, fmt.Sprintf("飞书资料未返回邮箱，open_id=%s", maskID(openID)), 0)
 		return nil, fmt.Errorf("飞书资料中未返回邮箱")
 	}
-	s.logRepo.Record("feishu_bind", "webhook", true, fmt.Sprintf("首次私聊识别到飞书邮箱，email=%s open_id=%s", maskEmail(email), maskID(openID)), 0)
+	s.logRepo.RecordWithActor("feishu_bind", "webhook", actorFeishuWebhook, true, fmt.Sprintf("首次私聊识别到飞书邮箱，email=%s open_id=%s", maskEmail(email), maskID(openID)), 0)
 
 	user, err = s.userRepo.FindByFeishuEmail(email)
 	if err != nil {
-		s.logRepo.Record("feishu_bind", "webhook", false, fmt.Sprintf("按飞书邮箱匹配后台用户失败，email=%s err=%v", maskEmail(email), err), 0)
+		s.logRepo.RecordWithActor("feishu_bind", "webhook", actorFeishuWebhook, false, fmt.Sprintf("按飞书邮箱匹配后台用户失败，email=%s err=%v", maskEmail(email), err), 0)
 		return nil, err
 	}
 	if !user.FeishuEnabled {
-		s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), false, fmt.Sprintf("飞书邮箱已匹配但用户未启用飞书消息，email=%s", maskEmail(email)), 0)
+		s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actorFeishuWebhook, false, fmt.Sprintf("飞书邮箱已匹配但用户未启用飞书消息，email=%s", maskEmail(email)), 0)
 		return user, nil
 	}
 
@@ -672,10 +676,10 @@ func (s *FeishuService) ResolveAuthorizedUser(openID, unionID string) (*entity.U
 	}
 	if changed {
 		if err := s.userRepo.Update(user); err != nil {
-			s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), false, "首次私聊补全飞书身份失败："+err.Error(), 0)
+			s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actorFeishuWebhook, false, "首次私聊补全飞书身份失败："+err.Error(), 0)
 			return nil, err
 		}
-		s.logRepo.Record("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), true, fmt.Sprintf("首次私聊已补全飞书身份，email=%s open_id=%s", maskEmail(email), maskID(user.FeishuOpenID)), 0)
+		s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actorFeishuWebhook, true, fmt.Sprintf("首次私聊已补全飞书身份，email=%s open_id=%s", maskEmail(email), maskID(user.FeishuOpenID)), 0)
 	}
 	return user, nil
 }

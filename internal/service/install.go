@@ -312,7 +312,7 @@ func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP strin
 	if t.ReplaceNodeID != nil && reach {
 		nodeID := node.ID
 		go func() {
-			r := NewSyncService().SyncNode(nodeID)
+			r := NewSyncService().SyncNode(nodeID, fmt.Sprintf("system:install-token:%s", tokenShortID(t.Token)))
 			if r != nil && !r.Success {
 				zap.L().Warn("更换服务器后自动同步失败，请手动同步",
 					zap.Uint("nodeID", nodeID),

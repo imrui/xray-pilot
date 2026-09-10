@@ -1,49 +1,64 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
 
+/* 字体在 main.tsx 里从 @fontsource 自托管引入（随 dist 一起 go:embed），不依赖 Google Fonts。
+   Inter / IBM Plex Mono 不含 CJK 字形，中文按平台回退：macOS 苹方、Windows 微软雅黑、Linux 思源黑体。 */
 @theme {
-  --font-sans: "Inter", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, "PingFang SC", "Microsoft YaHei", monospace;
 }
 
 :root {
   color-scheme: light;
-  --app-bg: #f3f4f6;
+  /* 亮色：冷灰底 + 白卡片 + 蓝色主色（参考 InvoFlow 风格） */
+  --app-bg: #f1f3f7;
   --app-bg-soft: #ffffff;
-  --sidebar: #ffffff;
-  --sidebar-hover: #f5f6f8;
+  --sidebar: #eceef2;
+  --sidebar-hover: #dfe3ea;
+  --header: #f1f3f7;
   --panel: #ffffff;
   --panel-strong: #ffffff;
-  --panel-muted: #f6f7f9;
-  --border: #e5e7eb;
-  --border-strong: #d1d5db;
-  --text: #111827;
-  --text-soft: #4b5563;
-  --text-faint: #9aa1ad;
-  --accent: #16a34a;
-  --accent-strong: #15803d;
-  --accent-soft: rgba(22, 163, 74, 0.1);
-  --accent-ring: rgba(22, 163, 74, 0.16);
-  --accent-contrast: #f0fdf4;
+  --panel-muted: #f6f8fb;
+  --border: #e4e7ee;
+  --border-strong: #d0d5df;
+  --text: #1f2937;
+  --text-soft: #64748b;
+  --text-faint: #7c8797;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.1);
+  --accent-ring: rgba(37, 99, 235, 0.18);
+  --accent-contrast: #ffffff;
+  --accent-glow: rgba(37, 99, 235, 0.1);
+  /* 侧栏激活项：亮色用主色实心 + 白字 */
+  --nav-active-bg: #2563eb;
+  --nav-active-text: #ffffff;
   --danger: #dc2626;
   --danger-soft: rgba(220, 38, 38, 0.1);
-  --danger-border: rgba(220, 38, 38, 0.14);
-  --warning: #d97706;
-  --success: #16a34a;
-  --shadow-panel: 0 2px 6px rgba(17, 24, 39, 0.03);
-  --shadow-card: 0 1px 3px rgba(17, 24, 39, 0.04);
-  --badge-green-bg: #d1fae5;
-  --badge-green-text: #065f46;
-  --badge-green-border: #6ee7b7;
+  --danger-border: rgba(220, 38, 38, 0.24);
+  /* warning / success 在亮色下也会直接作文字色（胶囊、提示行），取 700 档保证 4.5:1 以上 */
+  --warning: #b45309;
+  --warning-soft: rgba(217, 119, 6, 0.12);
+  --warning-border: rgba(217, 119, 6, 0.35);
+  --success: #15803d;
+  --success-soft: rgba(22, 163, 74, 0.1);
+  --success-border: rgba(22, 163, 74, 0.3);
+  --overlay: rgba(15, 23, 42, 0.45);
+  --code-bg: #0f1115;
+  --code-text: #e5e7eb;
+  --shadow-panel: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --badge-green-bg: #dcfce7;
+  --badge-green-text: #166534;
+  --badge-green-border: #86efac;
   --badge-yellow-bg: #fef3c7;
   --badge-yellow-text: #92400e;
   --badge-yellow-border: #fcd34d;
   --badge-red-bg: #fee2e2;
   --badge-red-text: #991b1b;
   --badge-red-border: #fca5a5;
-  --badge-gray-bg: #e5e7eb;
-  --badge-gray-text: #374151;
-  --badge-gray-border: #cbd5e1;
+  --badge-gray-bg: #eef0f4;
+  --badge-gray-text: #475467;
+  --badge-gray-border: #d0d5dd;
   --badge-blue-bg: #dbeafe;
   --badge-blue-text: #1e40af;
   --badge-blue-border: #93c5fd;
@@ -51,45 +66,58 @@
 
 .dark {
   color-scheme: dark;
-  --app-bg: #030303;
-  --app-bg-soft: #060606;
-  --sidebar: #050505;
-  --sidebar-hover: #0d0d0d;
-  --panel: #080808;
-  --panel-strong: #0a0a0a;
-  --panel-muted: #101010;
-  --border: #1b1b1b;
-  --border-strong: #252525;
-  --text: #f5f5f5;
-  --text-soft: #a3a3a3;
-  --text-faint: #737373;
-  --accent: #22c55e;
-  --accent-strong: #16a34a;
-  --accent-soft: rgba(34, 197, 94, 0.14);
-  --accent-ring: rgba(34, 197, 94, 0.26);
-  --accent-contrast: #052e16;
-  --danger: #ef4444;
-  --danger-soft: rgba(239, 68, 68, 0.14);
-  --danger-border: rgba(239, 68, 68, 0.25);
-  --warning: #eab308;
-  --success: #22c55e;
-  --shadow-panel: 0 20px 44px rgba(0, 0, 0, 0.52);
-  --shadow-card: 0 10px 24px rgba(0, 0, 0, 0.35);
+  /* 暗色：中性锌灰（r≈g≈b，不带蓝味）；侧栏 + 顶栏同色最深，内容区浅一档，卡片再浅一档，几乎不用阴影（参考 AIGW 风格） */
+  --app-bg: #131315;
+  --app-bg-soft: #161618;
+  --sidebar: #0f0f11;
+  --sidebar-hover: #1a1a1d;
+  --header: #0f0f11;
+  --panel: #18181b;
+  --panel-strong: #1c1c20;
+  --panel-muted: #222226;
+  --border: #27272a;
+  --border-strong: #36363b;
+  --text: #f4f4f5;
+  --text-soft: #a1a1aa;
+  --text-faint: #7d7d86;
+  --accent: #3b82f6;
+  --accent-strong: #2563eb;
+  --accent-soft: rgba(59, 130, 246, 0.16);
+  --accent-ring: rgba(59, 130, 246, 0.28);
+  --accent-contrast: #ffffff;
+  --accent-glow: rgba(59, 130, 246, 0.14);
+  /* 侧栏激活项：暗色用中性浅灰药丸 + 白字，彩色只留给按钮与状态 */
+  --nav-active-bg: #232326;
+  --nav-active-text: #f4f4f5;
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --danger-border: rgba(248, 113, 113, 0.3);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.14);
+  --warning-border: rgba(251, 191, 36, 0.3);
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.14);
+  --success-border: rgba(74, 222, 128, 0.3);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --code-bg: #0c0c0e;
+  --code-text: #e4e4e7;
+  --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.02);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
   --badge-green-bg: rgba(74, 222, 128, 0.12);
   --badge-green-text: #bbf7d0;
   --badge-green-border: rgba(74, 222, 128, 0.32);
-  --badge-yellow-bg: rgba(250, 204, 21, 0.12);
+  --badge-yellow-bg: rgba(251, 191, 36, 0.12);
   --badge-yellow-text: #fde68a;
-  --badge-yellow-border: rgba(250, 204, 21, 0.32);
-  --badge-red-bg: rgba(251, 113, 133, 0.12);
-  --badge-red-text: #fecdd3;
-  --badge-red-border: rgba(251, 113, 133, 0.32);
-  --badge-gray-bg: rgba(148, 163, 184, 0.12);
-  --badge-gray-text: #e2e8f0;
-  --badge-gray-border: rgba(148, 163, 184, 0.3);
-  --badge-blue-bg: rgba(56, 189, 248, 0.12);
-  --badge-blue-text: #bae6fd;
-  --badge-blue-border: rgba(56, 189, 248, 0.32);
+  --badge-yellow-border: rgba(251, 191, 36, 0.32);
+  --badge-red-bg: rgba(248, 113, 113, 0.12);
+  --badge-red-text: #fecaca;
+  --badge-red-border: rgba(248, 113, 113, 0.32);
+  --badge-gray-bg: rgba(161, 161, 170, 0.12);
+  --badge-gray-text: #e4e4e7;
+  --badge-gray-border: rgba(161, 161, 170, 0.3);
+  --badge-blue-bg: rgba(59, 130, 246, 0.14);
+  --badge-blue-text: #bfdbfe;
+  --badge-blue-border: rgba(59, 130, 246, 0.34);
 }
 
 @layer base {
@@ -119,7 +147,7 @@
   }
 
   ::selection {
-    background: var(--accent-soft);
+    background: var(--accent-ring);
   }
 }
 
@@ -128,14 +156,12 @@
     background: var(--panel);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-panel);
-    backdrop-filter: blur(12px);
   }
 
   .panel-strong {
     background: var(--panel-strong);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-card);
-    backdrop-filter: blur(14px);
   }
 
   .panel-muted {

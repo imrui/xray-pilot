@@ -122,6 +122,7 @@ func autoMigrate(db *gorm.DB) error {
 		&entity.TrafficSample{},
 		&entity.UserTrafficTotal{},
 		&entity.NodeInstallToken{},
+		&entity.AdminUser{},
 	)
 }
 

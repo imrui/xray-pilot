@@ -51,7 +51,7 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-slate-950/32 backdrop-blur-sm" onClick={() => void requestClose()} />
+      <div className="absolute inset-0 bg-[var(--overlay)] backdrop-blur-sm" onClick={() => void requestClose()} />
       <div className={cn('relative flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col border-l border-[var(--border)] bg-[var(--panel-strong)] shadow-[var(--shadow-panel)]', widths[width])}>
         <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
           <div>

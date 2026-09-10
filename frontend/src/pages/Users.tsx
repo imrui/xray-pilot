@@ -6,7 +6,7 @@ import { userApi, groupApi } from '@/lib/api'
 import { formatBytes } from '@/lib/utils'
 import type { FeishuPushResult, User } from '@/types'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Btn, FieldGroup } from '@/components/ui/Form'
+import { Field, Btn, FieldGroup, Switch } from '@/components/ui/Form'
 import { QRModal } from '@/components/ui/QRModal'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
@@ -66,21 +66,21 @@ function getFeishuEmailMeta(user: User) {
     emailClassName: email
       ? bound
         ? 'text-[var(--text)]'
-        : 'text-orange-600 dark:text-orange-400'
+        : 'text-[var(--warning)]'
       : 'text-soft',
     tooltipContent: email
       ? bound
         ? (
             <span className="block space-y-1 whitespace-nowrap">
               <span className="block">
-                <span className="font-medium text-emerald-600 dark:text-emerald-400">已绑定</span>
+                <span className="font-medium text-[var(--success)]">已绑定</span>
                 <span className="text-[var(--text)]">，点击可发送飞书订阅</span>
               </span>
               <span className="block">Open ID: {user.feishu_open_id ? 'ok' : '—'}</span>
               <span className="block">Union ID: {user.feishu_union_id ? 'ok' : '—'}</span>
             </span>
           )
-        : <span className="block whitespace-nowrap font-medium text-orange-600 dark:text-orange-400">待绑定</span>
+        : <span className="block whitespace-nowrap font-medium text-[var(--warning)]">待绑定</span>
       : null,
   }
 }
@@ -288,7 +288,7 @@ function GroupMultiSelect({
                     className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm text-[var(--text)] outline-none transition hover:bg-[var(--panel-muted)] data-[highlighted]:bg-[var(--panel-muted)]"
                   >
                     <span>{option.label}</span>
-                    <span className={`h-4 w-4 rounded border ${checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-transparent'}`} />
+                    <span className={`h-4 w-4 rounded border ${checked ? 'border-[var(--success)] bg-[var(--success)]' : 'border-[var(--border-strong)] bg-transparent'}`} />
                   </DropdownMenu.CheckboxItem>
                 )
               })
@@ -342,7 +342,7 @@ function ExpiryDateTimeField({
             type="button"
             className={`flex h-10 w-full items-center justify-between rounded-md border bg-[var(--panel-strong)] px-3 text-left text-sm transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)] ${
               currentExpired
-                ? 'border-rose-300 text-rose-500 focus:border-rose-400'
+                ? 'border-[var(--danger)] text-[var(--danger)] focus:border-[var(--danger)]'
                 : 'border-[var(--border)] text-[var(--text)] focus:border-[var(--accent)]'
             }`}
           >
@@ -426,7 +426,7 @@ function ExpiryDateTimeField({
                 </label>
               </div>
 
-              <div className={`text-xs ${draftExpired ? 'text-rose-500' : 'text-soft'}`}>
+              <div className={`text-xs ${draftExpired ? 'text-[var(--danger)]' : 'text-soft'}`}>
                 {draftValue
                   ? draftExpired
                     ? '该时间早于当前时间，保存后用户会被视为已过期。'
@@ -470,25 +470,6 @@ function ExpiryDateTimeField({
   )
 }
 
-function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full border transition ${
-        checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-slate-200 dark:border-[var(--border)] dark:bg-white/10'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition ${
-          checked ? 'left-[22px]' : 'left-0.5'
-        }`}
-      />
-    </button>
-  )
-}
 
 export default function Users() {
   const confirm = useConfirm()
@@ -881,7 +862,7 @@ export default function Users() {
                 </tr>
               ) : (
                 filteredUsers.map((u) => (
-                  <tr key={u.id} className="transition hover:bg-white/5">
+                  <tr key={u.id} className="transition hover:bg-[var(--panel-muted)]">
                     <td className="px-4 py-3.5">
                       <input
                         type="checkbox"
@@ -905,7 +886,7 @@ export default function Users() {
                     </td>
                     <td className="px-4 py-3.5">
                       {u.expires_at ? (
-                        <span className={isExpired(u) ? 'text-rose-400' : 'text-soft'}>
+                        <span className={isExpired(u) ? 'text-[var(--danger)]' : 'text-soft'}>
                           {formatDateTimeLocalDisplay(toDateTimeLocalValue(u.expires_at))}
                         </span>
                       ) : (
@@ -1233,7 +1214,7 @@ export default function Users() {
                   href={drawer.user!.subscribe_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--panel-strong)] px-4 text-sm font-medium text-[var(--text)] transition-all hover:border-[var(--accent)]/40 hover:bg-[var(--panel-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--panel-strong)] px-4 text-sm font-medium text-[var(--text)] transition-all hover:border-[var(--accent)]/40 hover:bg-[var(--panel-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-strong)]"
                 >
                   <ExternalLink className="h-4 w-4" />
                   打开订阅页
@@ -1267,7 +1248,7 @@ export default function Users() {
             </FieldGroup>
           )}
 
-          {err && <p className="text-sm text-rose-500">{err}</p>}
+          {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
         </div>
       </Drawer>
 

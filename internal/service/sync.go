@@ -43,8 +43,11 @@ type SyncResult struct {
 	Warnings     []string // inbound 生成警告（某个协议失败但整体继续）
 }
 
-// SyncNode 同步单个节点：生成多协议配置 → 推送 → 重载 xray → 更新状态
-func (s *SyncService) SyncNode(nodeID uint) *SyncResult {
+// actorSchedulerDriftCheck 漂移检测只由调度器触发
+const actorSchedulerDriftCheck = "system:scheduler:drift_check"
+
+// SyncNode 同步单个节点：生成多协议配置 → 推送 → 重载 xray → 更新状态。actor 为触发方（见 entity.SyncLog）
+func (s *SyncService) SyncNode(nodeID uint, actor string) *SyncResult {
 	node, err := s.nodeRepo.FindByID(nodeID)
 	if err != nil {
 		return &SyncResult{NodeID: nodeID, Error: "节点不存在"}
@@ -55,7 +58,7 @@ func (s *SyncService) SyncNode(nodeID uint) *SyncResult {
 	configContent, warnings, err := s.buildConfig(node)
 	if err != nil {
 		result.Error = fmt.Sprintf("生成配置失败: %v", err)
-		s.failNode(node, result.Error, 0)
+		s.failNode(node, actor, result.Error, 0)
 		return result
 	}
 	result.Warnings = warnings
@@ -68,7 +71,7 @@ func (s *SyncService) SyncNode(nodeID uint) *SyncResult {
 
 	if !syncResult.Success {
 		result.Error = syncResult.Error
-		s.failNode(node, result.Error, syncResult.ElapsedMs)
+		s.failNode(node, actor, result.Error, syncResult.ElapsedMs)
 		return result
 	}
 
@@ -83,14 +86,14 @@ func (s *SyncService) SyncNode(nodeID uint) *SyncResult {
 		_ = s.nodeRepo.UpdateXrayStatus(nodeID, true, syncResult.XrayVersion)
 	}
 
-	s.logRepo.Record("sync", fmt.Sprintf("node:%s(%d)", node.Name, nodeID), true, "同步成功", syncResult.ElapsedMs)
+	s.logRepo.RecordWithActor("sync", fmt.Sprintf("node:%s(%d)", node.Name, nodeID), actor, true, "同步成功", syncResult.ElapsedMs)
 
 	result.Success = true
 	return result
 }
 
 // SyncAll 同步所有激活节点
-func (s *SyncService) SyncAll() []SyncResult {
+func (s *SyncService) SyncAll(actor string) []SyncResult {
 	nodes, err := s.nodeRepo.FindAll()
 	if err != nil {
 		return nil
@@ -98,13 +101,13 @@ func (s *SyncService) SyncAll() []SyncResult {
 	results := make([]SyncResult, 0, len(nodes))
 	for _, node := range nodes {
 		node := node
-		results = append(results, *s.SyncNode(node.ID))
+		results = append(results, *s.SyncNode(node.ID, actor))
 	}
 	return results
 }
 
 // SyncDrifted 同步状态为 drifted、failed 或 pending 的节点
-func (s *SyncService) SyncDrifted() []SyncResult {
+func (s *SyncService) SyncDrifted(actor string) []SyncResult {
 	nodes, err := s.nodeRepo.GetDriftedNodes()
 	if err != nil {
 		return nil
@@ -112,7 +115,7 @@ func (s *SyncService) SyncDrifted() []SyncResult {
 	results := make([]SyncResult, 0, len(nodes))
 	for _, node := range nodes {
 		node := node
-		results = append(results, *s.SyncNode(node.ID))
+		results = append(results, *s.SyncNode(node.ID, actor))
 	}
 	return results
 }
@@ -139,9 +142,10 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 	if expectedHash != node.ConfigHash {
 		_ = s.nodeRepo.UpdateSyncStatus(nodeID, entity.SyncStatusDrifted, "")
 		if node.SyncStatus != entity.SyncStatusDrifted {
-			s.logRepo.Record(
+			s.logRepo.RecordWithActor(
 				"drift_check",
 				fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
+				actorSchedulerDriftCheck,
 				false,
 				fmt.Sprintf("配置源已变化，节点需重新同步: last=%s expected=%s", shortHash(node.ConfigHash), expectedHash[:8]),
 				0,
@@ -153,9 +157,10 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 	params := s.sshParams(node)
 	remoteContent, err := xray.ReadRemoteConfig(params)
 	if err != nil {
-		s.logRepo.Record(
+		s.logRepo.RecordWithActor(
 			"drift_check",
 			fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
+			actorSchedulerDriftCheck,
 			false,
 			fmt.Sprintf("远端配置读取异常: %v", err),
 			0,
@@ -164,9 +169,10 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 	}
 	remoteContent = strings.TrimSpace(remoteContent)
 	if remoteContent == "" {
-		s.logRepo.Record(
+		s.logRepo.RecordWithActor(
 			"drift_check",
 			fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
+			actorSchedulerDriftCheck,
 			false,
 			"远端配置读取异常: 内容为空",
 			0,
@@ -185,9 +191,10 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 	if expectedHash != remoteHash {
 		_ = s.nodeRepo.UpdateSyncStatus(nodeID, entity.SyncStatusDrifted, "")
 		if node.SyncStatus != entity.SyncStatusDrifted {
-			s.logRepo.Record(
+			s.logRepo.RecordWithActor(
 				"drift_check",
 				fmt.Sprintf("node:%s(%d)", node.Name, nodeID),
+				actorSchedulerDriftCheck,
 				false,
 				fmt.Sprintf("远端配置漂移: expected=%s remote=%s", expectedHash[:8], remoteHash[:8]),
 				0,
@@ -321,16 +328,17 @@ func maskXrayConfig(configJSON string) string {
 	return result
 }
 
-func (s *SyncService) failNode(node *entity.Node, errMsg string, elapsedMs int64) {
+func (s *SyncService) failNode(node *entity.Node, actor string, errMsg string, elapsedMs int64) {
 	_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusFailed, "")
 	zap.L().Error("节点同步失败",
 		zap.String("node", node.Name),
 		zap.Uint("id", node.ID),
 		zap.String("error", errMsg),
 	)
-	s.logRepo.Record(
+	s.logRepo.RecordWithActor(
 		"sync",
 		fmt.Sprintf("node:%s(%d)", node.Name, node.ID),
+		actor,
 		false,
 		errMsg,
 		elapsedMs,

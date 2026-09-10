@@ -33,7 +33,7 @@ func NewLogHandler() *LogHandler {
 func (h *LogHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	logs, total, err := h.logRepo.List(page, pageSize)
+	logs, total, err := h.logRepo.List(page, pageSize, strings.TrimSpace(c.Query("actor")))
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return
@@ -60,7 +60,7 @@ func (h *LogHandler) Cleanup(c *gin.Context) {
 		response.Fail(c, 500, err.Error())
 		return
 	}
-	h.logRepo.Record("cleanup_logs", "logs", true, "清理 "+strconv.Itoa(req.Days)+" 天前日志", 0)
+	h.logRepo.RecordWithActor("cleanup_logs", "logs", actorFrom(c), true, "清理 "+strconv.Itoa(req.Days)+" 天前日志", 0)
 	response.Success(c, gin.H{
 		"deleted": deleted,
 		"before":  cutoff.Format(time.RFC3339),
@@ -154,9 +154,9 @@ func (h *SubscribeHandler) Subscribe(c *gin.Context) {
 // handleSubscription 返回代理客户端格式的订阅内容
 func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format string) {
 	var (
-		expire  int64
-		up      int64
-		down    int64
+		expire int64
+		up     int64
+		down   int64
 	)
 	if u, err := h.svc.GetUser(token); err == nil {
 		if u.ExpiresAt != nil {

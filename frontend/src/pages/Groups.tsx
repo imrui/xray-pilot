@@ -5,8 +5,8 @@ import { groupApi, nodeApi } from '@/lib/api'
 import type { Group } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
-import { Field, Btn, FieldGroup } from '@/components/ui/Form'
-import { PageHeader, PageShell, SurfaceCard } from '@/components/ui/Page'
+import { Field, Btn, FieldGroup, Switch } from '@/components/ui/Form'
+import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
@@ -43,25 +43,6 @@ function GroupNodesTooltip({ names }: { names: string[] }) {
   )
 }
 
-function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full border transition ${
-        checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-slate-200 dark:border-[var(--border)] dark:bg-white/10'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition ${
-          checked ? 'left-[22px]' : 'left-0.5'
-        }`}
-      />
-    </button>
-  )
-}
 
 export default function Groups() {
   const confirm = useConfirm()
@@ -268,18 +249,13 @@ export default function Groups() {
 
   return (
     <PageShell>
-      <PageHeader
-        title="分组管理"
-        description="把分组视为节点池和分发策略容器，而不是单纯的命名项。编辑时在右侧直接维护关联节点。"
+      <ListToolbar
         actions={
           <Btn onClick={openCreate}>
             <Plus className="h-4 w-4" />
             新增分组
           </Btn>
         }
-      />
-
-      <ListToolbar
         searchValue={search}
         searchPlaceholder="搜索分组名或描述"
         onSearchChange={setSearch}
@@ -290,7 +266,6 @@ export default function Groups() {
             <FilterChip active={statusFilter === 'inactive'} onClick={() => setStatusFilter('inactive')}>禁用</FilterChip>
           </>
         }
-        meta={`当前页匹配 ${filteredGroups.length} / ${(data?.list ?? []).length} 条`}
         bulkBar={
           selectedGroups.length > 0 ? (
             <BulkBar>
@@ -323,9 +298,9 @@ export default function Groups() {
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <SurfaceCard className="p-4">
+        <div className="min-w-0 space-y-3">
           <Table columns={columns} data={filteredGroups} loading={isLoading} />
-          <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border)] pt-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="inline-flex items-center gap-2 text-sm text-soft">
               分页
               <select
@@ -345,7 +320,7 @@ export default function Groups() {
             </label>
             <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
           </div>
-        </SurfaceCard>
+        </div>
 
         <SurfaceCard className="p-5">
           <div className="mb-4">
@@ -355,12 +330,12 @@ export default function Groups() {
             </p>
           </div>
           <div className="space-y-3">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+            <div className="border-t border-[var(--border)] pt-4">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Node Pool</div>
               <div className="mt-2 text-sm font-semibold">节点按职责归类</div>
               <p className="mt-2 text-xs leading-5 text-soft">比如海外中转、高可用入口、实验线路，不需要把这些语义散落在节点备注里。</p>
             </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+            <div className="border-t border-[var(--border)] pt-4">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Distribution</div>
               <div className="mt-2 text-sm font-semibold">为订阅分发做准备</div>
               <p className="mt-2 text-xs leading-5 text-soft">后续用户绑定分组后，订阅生成会更自然，排障时也更容易回溯。</p>
@@ -408,7 +383,7 @@ export default function Groups() {
                           : 'border-[var(--border)] bg-[var(--panel-strong)] hover:bg-[var(--panel-muted)]'
                       }`}
                     >
-                      <div className={`h-2.5 w-2.5 rounded-full ${checked ? 'bg-[var(--accent)]' : 'bg-slate-400/60'}`} />
+                      <div className={`h-2.5 w-2.5 rounded-full ${checked ? 'bg-[var(--accent)]' : 'bg-[var(--border-strong)]'}`} />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium">{n.name}</span>
@@ -426,7 +401,7 @@ export default function Groups() {
             )}
           </FieldGroup>
 
-          {err && <p className="text-sm text-rose-500">{err}</p>}
+          {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
         </div>
       </Drawer>
     </PageShell>

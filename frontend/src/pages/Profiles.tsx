@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, PencilLine, Plus, Sparkles } from 'lucide-react'
+import { KeyRound, Lock, PencilLine, Plus, Sparkles } from 'lucide-react'
 import { nodeApi, profileApi } from '@/lib/api'
 import { generateShortIds } from '@/lib/keygen'
 import { PROTOCOL_OPTIONS, protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
 import type { InboundProfile, NodeKey, Protocol } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
-import { Field, SelectField, Btn, FieldGroup } from '@/components/ui/Form'
-import { PageHeader, PageShell, SurfaceCard } from '@/components/ui/Page'
+import { Field, SelectField, Btn, FieldGroup, Switch } from '@/components/ui/Form'
+import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
@@ -71,25 +71,6 @@ const emptyForm = (): FormState => ({
   remark: '',
 })
 
-function Switch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full border transition ${
-        checked ? 'border-emerald-500 bg-emerald-500' : 'border-[var(--border-strong)] bg-slate-200 dark:border-[var(--border)] dark:bg-white/10'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white shadow transition ${
-          checked ? 'left-[22px]' : 'left-0.5'
-        }`}
-      />
-    </button>
-  )
-}
 
 function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose: () => void }) {
   const [activeNodeId, setActiveNodeId] = useState<number | null>(null)
@@ -342,7 +323,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                   <button type="button" onClick={() => setActiveNodeId(n.id)} className="flex min-w-0 flex-1 flex-col text-left">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate font-medium">{n.name}</span>
-                      {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存" />}
+                      {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" title="未保存" />}
                     </span>
                     <span className="flex min-w-0 items-center gap-1 text-xs text-soft">
                       <span className="min-w-0 flex-1 truncate">{n.ip}</span>
@@ -350,7 +331,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                         <span className="flex shrink-0 items-center gap-1">
                           <span className="text-faint">·</span>
                           <span>{k.port > 0 ? `端口 ${k.port}` : `默认`}</span>
-                          {k.locked && <span className="text-amber-500">🔒</span>}
+                          {k.locked && <Lock className="h-3.5 w-3.5 text-[var(--warning)]" aria-label="已锁定" />}
                         </span>
                       )}
                     </span>
@@ -418,7 +399,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                     className="min-h-[240px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
                     placeholder='{"private_key": "...", "public_key": "...", "short_ids": ["..."]}'
                   />
-                  {activeLocked && <p className="text-xs text-amber-500">当前节点协议已锁定，需先解锁才能修改、删除或重新生成。</p>}
+                  {activeLocked && <p className="text-xs text-[var(--warning)]">当前节点协议已锁定，需先解锁才能修改、删除或重新生成。</p>}
                 </FieldGroup>
               )}
 
@@ -453,7 +434,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                 </FieldGroup>
               )}
 
-              {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>{msg}</p>}
+              {msg && <p className={`text-sm ${msgType === 'ok' ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>{msg}</p>}
             </>
           )}
         </div>
@@ -668,7 +649,7 @@ export default function Profiles() {
           </button>
           <button
             onClick={() => setKeyDrawer(p)}
-            className="inline-flex h-9 items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-semibold text-[var(--accent)] transition hover:bg-[var(--panel-muted)]"
+            className="inline-flex h-9 items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-semibold text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
           >
             <KeyRound className="h-3.5 w-3.5" />
             密钥 / 锁定
@@ -698,18 +679,13 @@ export default function Profiles() {
 
   return (
     <PageShell>
-      <PageHeader
-        title="协议配置"
-        description="将协议定义、节点密钥和 JSON 参数拆开处理，让高频维护动作保持清晰。"
+      <ListToolbar
         actions={
           <Btn onClick={openCreate}>
             <Plus className="h-4 w-4" />
             新增协议
           </Btn>
         }
-      />
-
-      <ListToolbar
         searchValue={search}
         searchPlaceholder="搜索协议名或协议类型"
         onSearchChange={setSearch}
@@ -723,7 +699,6 @@ export default function Profiles() {
             ))}
           </>
         }
-        meta={`当前页匹配 ${filteredProfiles.length} / ${(data?.list ?? []).length} 条`}
         bulkBar={
           selectedProfiles.length > 0 ? (
             <BulkBar>
@@ -756,9 +731,9 @@ export default function Profiles() {
       />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <SurfaceCard className="p-4">
+        <div className="min-w-0 space-y-3">
           <Table columns={columns} data={filteredProfiles} loading={isLoading} />
-          <div className="mt-4 flex flex-col gap-3 border-t border-[var(--border)] pt-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="inline-flex items-center gap-2 text-sm text-soft">
               分页
               <select
@@ -778,7 +753,7 @@ export default function Profiles() {
             </label>
             <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
           </div>
-        </SurfaceCard>
+        </div>
 
         <SurfaceCard className="p-5">
           <div className="mb-4">
@@ -788,12 +763,12 @@ export default function Profiles() {
             </p>
           </div>
           <div className="space-y-3">
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+            <div className="border-t border-[var(--border)] pt-4">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Template</div>
               <div className="mt-2 text-sm font-semibold">协议模板管理</div>
               <p className="mt-2 text-xs leading-5 text-soft">统一维护端口、SNI、传输参数等共性配置，减少节点端重复输入。</p>
             </div>
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
+            <div className="border-t border-[var(--border)] pt-4">
               <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Node Keys</div>
               <div className="mt-2 text-sm font-semibold">节点密钥独立配置</div>
               <p className="mt-2 text-xs leading-5 text-soft">将节点专属密钥放进单独抽屉管理，避免把敏感值混进大表单里。</p>
@@ -849,7 +824,7 @@ export default function Profiles() {
             <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="记录用途、适配节点或特殊说明" />
           </FieldGroup>
 
-          {err && <p className="text-sm text-rose-500">{err}</p>}
+          {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
         </div>
       </Drawer>
 

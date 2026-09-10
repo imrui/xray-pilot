@@ -187,7 +187,7 @@ func (h *FeishuHandler) PushUser(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.PushSubscriptionToUserID(uint(id))
+	result, err := h.svc.PushSubscriptionToUserID(uint(id), actorFrom(c))
 	if err != nil {
 		response.Fail(c, 400, err.Error())
 		return
@@ -210,7 +210,7 @@ func (h *FeishuHandler) BindUser(c *gin.Context) {
 		return
 	}
 
-	user, err := h.svc.BindUserByEmail(uint(id), req.Email)
+	user, err := h.svc.BindUserByEmail(uint(id), req.Email, actorFrom(c))
 	if err != nil {
 		response.Fail(c, 400, err.Error())
 		return
@@ -239,7 +239,7 @@ func (h *FeishuHandler) UnbindUser(c *gin.Context) {
 		return
 	}
 
-	user, err := h.svc.UnbindUser(uint(id))
+	user, err := h.svc.UnbindUser(uint(id), actorFrom(c))
 	if err != nil {
 		response.Fail(c, 400, err.Error())
 		return
@@ -265,7 +265,7 @@ func (h *FeishuHandler) PushUsers(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.PushSubscriptionToUsers(req.UserIDs)
+	result, err := h.svc.PushSubscriptionToUsers(req.UserIDs, actorFrom(c))
 	if err != nil {
 		response.Fail(c, 400, err.Error())
 		return

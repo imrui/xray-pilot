@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"time"
 
 	"github.com/imrui/xray-pilot/internal/entity"
@@ -16,21 +17,6 @@ func (r *LogRepository) Create(log *entity.SyncLog) error {
 	return DB.Create(log).Error
 }
 
-// Record 快捷写入一条操作日志（不带 actor）
-//
-// Deprecated: 新代码请用 RecordWithActor 显式声明 actor。
-// 该方法保留供 v0.4.0 之前的 27 处老调用点继续工作；
-// v0.5.0 多管理员落地时统一迁移完毕后再删除。
-func (r *LogRepository) Record(action, target string, success bool, msg string, durationMs int64) {
-	_ = r.Create(&entity.SyncLog{
-		Action:     action,
-		Target:     target,
-		Success:    success,
-		Message:    msg,
-		DurationMs: durationMs,
-	})
-}
-
 // RecordWithActor 写入一条带 actor 的操作日志。
 // actor 字符串格式约定见 entity.SyncLog godoc。
 func (r *LogRepository) RecordWithActor(action, target, actor string, success bool, msg string, durationMs int64) {
@@ -44,15 +30,27 @@ func (r *LogRepository) RecordWithActor(action, target, actor string, success bo
 	})
 }
 
-func (r *LogRepository) List(page, pageSize int) ([]entity.SyncLog, int64, error) {
+// List 分页查询；actor 非空时按前缀过滤（如 "admin:" 只看人工操作、"system:scheduler:" 只看调度器）
+func (r *LogRepository) List(page, pageSize int, actor string) ([]entity.SyncLog, int64, error) {
+	query := DB.Model(&entity.SyncLog{})
+	if actor != "" {
+		query = query.Where("actor LIKE ? ESCAPE '\\'", escapeLike(actor)+"%")
+	}
 	var total int64
-	if err := DB.Model(&entity.SyncLog{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var logs []entity.SyncLog
 	offset := (page - 1) * pageSize
-	err := DB.Model(&entity.SyncLog{}).Order("id desc").Offset(offset).Limit(pageSize).Find(&logs).Error
+	err := query.Order("id desc").Offset(offset).Limit(pageSize).Find(&logs).Error
 	return logs, total, err
+}
+
+// escapeLike 转义 LIKE 通配符，让用户输入按字面匹配
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	return strings.ReplaceAll(s, "_", "\\_")
 }
 
 func (r *LogRepository) CleanupBefore(cutoff time.Time) (int64, error) {

@@ -22,6 +22,7 @@ func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
 	backupH := NewBackupHandler()
 	installH := NewInstallHandler()
 	releaseNotesH := NewReleaseNotesHandler(releaseNotesFS)
+	adminH := NewAdminHandler()
 
 	// 订阅（无需鉴权）
 	r.GET("/sub/:token", subH.Subscribe)
@@ -115,5 +116,19 @@ func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
 		// 运行时配置（KV，可读写）
 		api.GET("/system/settings", systemH.GetSettings)
 		api.PUT("/system/settings", systemH.UpdateSettings)
+
+		// 当前管理员
+		api.GET("/me", adminH.Me)
+		api.PUT("/me/password", adminH.ChangeMyPassword)
+
+		// 管理员账号管理（仅 super_admin）
+		admins := api.Group("/admins", RequireSuperAdmin())
+		{
+			admins.GET("", adminH.List)
+			admins.POST("", adminH.Create)
+			admins.PUT("/:id", adminH.Update)
+			admins.DELETE("/:id", adminH.Delete)
+			admins.PUT("/:id/password", adminH.SetPassword)
+		}
 	}
 }

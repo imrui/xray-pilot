@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   History,
+  KeyRound,
   LayoutDashboard,
   Layers,
   LogOut,
@@ -28,13 +29,31 @@ import { GitHubMark } from '@/components/icons/GitHubMark'
 import { Logo } from '@/components/icons/Logo'
 import { APP_VERSION } from '@/lib/version'
 import { systemApi } from '@/lib/api'
-import { SyncReminderBanner } from '@/components/SyncReminderBanner'
+import { SyncStatusPill } from '@/components/SyncStatusPill'
 import { ChangelogDrawer } from '@/components/ChangelogDrawer'
+import { ChangePasswordModal } from '@/components/ChangePasswordModal'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { useSettingsDraft } from '@/store/settingsDraft'
+import { SETTINGS_SECTIONS } from '@/pages/settings/context'
+
+// 二级菜单项：目前只有系统设置有子项，来源与设置页路由保持单一（SETTINGS_SECTIONS）
+interface NavChild {
+  path: string
+  label: string
+  subtitle: string
+  superAdminOnly?: boolean
+}
+const settingsChildren: NavChild[] = SETTINGS_SECTIONS.map((s) => ({
+  path: `/settings/${s.key}`,
+  label: s.label,
+  subtitle: s.hint,
+  superAdminOnly: 'superAdminOnly' in s && s.superAdminOnly,
+}))
 
 const navGroups = [
   {
     title: '概览',
-    items: [{ path: '/dashboard', label: '仪表总览', subtitle: '系统概览与快捷操作', icon: LayoutDashboard }],
+    items: [{ path: '/dashboard', label: '仪表盘', subtitle: '系统概览与快捷操作', icon: LayoutDashboard }],
   },
   {
     title: '用户订阅',
@@ -52,7 +71,7 @@ const navGroups = [
     title: '运维工具',
     items: [
       { path: '/logs', label: '操作日志', subtitle: '查看系统行为与同步记录', icon: ScrollText },
-      { path: '/settings', label: '系统设置', subtitle: '配置系统参数与诊断项', icon: Settings },
+      { path: '/settings', label: '系统设置', subtitle: '配置系统参数与诊断项', icon: Settings, children: settingsChildren },
     ],
   },
 ]
@@ -63,10 +82,16 @@ export default function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
+  const username = useAuthStore((s) => s.username)
+  const role = useAuthStore((s) => s.role)
+  const settingsDirty = useSettingsDraft((s) => s.dirty)
+  const discardSettings = useSettingsDraft((s) => s.discard)
+  const confirm = useConfirm()
   const { theme, toggleTheme } = useThemeStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [changelogOpen, setChangelogOpen] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
   const { data: syncSummary } = useQuery({
     queryKey: ['sync-summary'],
     queryFn: () => systemApi.getSyncSummary().then((r) => r.data.data!),
@@ -75,25 +100,48 @@ export default function Layout() {
     retry: 1,
   })
 
+  const pendingSync = syncSummary?.needs_sync ? syncSummary.total_affected : 0
+
   const handleLogout = () => {
     logout()
     navigate('/login')
   }
 
+  // 设置页二级菜单切换：有未保存改动时先确认（草稿跨分组共享，放弃即整体回滚）
+  const goChild = async (path: string) => {
+    if (location.pathname === path) return
+    if (settingsDirty) {
+      const ok = await confirm({
+        title: '放弃未保存的修改？',
+        description: '当前分组有尚未保存的配置改动，离开后将恢复为已保存的值。',
+        confirmText: '放弃修改',
+        cancelText: '留在本页',
+        tone: 'danger',
+      })
+      if (!ok) return
+      discardSettings()
+    }
+    navigate(path)
+    setMobileMenuOpen(false)
+  }
+  const visibleChildren = (children?: NavChild[]) =>
+    (children ?? []).filter((c) => !c.superAdminOnly || role === 'super_admin')
+
   const currentView = useMemo(
     () => allNavItems.find((item) => location.pathname.startsWith(item.path))?.label ?? '控制台',
     [location.pathname]
   )
-  const currentSubTitle = useMemo(
-    () => allNavItems.find((item) => location.pathname.startsWith(item.path))?.subtitle ?? '可视化管理与系统配置',
-    [location.pathname]
-  )
+  const currentSubTitle = useMemo(() => {
+    const child = settingsChildren.find((c) => location.pathname.startsWith(c.path))
+    if (child) return child.subtitle
+    return allNavItems.find((item) => location.pathname.startsWith(item.path))?.subtitle ?? '可视化管理与系统配置'
+  }, [location.pathname])
 
   const sidebarWidth = collapsed ? 'w-[74px]' : 'w-[240px]'
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text)] lg:h-screen lg:overflow-hidden">
-      <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[color:var(--panel-strong)]/96 px-4 py-3 backdrop-blur-xl lg:hidden">
+      <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[color:var(--header)]/96 px-4 py-3 backdrop-blur-xl lg:hidden">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center text-[var(--accent)]">
             <Logo size={32} className="text-[var(--accent)]" />
@@ -105,6 +153,7 @@ export default function Layout() {
             </div>
           )}
           <div className="ml-auto flex items-center gap-2">
+            {syncSummary && <SyncStatusPill summary={syncSummary} compact />}
             <button
               onClick={toggleTheme}
               className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--panel)] text-soft transition hover:text-[var(--text)]"
@@ -124,7 +173,7 @@ export default function Layout() {
 
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-slate-950/42 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
+          <div className="absolute inset-0 bg-[var(--overlay)] backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
           <div className="absolute inset-x-3 bottom-3 top-20 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] p-4 shadow-[var(--shadow-panel)]">
             <div className="mb-4 flex items-center justify-between border-b border-[var(--border)] pb-4">
               <div>
@@ -138,7 +187,9 @@ export default function Layout() {
                   <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-faint">{group.title}</div>
                   <nav className="space-y-1">
                     {group.items.map((item) => {
-                      const active = location.pathname.startsWith(item.path)
+                      const inSection = location.pathname.startsWith(item.path)
+                      const expanded = Boolean(item.children) && inSection
+                      const active = inSection && !expanded
                       return (
                         <Link
                           key={item.path}
@@ -147,18 +198,43 @@ export default function Layout() {
                           className={cn(
                             'flex items-center justify-between rounded-md px-3 py-2.5 text-sm font-medium transition-all',
                             active
-                              ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                              : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
+                              ? 'bg-[var(--nav-active-bg)] text-[var(--nav-active-text)]'
+                              : expanded
+                                ? 'text-[var(--text)]'
+                                : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
                           )}
                         >
                           <span className="flex items-center gap-3">
                             <item.icon className="h-4 w-4" />
                             {item.label}
+                            {item.path === '/nodes' && pendingSync > 0 && (
+                              <span className="rounded-full bg-[var(--warning-soft)] px-1.5 text-[11px] font-semibold leading-5 text-[var(--warning)]">{pendingSync}</span>
+                            )}
                           </span>
                           <ChevronRight className="h-4 w-4 opacity-50" />
                         </Link>
                       )
                     })}
+                    {group.items.map((item) =>
+                      item.children && location.pathname.startsWith(item.path)
+                        ? visibleChildren(item.children).map((c) => {
+                            const childActive = location.pathname.startsWith(c.path)
+                            return (
+                              <button
+                                key={c.path}
+                                type="button"
+                                onClick={() => void goChild(c.path)}
+                                className={cn(
+                                  'flex w-full items-center rounded-md py-2 pl-10 pr-3 text-left text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]',
+                                  childActive ? 'text-[var(--accent)]' : 'text-soft hover:text-[var(--text)]'
+                                )}
+                              >
+                                {c.label}
+                              </button>
+                            )
+                          })
+                        : null
+                    )}
                   </nav>
                 </div>
               ))}
@@ -191,7 +267,10 @@ export default function Layout() {
                 )}
                 <nav className="space-y-1">
                   {group.items.map((item) => {
-                    const active = location.pathname.startsWith(item.path)
+                    const inSection = location.pathname.startsWith(item.path)
+                    // 折叠态没有子项可显示，父项自己承担选中高亮
+                    const expanded = Boolean(item.children) && inSection && !collapsed
+                    const active = inSection && !expanded
                     return (
                       <Link
                         key={item.path}
@@ -200,16 +279,53 @@ export default function Layout() {
                           'group flex items-center rounded-md px-3 py-2.5 text-sm transition-all',
                           collapsed ? 'justify-center' : 'gap-3',
                           active
-                            ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                            : 'text-soft hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]'
+                            ? 'bg-[var(--nav-active-bg)] text-[var(--nav-active-text)]'
+                            : expanded
+                              ? 'text-[var(--text)] hover:bg-[var(--sidebar-hover)]'
+                              : 'text-soft hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]'
                         )}
                       >
-                        <item.icon className={cn('h-4 w-4 transition-transform group-hover:scale-105', active && 'scale-105')} />
+                        <span className="relative">
+                          <item.icon className={cn('h-4 w-4 transition-transform group-hover:scale-105', active && 'scale-105')} />
+                          {collapsed && item.path === '/nodes' && pendingSync > 0 && (
+                            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-[var(--warning)]" />
+                          )}
+                        </span>
                         {!collapsed && <span className="flex-1 font-medium">{item.label}</span>}
-                        {!collapsed && <ChevronRight className={cn('h-4 w-4 transition', active ? 'opacity-100' : 'opacity-0 group-hover:opacity-40')} />}
+                        {!collapsed && item.path === '/nodes' && pendingSync > 0 && (
+                          <span className="rounded-full bg-[var(--warning-soft)] px-1.5 text-[11px] font-semibold leading-5 text-[var(--warning)]">{pendingSync}</span>
+                        )}
+                        {!collapsed && (
+                          <ChevronRight className={cn('h-4 w-4 transition', expanded && 'rotate-90', active || expanded ? 'opacity-100' : 'opacity-0 group-hover:opacity-40')} />
+                        )}
                       </Link>
                     )
                   })}
+                  {!collapsed &&
+                    group.items.map((item) =>
+                      item.children && location.pathname.startsWith(item.path) ? (
+                        <div key={`${item.path}-children`} className="ml-5 space-y-0.5 border-l border-[var(--border)] pl-2">
+                          {visibleChildren(item.children).map((c) => {
+                            const childActive = location.pathname.startsWith(c.path)
+                            return (
+                              <button
+                                key={c.path}
+                                type="button"
+                                onClick={() => void goChild(c.path)}
+                                className={cn(
+                                  'flex w-full items-center rounded-md px-3 py-2 text-left text-[13px] outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]',
+                                  childActive
+                                    ? 'bg-[var(--nav-active-bg)] font-medium text-[var(--nav-active-text)]'
+                                    : 'text-soft hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]'
+                                )}
+                              >
+                                {c.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : null
+                    )}
                 </nav>
               </div>
             ))}
@@ -241,12 +357,13 @@ export default function Layout() {
 
         <main className="min-w-0 flex-1 lg:h-full">
           <div className="flex min-h-screen flex-col lg:h-full lg:min-h-0">
-            <header className="hidden h-16 items-center justify-between border-b border-[var(--border)] bg-[color:var(--panel-strong)]/92 px-6 backdrop-blur-xl lg:flex">
+            <header className="hidden h-16 items-center justify-between border-b border-[var(--border)] bg-[var(--header)] px-6 lg:flex">
               <div className="flex flex-col justify-center leading-tight">
                 <div className="text-base font-semibold tracking-[-0.03em]">{currentView}</div>
                 <div className="mt-0.5 text-xs text-faint">{currentSubTitle}</div>
               </div>
               <div className="flex h-full items-center gap-2.5">
+                {syncSummary && <SyncStatusPill summary={syncSummary} />}
                 <label className="relative hidden lg:block">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
                   <input
@@ -294,8 +411,19 @@ export default function Layout() {
                       sideOffset={8}
                       className="z-50 min-w-[160px] rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-1.5 shadow-[var(--shadow-card)]"
                     >
-                      <DropdownMenu.Item className="cursor-default rounded-md px-2.5 py-2 text-sm text-soft outline-none">
-                        个人中心
+                      <div className="px-2.5 py-2">
+                        <div className="text-sm font-semibold">{username ?? '管理员'}</div>
+                        <div className="mt-0.5 text-[11px] uppercase tracking-[0.12em] text-faint">
+                          {role === 'super_admin' ? '超级管理员' : '管理员'}
+                        </div>
+                      </div>
+                      <DropdownMenu.Separator className="my-1 h-px bg-[var(--border)]" />
+                      <DropdownMenu.Item
+                        onSelect={() => setPasswordOpen(true)}
+                        className="flex cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-2 text-sm text-soft outline-none transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                      >
+                        <KeyRound className="h-4 w-4" />
+                        修改密码
                       </DropdownMenu.Item>
                       <DropdownMenu.Item
                         onSelect={() => setChangelogOpen(true)}
@@ -320,7 +448,6 @@ export default function Layout() {
 
             <div className="flex-1 px-4 py-4 md:px-6 md:py-5 lg:min-h-0 lg:overflow-y-auto">
               <div className="min-h-full">
-                {syncSummary && <SyncReminderBanner summary={syncSummary} />}
                 <Outlet />
               </div>
             </div>
@@ -329,6 +456,7 @@ export default function Layout() {
       </div>
 
       <ChangelogDrawer open={changelogOpen} onClose={() => setChangelogOpen(false)} />
+      <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </div>
   )
 }

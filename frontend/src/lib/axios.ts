@@ -33,7 +33,10 @@ request.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
+      // 与 store/auth.logout 同步清理（token / 用户名 / 角色）
       localStorage.removeItem('token')
+      localStorage.removeItem('admin_username')
+      localStorage.removeItem('admin_role')
       window.location.href = '/login'
       return Promise.reject(error)
     }

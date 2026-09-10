@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeftRight, Copy, PencilLine, Sparkles, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Copy, PencilLine, Sparkles, Terminal } from 'lucide-react'
 import { installApi, nodeApi, type InstallToken } from '@/lib/api'
 import type { Node } from '@/types'
 import { copyText } from '@/lib/clipboard'
@@ -288,13 +288,13 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
           <Field label="当前 IP" value={replaceNode.ip} disabled readOnly />
           <Field label="新 IP *" value={newIP} onChange={(e) => setNewIP(e.target.value)} placeholder="如：34.21.157.200" />
           {replaceNode.domain && (
-            <p className="text-xs text-amber-500">
-              ⚠️ 该节点配置了域名 <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono">{replaceNode.domain}</code>，
+            <p className="text-xs text-[var(--warning)]">
+              <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />该节点配置了域名 <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono">{replaceNode.domain}</code>，
               保存后请手动将 DNS 解析指向新 IP，客户端订阅才能正常连接。
             </p>
           )}
           <p className="text-xs text-soft">保存后节点进入待同步状态，请在节点列表点「同步」推送配置到新 IP。</p>
-          {err && <p className="text-sm text-rose-500">{err}</p>}
+          {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
         </div>
       )}
 
@@ -338,7 +338,7 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
             />
           </FieldGroup>
 
-          {err && <p className="text-sm text-rose-500">{err}</p>}
+          {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
         </div>
       )}
 
@@ -352,14 +352,14 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
             <p className="mt-2 text-xs text-soft">
               请在{isReplace ? '新机器' : '目标机器'}上以 root 用户执行下面这行命令（若当前为普通用户，先执行 <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">sudo su -</code> 切换）。脚本完成自检后会自动注册回 panel，该对话框会自动关闭并刷新节点列表。
             </p>
-            <p className="mt-2 text-xs text-amber-500">
+            <p className="mt-2 text-xs text-[var(--warning)]">
               ⚠️ 同时确保节点防火墙允许面板{token.panel_outbound_ip ? (
-                <> IP <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono text-amber-400">{token.panel_outbound_ip}</code></>
+                <> IP <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono text-[var(--warning)]">{token.panel_outbound_ip}</code></>
               ) : ' 出网 IP'}通过 SSH 端口访问（云厂商安全组 / ufw / firewalld / iptables 任一层拦截都会让后续同步失败）
             </p>
           </div>
 
-          <div className="rounded-xl border border-[var(--border)] bg-slate-950 p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--code-bg)] p-4">
             <div className="mb-2 flex items-center justify-between text-xs text-soft">
               <span className="inline-flex items-center gap-1.5">
                 <Terminal className="h-3.5 w-3.5" />
@@ -370,7 +370,7 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
                 onClick={handleCopyCommand}
                 className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white shadow-sm transition ${
                   copied
-                    ? 'bg-emerald-600'
+                    ? 'bg-[var(--success)]'
                     : 'bg-[var(--accent)] hover:brightness-110'
                 }`}
               >
@@ -378,7 +378,7 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
                 {copied ? '已复制' : '复制命令'}
               </button>
             </div>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-slate-100">
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-[var(--code-text)]">
               {token.curl_command}
             </pre>
           </div>
@@ -391,10 +391,10 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
 
       {step === 'success' && token && (
         <div className="space-y-3 py-6 text-center">
-          <Sparkles className="mx-auto h-10 w-10 text-emerald-500" />
+          <Sparkles className="mx-auto h-10 w-10 text-[var(--success)]" />
           <p className="text-base font-semibold">{isReplace ? '新机器已注册，节点更换完成' : '节点已成功注册'}</p>
           {token.reachable === true && (
-            <p className="text-xs text-emerald-500">
+            <p className="text-xs text-[var(--success)]">
               ✅ panel 已可正常 SSH 到节点{typeof token.reachable_latency_ms === 'number' && token.reachable_latency_ms > 0
                 ? `（延迟 ${token.reachable_latency_ms} ms）`
                 : ''}
@@ -402,14 +402,14 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
             </p>
           )}
           {isReplace && replaceNode?.domain && (
-            <p className="text-xs text-amber-500">
-              ⚠️ 请将域名 <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono">{replaceNode.domain}</code> 的 DNS 解析指向新 IP
+            <p className="text-xs text-[var(--warning)]">
+              <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />请将域名 <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono">{replaceNode.domain}</code> 的 DNS 解析指向新 IP
             </p>
           )}
           {token.reachable === false && (
-            <div className="mx-auto max-w-md space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-left">
-              <p className="text-xs font-semibold text-amber-500">⚠️ panel 暂时无法 SSH 到节点</p>
-              <p className="text-xs text-amber-400">
+            <div className="mx-auto max-w-md space-y-2 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-soft)] p-3 text-left">
+              <p className="text-xs font-semibold text-[var(--warning)]"><AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />panel 暂时无法 SSH 到节点</p>
+              <p className="text-xs text-[var(--warning)]">
                 {token.reachable_message || 'SSH 端口探针失败，可能是防火墙未放行。'}
               </p>
               <p className="text-[11px] text-soft">放行后回节点列表点「同步」即可使配置生效。</p>
@@ -421,7 +421,7 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
 
       {step === 'expired' && (
         <div className="space-y-3 py-6 text-center">
-          <p className="text-base font-semibold text-amber-500">Token 已过期</p>
+          <p className="text-base font-semibold text-[var(--warning)]">Token 已过期</p>
           <p className="text-xs text-soft">如果脚本尚未执行完毕，请重新生成 token；已经执行成功的节点会被保留。</p>
         </div>
       )}
