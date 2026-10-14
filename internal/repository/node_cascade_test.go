@@ -31,6 +31,9 @@ func TestNodeDelete_CascadesAssociations(t *testing.T) {
 	if err := DB.Create(&key).Error; err != nil {
 		t.Fatalf("create node_profile_key: %v", err)
 	}
+	if err := DB.Create(&entity.NodeAlertState{NodeID: node.ID, Kind: entity.AlertKindXrayDown, Alerting: true}).Error; err != nil {
+		t.Fatalf("create node_alert_state: %v", err)
+	}
 
 	// 执行删除
 	if err := NewNodeRepository().Delete(node.ID); err != nil {
@@ -56,6 +59,13 @@ func TestNodeDelete_CascadesAssociations(t *testing.T) {
 	DB.Model(&entity.NodeProfileKey{}).Where("node_id = ?", node.ID).Count(&npkCount)
 	if npkCount != 0 {
 		t.Errorf("node_profile_keys orphan remaining: %d", npkCount)
+	}
+
+	// 验证：node_alert_states 对应行被清
+	var alertCount int64
+	DB.Model(&entity.NodeAlertState{}).Where("node_id = ?", node.ID).Count(&alertCount)
+	if alertCount != 0 {
+		t.Errorf("node_alert_states orphan remaining: %d", alertCount)
 	}
 }
 

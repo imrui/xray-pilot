@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -227,6 +228,72 @@ func (s *FeishuService) sendTextMessage(openID, text string) error {
 		return err
 	}
 	return s.sendMessage(openID, "open_id", "text", string(content))
+}
+
+// SendCardToChat 以应用机器人身份向群发送卡片消息（机器人需已在群内）
+func (s *FeishuService) SendCardToChat(chatID string, card any) error {
+	content, err := json.Marshal(card)
+	if err != nil {
+		return err
+	}
+	return s.sendMessage(chatID, "chat_id", "interactive", string(content))
+}
+
+// FeishuChat 机器人所在的群
+type FeishuChat struct {
+	ChatID string `json:"chat_id"`
+	Name   string `json:"name"`
+}
+
+// ListBotChats 列出机器人所在的全部群（需应用开通 im:chat:readonly）
+func (s *FeishuService) ListBotChats() ([]FeishuChat, error) {
+	token, err := s.getTenantAccessToken()
+	if err != nil {
+		return nil, err
+	}
+
+	chats := make([]FeishuChat, 0)
+	pageToken := ""
+	// 分页上限兜底，防止接口异常时死循环
+	for range 20 {
+		endpoint := "https://open.feishu.cn/open-apis/im/v1/chats?page_size=100"
+		if pageToken != "" {
+			endpoint += "&page_token=" + url.QueryEscape(pageToken)
+		}
+		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("调用飞书群列表失败: %w", err)
+		}
+		var payload struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				Items     []FeishuChat `json:"items"`
+				PageToken string       `json:"page_token"`
+				HasMore   bool         `json:"has_more"`
+			} `json:"data"`
+		}
+		decodeErr := json.NewDecoder(resp.Body).Decode(&payload)
+		resp.Body.Close()
+		if decodeErr != nil {
+			return nil, fmt.Errorf("解析飞书群列表失败: %w", decodeErr)
+		}
+		if resp.StatusCode >= 300 || payload.Code != 0 {
+			return nil, fmt.Errorf("获取飞书群列表失败（需开通 im:chat:readonly 权限）: %s", payload.Msg)
+		}
+		chats = append(chats, payload.Data.Items...)
+		if !payload.Data.HasMore || payload.Data.PageToken == "" {
+			break
+		}
+		pageToken = payload.Data.PageToken
+	}
+	return chats, nil
 }
 
 func (s *FeishuService) sendMessage(receiveID, receiveIDType, msgType, content string) error {

@@ -151,6 +151,9 @@ func (r *NodeRepository) Delete(id uint) error {
 		if err := tx.Where("node_id = ?", id).Delete(&entity.NodeProfileKey{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("node_id = ?", id).Delete(&entity.NodeAlertState{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&entity.Node{}, id).Error
 	})
 }
@@ -244,6 +247,11 @@ func (r *NodeRepository) UpdateLastCheck(id uint, ok bool, latencyMs int) error 
 		"last_check_ok":   ok,
 		"last_latency_ms": latencyMs,
 	}).Error
+}
+
+// UpdateXrayActive 仅更新 Xray 运行状态（健康检测代理端口探测结果，不动版本）
+func (r *NodeRepository) UpdateXrayActive(id uint, active bool) error {
+	return DB.Model(&entity.Node{}).Where("id = ?", id).Update("xray_active", active).Error
 }
 
 // UpdateXrayStatus 更新节点 Xray 运行状态和版本

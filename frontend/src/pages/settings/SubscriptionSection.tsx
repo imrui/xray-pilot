@@ -7,8 +7,9 @@ import { Badge } from '@/components/ui/Badge'
 import { pushToast } from '@/lib/notify'
 import { SecretField, Section } from './shared'
 import { useSettingsForm } from './context'
+import AlertSettings from './AlertSettings'
 
-// 订阅与通知：订阅链接前缀 / 备注模板 + 飞书机器人
+// 订阅与通知：订阅链接前缀 / 备注模板 + 飞书机器人 + 节点告警
 export default function SubscriptionSection() {
   const { form, f, set } = useSettingsForm()
   const [secretVisibility, setSecretVisibility] = useState<Record<string, boolean>>({})
@@ -146,6 +147,8 @@ export default function SubscriptionSection() {
           )}
         </div>
       </Section>
+
+      <AlertSettings />
     </>
   )
 }

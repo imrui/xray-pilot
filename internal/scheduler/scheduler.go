@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/service"
 )
@@ -22,7 +21,7 @@ type Scheduler struct {
 	settingSvc *service.SettingService
 	installSvc *service.InstallService
 	panelSvc   *service.PanelService
-	nodeRepo   *repository.NodeRepository
+	healthSvc  *service.HealthService
 	logRepo    *repository.LogRepository
 	log        *zap.Logger
 }
@@ -36,7 +35,7 @@ func New() *Scheduler {
 		settingSvc: service.NewSettingService(),
 		installSvc: service.NewInstallService(),
 		panelSvc:   service.NewPanelService(),
-		nodeRepo:   repository.NewNodeRepository(),
+		healthSvc:  service.NewHealthService(),
 		logRepo:    repository.NewLogRepository(),
 		log:        zap.L().Named("scheduler"),
 	}
@@ -220,51 +219,14 @@ func (s *Scheduler) runDriftCheck() {
 
 func (s *Scheduler) runHealthCheck() {
 	s.log.Debug("开始健康检测")
-	nodes, err := s.nodeRepo.FindAll()
+	summary, err := s.healthSvc.RunOnce()
 	if err != nil {
 		s.log.Error("健康检测：查询节点失败", zap.Error(err))
 		return
 	}
-
-	okCount, failCount := 0, 0
-	for _, node := range nodes {
-		node := node
-		sshPort := node.SSHPort
-		if sshPort == 0 {
-			sshPort = 22
-		}
-		ok, latencyMs := service.TCPProbe(node.IP, sshPort)
-		if err := s.nodeRepo.UpdateLastCheck(node.ID, ok, latencyMs); err != nil {
-			s.log.Warn("健康检测：更新状态失败",
-				zap.Uint("nodeID", node.ID),
-				zap.Error(err),
-			)
-		}
-		// 节点从健康变为不健康时，记录日志
-		if !ok && node.LastCheckOK {
-			s.logRepo.RecordWithActor(
-				"health_check",
-				nodeTarget(node),
-				"system:scheduler:health_check",
-				false,
-				"节点不可达（TCP 连接失败）",
-				int64(latencyMs),
-			)
-			failCount++
-		} else if ok {
-			okCount++
-		} else {
-			failCount++
-		}
-
-	}
 	s.log.Info("健康检测完成",
-		zap.Int("ok", okCount),
-		zap.Int("fail", failCount),
-		zap.Int("total", len(nodes)),
+		zap.Int("ok", summary.OK),
+		zap.Int("fail", summary.Fail),
+		zap.Int("total", summary.Total),
 	)
-}
-
-func nodeTarget(n entity.Node) string {
-	return fmt.Sprintf("%s(%s)", n.Name, n.IP)
 }

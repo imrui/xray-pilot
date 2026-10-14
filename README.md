@@ -8,6 +8,7 @@ Self-hosted Xray proxy management for small teams. Push configs over SSH, detect
 
 - Node lifecycle management for Xray Reality deployments
 - Config drift detection with scheduled SHA256 comparisons
+- Feishu group alerts when a node goes down (host unreachable, Xray ports closed, sync failed), with recovery notices
 - User and group management for subscription access control
 - Subscription generation with health-aware node selection
 - SSH-based sync with atomic uploads and remote service reloads

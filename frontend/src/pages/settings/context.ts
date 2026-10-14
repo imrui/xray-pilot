@@ -20,7 +20,7 @@ export function useSettingsForm() {
 export const SETTINGS_SECTIONS = [
   { key: 'status', label: '运行状态', hint: '系统信息与部署诊断', form: false },
   { key: 'sync', label: '节点与同步', hint: 'SSH、Xray 日志、调度周期', form: true },
-  { key: 'subscription', label: '订阅与通知', hint: '订阅链接、飞书机器人', form: true },
+  { key: 'subscription', label: '订阅与通知', hint: '订阅链接、飞书机器人、节点告警', form: true },
   { key: 'backup', label: '数据备份', hint: '备份周期与快照文件', form: true },
   { key: 'admins', label: '管理员', hint: '面板登录账号', form: false, superAdminOnly: true },
 ] as const
