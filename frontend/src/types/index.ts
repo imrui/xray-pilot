@@ -172,6 +172,11 @@ export interface FeishuStatus {
   bot_name?: string
 }
 
+export interface FeishuChat {
+  chat_id: string
+  name: string
+}
+
 export interface FeishuPushResult {
   total: number
   sent: number

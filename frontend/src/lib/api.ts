@@ -1,5 +1,5 @@
 import request from './axios'
-import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuPushResult, TrafficSummary, Admin, AdminRole, LoginResponse } from '@/types'
+import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuChat, FeishuPushResult, TrafficSummary, Admin, AdminRole, LoginResponse } from '@/types'
 
 // ---- 通用分页参数 ----
 interface PageParams {
@@ -219,6 +219,12 @@ export const systemApi = {
 
   testFeishuConfig: () =>
     request.post<ApiResponse<FeishuStatus>>('/system/feishu-test'),
+
+  listFeishuChats: () =>
+    request.get<ApiResponse<FeishuChat[]>>('/system/feishu-chats'),
+
+  testAlert: () =>
+    request.post<ApiResponse<null>>('/system/alert-test'),
 
   getSettings: () =>
     request.get<ApiResponse<Record<string, string>>>('/system/settings'),

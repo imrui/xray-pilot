@@ -274,6 +274,7 @@ type SystemHandler struct {
 	diagnosticSvc *service.DiagnosticsService
 	syncSummary   *service.SyncSummaryService
 	feishuSvc     *service.FeishuService
+	alertSvc      *service.AlertService
 }
 
 func NewSystemHandler() *SystemHandler {
@@ -282,6 +283,7 @@ func NewSystemHandler() *SystemHandler {
 		diagnosticSvc: service.NewDiagnosticsService(),
 		syncSummary:   service.NewSyncSummaryService(),
 		feishuSvc:     service.NewFeishuService(),
+		alertSvc:      service.NewAlertService(),
 	}
 }
 
@@ -337,6 +339,25 @@ func (h *SystemHandler) GetSyncSummary(c *gin.Context) {
 // GetFeishuStatus 返回飞书配置状态
 func (h *SystemHandler) GetFeishuStatus(c *gin.Context) {
 	response.Success(c, h.feishuSvc.GetStatus())
+}
+
+// ListFeishuChats 列出飞书机器人所在的群（告警目标群选择）
+func (h *SystemHandler) ListFeishuChats(c *gin.Context) {
+	chats, err := h.feishuSvc.ListBotChats()
+	if err != nil {
+		response.Fail(c, 400, err.Error())
+		return
+	}
+	response.Success(c, chats)
+}
+
+// TestAlert 用已保存的告警配置向目标群发送测试卡片
+func (h *SystemHandler) TestAlert(c *gin.Context) {
+	if err := h.alertSvc.SendTest(actorFrom(c)); err != nil {
+		response.Fail(c, 400, "发送失败："+err.Error())
+		return
+	}
+	response.Success(c, nil)
 }
 
 // TestFeishuConfig 检查飞书配置完整度

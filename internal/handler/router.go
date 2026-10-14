@@ -113,6 +113,8 @@ func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
 		api.GET("/system/sync-summary", systemH.GetSyncSummary)
 		api.GET("/system/feishu-status", systemH.GetFeishuStatus)
 		api.POST("/system/feishu-test", systemH.TestFeishuConfig)
+		api.GET("/system/feishu-chats", systemH.ListFeishuChats)
+		api.POST("/system/alert-test", systemH.TestAlert)
 		// 运行时配置（KV，可读写）
 		api.GET("/system/settings", systemH.GetSettings)
 		api.PUT("/system/settings", systemH.UpdateSettings)

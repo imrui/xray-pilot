@@ -19,6 +19,7 @@ type SyncService struct {
 	logRepo     *repository.LogRepository
 	profileRepo *repository.InboundProfileRepository
 	settingSvc  *SettingService
+	alertSvc    *AlertService
 }
 
 var errNodeNoProtocols = errors.New("节点未绑定协议，无法生成可用配置")
@@ -30,6 +31,7 @@ func NewSyncService() *SyncService {
 		logRepo:     repository.NewLogRepository(),
 		profileRepo: repository.NewInboundProfileRepository(),
 		settingSvc:  NewSettingService(),
+		alertSvc:    NewAlertService(),
 	}
 }
 
@@ -87,6 +89,7 @@ func (s *SyncService) SyncNode(nodeID uint, actor string) *SyncResult {
 	}
 
 	s.logRepo.RecordWithActor("sync", fmt.Sprintf("node:%s(%d)", node.Name, nodeID), actor, true, "同步成功", syncResult.ElapsedMs)
+	s.reportSyncAlert(nodeID, true, "")
 
 	result.Success = true
 	return result
@@ -343,6 +346,24 @@ func (s *SyncService) failNode(node *entity.Node, actor string, errMsg string, e
 		errMsg,
 		elapsedMs,
 	)
+	s.reportSyncAlert(node.ID, false, truncateRunes(errMsg, 200))
+}
+
+// reportSyncAlert 同步结果上报告警：先同步判断开关，开启时才起 goroutine 发送，不阻塞同步返回
+func (s *SyncService) reportSyncAlert(nodeID uint, ok bool, detail string) {
+	if !s.alertSvc.Enabled() {
+		return
+	}
+	go s.alertSvc.ReportEvent(nodeID, entity.AlertKindSyncFailed, ok, detail)
+}
+
+// truncateRunes 按字符截断，避免卡片被超长错误撑爆
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 func shortHash(value string) string {

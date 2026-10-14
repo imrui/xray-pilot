@@ -100,6 +100,7 @@ func cleanupOrphanRelations(db *gorm.DB) error {
 		"DELETE FROM node_profile_keys WHERE profile_id NOT IN (SELECT id FROM inbound_profiles)",
 		"DELETE FROM user_groups WHERE user_id NOT IN (SELECT id FROM users)",
 		"DELETE FROM user_groups WHERE group_id NOT IN (SELECT id FROM groups)",
+		"DELETE FROM node_alert_states WHERE node_id <> 0 AND node_id NOT IN (SELECT id FROM nodes)",
 	}
 	for _, stmt := range statements {
 		if err := db.Exec(stmt).Error; err != nil {
@@ -123,6 +124,7 @@ func autoMigrate(db *gorm.DB) error {
 		&entity.UserTrafficTotal{},
 		&entity.NodeInstallToken{},
 		&entity.AdminUser{},
+		&entity.NodeAlertState{},
 	)
 }
 

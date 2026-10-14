@@ -41,6 +41,13 @@ const (
 	// 最终生效值 = manual.TrimSpace() != "" ? manual : auto。
 	KeyPanelOutboundIPAuto   = "panel.outbound_ip_auto"
 	KeyPanelOutboundIPManual = "panel.outbound_ip_manual"
+	// 节点异常告警（v0.5.1）：复用飞书应用机器人发群消息，依赖 feishu.enabled 与 App 凭据
+	KeyAlertEnabled          = "alert.enabled"
+	KeyAlertFeishuChatID     = "alert.feishu_chat_id"
+	KeyAlertFailThreshold    = "alert.fail_threshold"    // 连续失败 N 次触发（sync_failed 固定 1 次）
+	KeyAlertRecoverThreshold = "alert.recover_threshold" // 连续成功 M 次恢复
+	KeyAlertRepeatHours      = "alert.repeat_hours"      // 未恢复时重复提醒间隔，0 = 不重复
+	KeyAlertKinds            = "alert.kinds"             // 启用的告警类型，逗号分隔
 )
 
 // 硬编码默认值（三级优先级最后兜底）
@@ -71,6 +78,12 @@ var settingDefaults = map[string]string{
 	KeyTrafficSampleRetentionDays: "90",
 	KeyPanelOutboundIPAuto:        "",
 	KeyPanelOutboundIPManual:      "",
+	KeyAlertEnabled:               "false",
+	KeyAlertFeishuChatID:          "",
+	KeyAlertFailThreshold:         "3",
+	KeyAlertRecoverThreshold:      "2",
+	KeyAlertRepeatHours:           "0",
+	KeyAlertKinds:                 "node_unreachable,xray_down,sync_failed,panel_unreachable",
 }
 
 // SettingService 系统运行时配置服务
