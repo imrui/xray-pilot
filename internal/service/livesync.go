@@ -115,6 +115,8 @@ func (s *LiveSyncService) applyOverNodes(nodeIDs []uint, action, email string, p
 // applyOnNode 单节点脚手架：scp 最新 config（不重启）+ 逐 inbound 经 gRPC 执行 perInbound。
 // 返回非 nil（SSH/scp/dial/配置生成失败）时，调用方将该节点标记 drifted 兜底。
 func (s *LiveSyncService) applyOnNode(node *entity.Node, perInbound inboundFn) error {
+	defer lockNode(node.ID)()
+
 	// 1. 生成最新 config（buildConfig 只含激活用户，反映增删后的最终状态）
 	configContent, _, err := s.syncSvc.buildConfig(node)
 	if err != nil {

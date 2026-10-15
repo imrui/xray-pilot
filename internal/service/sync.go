@@ -50,6 +50,8 @@ const actorSchedulerDriftCheck = "system:scheduler:drift_check"
 
 // SyncNode 同步单个节点：生成多协议配置 → 推送 → 重载 xray → 更新状态。actor 为触发方（见 entity.SyncLog）
 func (s *SyncService) SyncNode(nodeID uint, actor string) *SyncResult {
+	defer lockNode(nodeID)()
+
 	node, err := s.nodeRepo.FindByID(nodeID)
 	if err != nil {
 		return &SyncResult{NodeID: nodeID, Error: "节点不存在"}
@@ -349,12 +351,14 @@ func (s *SyncService) failNode(node *entity.Node, actor string, errMsg string, e
 	s.reportSyncAlert(node.ID, false, truncateRunes(errMsg, 200))
 }
 
-// reportSyncAlert 同步结果上报告警：先同步判断开关，开启时才起 goroutine 发送，不阻塞同步返回
+// reportSyncAlert 同步结果上报告警：状态同步推进（保证按同步完成顺序生效，失败后紧接成功不会被乱序覆盖），
+// 只把发送放进 goroutine，不阻塞同步返回
 func (s *SyncService) reportSyncAlert(nodeID uint, ok bool, detail string) {
 	if !s.alertSvc.Enabled() {
 		return
 	}
-	go s.alertSvc.ReportEvent(nodeID, entity.AlertKindSyncFailed, ok, detail)
+	s.alertSvc.Observe(nodeID, entity.AlertKindSyncFailed, ok, detail)
+	go s.alertSvc.Flush()
 }
 
 // truncateRunes 按字符截断，避免卡片被超长错误撑爆

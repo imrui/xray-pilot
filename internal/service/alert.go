@@ -17,9 +17,13 @@ import (
 // actorAlert 告警发送的操作日志 actor
 const actorAlert = "system:alert"
 
-// alertFlushMu 串行化 Flush：service 实例按需 New，锁必须是包级的，
-// 否则健康检测与手动同步并发 Flush 会重复发送同一条告警。
-var alertFlushMu sync.Mutex
+// service 实例按需 New，锁必须是包级的：
+//   - alertFlushMu 串行化 Flush，防止健康检测与同步并发 Flush 重复发送同一条告警
+//   - alertStateMu 串行化 Observe 的读-改-写，防止同节点并发上报（如两次同步同时结束）互相覆盖计数
+var (
+	alertFlushMu sync.Mutex
+	alertStateMu sync.Mutex
+)
 
 // alertKindLabels 告警类型中文名（卡片展示用）
 var alertKindLabels = map[string]string{
@@ -107,6 +111,9 @@ func (s *AlertService) Observe(nodeID uint, kind string, ok bool, detail string)
 	if !cfg.enabled || !cfg.kinds[kind] {
 		return
 	}
+	alertStateMu.Lock()
+	defer alertStateMu.Unlock()
+
 	st, err := s.repo.Get(nodeID, kind)
 	if err != nil {
 		zap.L().Warn("告警状态读取失败", zap.Uint("nodeID", nodeID), zap.String("kind", kind), zap.Error(err))
@@ -118,15 +125,9 @@ func (s *AlertService) Observe(nodeID uint, kind string, ok bool, detail string)
 	}
 	fail, rec := cfg.thresholds(kind)
 	advanceAlertState(st, ok, detail, time.Now(), fail, rec)
-	if err := s.repo.Save(st); err != nil {
+	if err := s.repo.SaveObservation(st); err != nil {
 		zap.L().Warn("告警状态写入失败", zap.Uint("nodeID", nodeID), zap.String("kind", kind), zap.Error(err))
 	}
-}
-
-// ReportEvent 事件驱动场景（如同步结果）的上报：推进状态后立即发送。调用方用 goroutine 调用，不阻塞主流程
-func (s *AlertService) ReportEvent(nodeID uint, kind string, ok bool, detail string) {
-	s.Observe(nodeID, kind, ok, detail)
-	s.Flush()
 }
 
 // PruneInactive 清掉已禁用 / 已删除节点的告警状态（不发恢复）
@@ -196,8 +197,10 @@ func (s *AlertService) Flush() {
 		return
 	}
 	for _, item := range items {
+		// 只回写送达字段：发送期间 Observe 可能已推进判定（如同步失败后紧接成功），
+		// 整行 Save 会把新判定覆盖回旧值，导致恢复消息永远发不出
 		markAlertNotified(item.state, now)
-		if err := s.repo.Save(item.state); err != nil {
+		if err := s.repo.MarkNotified(item.state.ID, item.state.NotifiedAlerting, now); err != nil {
 			zap.L().Warn("告警送达状态回写失败", zap.Uint("nodeID", item.state.NodeID), zap.Error(err))
 		}
 	}
