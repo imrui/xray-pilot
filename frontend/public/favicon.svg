@@ -1,7 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="#2563EB" stroke-width="1.8" stroke-linejoin="round" />
-  <path d="M16 10V22" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round" />
-  <path d="M10.5 13L21.5 19" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round" />
-  <path d="M10.5 19L21.5 13" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round" />
-  <circle cx="16" cy="16" r="2.3" fill="#2563EB" />
+  <style>
+    .m { color: #2563EB; }
+    @media (prefers-color-scheme: dark) { .m { color: #3B82F6; } }
+  </style>
+  <g class="m">
+    <path d="M7.5 7.5L13 13M24.5 24.5L19 19M24.5 7.5L19 13M7.5 24.5L13 19" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" />
+    <circle cx="7.5" cy="7.5" r="3.6" fill="currentColor" />
+    <circle cx="24.5" cy="7.5" r="3.6" fill="currentColor" />
+    <circle cx="7.5" cy="24.5" r="3.6" fill="currentColor" />
+    <circle cx="24.5" cy="24.5" r="3.6" fill="currentColor" />
+    <circle cx="16" cy="16" r="3.6" stroke="currentColor" stroke-width="3.2" />
+  </g>
 </svg>

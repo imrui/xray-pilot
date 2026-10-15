@@ -108,7 +108,7 @@ export default function Login() {
         <div className="rounded-[28px] border border-[var(--border)] bg-[var(--panel-strong)] p-8 shadow-[var(--shadow-panel)] md:p-10">
           <div className="mb-8 flex flex-col items-center text-center">
             <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]">
-              <Logo size={46} className="text-[var(--accent)]" />
+              <Logo size={34} className="text-[var(--accent)]" />
             </div>
             <h2 className="text-2xl font-semibold tracking-[-0.04em]">Xray Pilot</h2>
             <p className="mt-2 text-sm font-medium text-soft">节点管理控制台</p>
