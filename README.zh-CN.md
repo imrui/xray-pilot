@@ -1,77 +1,72 @@
 # xray-pilot
 
-面向小团队的自托管 Xray 管理面板。它可以通过 SSH 下发配置、检测配置漂移，并用单个嵌入前端的 Go 二进制提供完整管理界面。
+面向小团队的自托管 Xray 节点管理面板。一行命令接入节点，通过 SSH 下发配置，借助 Xray gRPC API 即时增删用户，并分发多格式订阅；前端内嵌，部署只需一个 Go 二进制。
 
 [English README](./README.md)
 
 ## 功能特性
 
-- 管理 Xray Reality 节点的创建、编辑、同步与启停
-- 定时执行配置漂移检测，基于 SHA256 比较本地与远端配置
-- 节点异常（服务器不可达 / Xray 端口不通 / 同步失败）时推送飞书群告警，恢复后自动通知
-- 管理用户、分组与订阅访问权限
-- 生成多格式订阅，并根据节点健康状态优先选择可用节点
-- 通过 SSH 原子上传配置并重启远端服务
-- 使用 `go:embed` 打包前端，部署时只需要一个后端二进制
-- 运行时系统配置写入数据库，可直接在 Web UI 中调整
+- **多协议节点**：支持 VLESS + Reality、VLESS + WS + TLS、Trojan 入站，以及 Hysteria2 订阅条目；协议模板共享参数，端口、SNI、指纹可按节点覆盖
+- **节点接入**：面板生成一行安装命令，新 VPS 执行后自动注册回面板；更换服务器时保留分组、密钥与覆盖配置
+- **配置同步**：SSH 原子上传配置，定时 SHA256 漂移检测；用户增删改经 Xray gRPC API 即时生效，无需重启 Xray
+- **健康检测与告警**：探测 SSH 与代理端口，节点不可达、Xray 端口不通或同步失败时推送飞书群卡片告警，恢复后自动通知
+- **订阅分发**：按客户端自动输出 base64 / Clash / sing-box，浏览器访问显示带二维码与流量的信息页；用户到期后自动从各节点下线
+- **用户与权限**：通过分组决定用户可用的节点；订阅链接可经飞书机器人私聊发送
+- **运维代理**：HTTP / SOCKS5 入站，支持 IP 白名单与可选认证，不进入用户订阅
+- **后台管理**：多管理员账号（超级管理员 / 管理员）、带操作人的操作日志、SQLite 定时备份，运行时配置可在 Web UI 调整
+- **单文件部署**：React 前端通过 `go:embed` 打包进二进制；默认 SQLite，可选 PostgreSQL
 
 ## 界面截图
 
-建议将截图放在 [`docs/screenshots/`](./docs/screenshots/) 目录，并使用以下命名格式：
-
-- `01-login.png`
-- `02-dashboard.png`
-- `03-users.png`
-- `04-profiles.png`
-- `05-settings.png`
-- `06-subscribe.png`
-
-推荐截图顺序：
-
-1. 登录页
-2. 仪表盘
-3. 用户管理
-4. 协议配置
-5. 系统设置
-6. 订阅页
-
-> 当前后台界面以中文为主，保留英文 `README.md` 更有利于 GitHub 展示与项目传播；中文细节可以通过本页和截图补充说明。
+> 截图均使用虚构的演示数据。
 
 ### 登录页
 
 ![登录页](./docs/screenshots/01-login.png)
 
-展示控制台登录入口、主题切换、GitHub 链接与产品品牌信息，适合作为项目第一印象。
+控制台登录入口，支持亮色与暗色主题。
 
 ### 仪表盘
 
 ![仪表盘](./docs/screenshots/02-dashboard.png)
 
-集中展示节点健康、活跃用户、订阅分发和最近操作，方便快速判断控制平面当前状态。
+集中展示节点健康、活跃用户、累计流量、最近操作和待同步节点。
+
+### 节点管理
+
+![节点管理](./docs/screenshots/03-nodes.png)
+
+按状态、健康度、地区、所有者服务端筛选；展示同步状态、Xray 版本、已绑定协议，并提供一键接入。
 
 ### 用户管理
 
-![用户管理](./docs/screenshots/03-users.png)
+![用户管理](./docs/screenshots/04-users.png)
 
-支持创建和维护订阅用户、复制订阅链接、查看二维码、控制到期时间，并通过统一交互完成启用或禁用。
+维护订阅用户、分组与到期时间；复制订阅链接、查看二维码与流量，或通过飞书推送订阅。
 
 ### 协议配置
 
-![协议配置](./docs/screenshots/04-profiles.png)
+![协议配置](./docs/screenshots/05-profiles.png)
 
-将协议模板与节点密钥拆分管理，方便维护共享参数与节点差异配置，降低 Reality/TLS 场景的维护复杂度。
+协议模板维护共享参数，节点密钥维护各节点的密钥材料与端口覆盖。
+
+### 节点告警
+
+![节点告警](./docs/screenshots/06-alerts.png)
+
+选择飞书告警群，调整触发 / 恢复阈值与告警类型，并可发送测试消息。
 
 ### 系统设置
 
-![系统设置](./docs/screenshots/05-settings.png)
+![系统设置](./docs/screenshots/07-settings.png)
 
-可直接查看运行诊断、部署建议和数据库中的运行时设置，减少手动修改配置文件的频率。
+查看运行诊断与部署建议；调度、SSH、订阅、备份、管理员等配置按分组管理。
 
 ### 订阅页
 
-![订阅页](./docs/screenshots/06-subscribe.png)
+![订阅页](./docs/screenshots/08-subscribe.png)
 
-同一个 `/sub/{token}` 入口可以根据访问场景返回浏览器信息页或客户端订阅内容，并在页面中提供二维码导入、节点级复制和备用链接等操作。
+同一个 `/sub/{token}` 入口按访问场景返回浏览器信息页（二维码导入、节点级复制、备用链接）或客户端订阅内容。
 
 ## 技术栈
 
@@ -138,8 +133,6 @@ curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/install.sh | 
 3. 脚本结束后确认输出中的 `Xray version` 和 `TCP congestion control`。
 
 推荐直接执行：
-
-示例：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/scripts/node-bootstrap.sh | sudo bash
@@ -257,6 +250,8 @@ admins:
 对于 Linux systemd 部署，推荐将 SSH 私钥放在 `/etc/xray-pilot/ssh/id_ed25519`，服务使用的 `known_hosts` 文件保存在 `/var/lib/xray-pilot/known_hosts`。
 
 调度周期、SSH 默认值、订阅格式、Xray 日志等级等运行时配置，已经迁移到数据库中的系统配置表，可在 Web UI 里调整。
+
+v0.5.0 起管理员账号保存在数据库中。`admins` 段只在首次启动（管理员表为空）时写入，第一个账号为超级管理员；之后请在「系统设置 → 管理员」中维护。
 
 也可以通过环境变量覆盖主密钥：
 

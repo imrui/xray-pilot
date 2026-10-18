@@ -1,77 +1,72 @@
 # xray-pilot
 
-Self-hosted Xray proxy management for small teams. Push configs over SSH, detect config drift, and generate multi-format subscriptions from one embedded Go binary.
+Self-hosted Xray node management for small teams. Onboard nodes in one command, push configs over SSH, apply user changes instantly through the Xray gRPC API, and hand out multi-format subscriptions — all from a single Go binary with the web UI embedded.
 
 [中文文档](./README.zh-CN.md)
 
 ## Features
 
-- Node lifecycle management for Xray Reality deployments
-- Config drift detection with scheduled SHA256 comparisons
-- Feishu group alerts when a node goes down (host unreachable, Xray ports closed, sync failed), with recovery notices
-- User and group management for subscription access control
-- Subscription generation with health-aware node selection
-- SSH-based sync with atomic uploads and remote service reloads
-- Single-binary deployment with the frontend embedded via `go:embed`
-- Runtime system settings managed from the web UI and persisted in the database
+- **Multi-protocol nodes**: VLESS + Reality, VLESS + WS + TLS and Trojan inbounds, plus Hysteria2 subscription entries; protocol templates are shared, while ports, SNI and fingerprints can be overridden per node
+- **Node onboarding**: a one-line install command registers a fresh VPS with the panel; replacing a server keeps its groups, keys and overrides
+- **Config sync**: atomic uploads over SSH, scheduled SHA256 drift detection, and instant user add/remove through the Xray gRPC API without restarting Xray
+- **Health checks and alerts**: probes SSH and proxy ports, and posts Feishu group cards when a node goes down, Xray ports close or a sync fails — with recovery notices
+- **Subscriptions**: base64 / Clash / sing-box output picked by client, a browser info page with QR codes, traffic usage, and automatic removal of expired users from every node
+- **Users and access**: groups decide which nodes a user gets; subscription links can also be delivered through a Feishu bot
+- **Ops proxies**: HTTP / SOCKS5 inbounds with IP allowlists and optional auth, kept out of user subscriptions
+- **Administration**: multiple admin accounts (super admin / admin), operation logs with actors, scheduled SQLite backups, and runtime settings managed from the web UI
+- **Single binary**: the React frontend is embedded via `go:embed`; SQLite by default, PostgreSQL optional
 
 ## Screenshots
 
-Place screenshots in [`docs/screenshots/`](./docs/screenshots/) with the following naming convention:
-
-- `01-login.png`
-- `02-dashboard.png`
-- `03-users.png`
-- `04-profiles.png`
-- `05-settings.png`
-- `06-subscribe.png`
-
-Recommended capture order:
-
-1. Login screen
-2. Dashboard overview
-3. User management
-4. Protocol configuration
-5. System settings
-6. Subscription portal
-
-> The current admin UI is primarily Chinese. Keeping `README.md` in English is still recommended for project discovery, while the screenshots and the Chinese manual provide localized context.
+> The admin UI is in Chinese. Screenshots use fictional demo data.
 
 ### Login
 
 ![Login](./docs/screenshots/01-login.png)
 
-Secure access to the control panel with a lightweight sign-in screen, theme toggle, GitHub link, and clear operator-facing branding.
+Sign in to the control panel; light and dark themes are both supported.
 
 ### Dashboard
 
 ![Dashboard](./docs/screenshots/02-dashboard.png)
 
-The dashboard highlights node health, active users, subscription delivery, recent operations, and the current control-plane status in a single view.
+Node health, active users, cumulative traffic, recent operations and nodes waiting for sync in one view.
 
-### User Management
+### Nodes
 
-![Users](./docs/screenshots/03-users.png)
+![Nodes](./docs/screenshots/03-nodes.png)
 
-Manage subscription users, copy subscription links, open QR codes, assign groups, control expiration, and toggle access with consistent confirmation flows.
+Server-side filters by status, health, region and owner; per-node sync state, Xray version, bound protocols and one-click onboarding.
+
+### Users
+
+![Users](./docs/screenshots/04-users.png)
+
+Manage subscription users, groups and expiry; copy links, show QR codes, check traffic, and push subscriptions through Feishu.
 
 ### Protocol Configuration
 
-![Profiles](./docs/screenshots/04-profiles.png)
+![Profiles](./docs/screenshots/05-profiles.png)
 
-Define protocol templates, attach node-specific key material, and keep shared settings separate from node overrides for clearer operations.
+Protocol templates hold shared settings; node keys hold per-node key material and port overrides.
+
+### Node Alerts
+
+![Alerts](./docs/screenshots/06-alerts.png)
+
+Pick a Feishu group, tune failure / recovery thresholds and alert types, and send a test message.
 
 ### System Settings
 
-![Settings](./docs/screenshots/05-settings.png)
+![Settings](./docs/screenshots/07-settings.png)
 
-Inspect runtime diagnostics, review deployment hints, and manage database-backed system settings without editing config files manually.
+Runtime diagnostics and deployment hints; scheduler, SSH, subscription, backup and admin settings live in their own sections.
 
 ### Subscription Portal
 
-![Subscribe](./docs/screenshots/06-subscribe.png)
+![Subscribe](./docs/screenshots/08-subscribe.png)
 
-Render a browser-friendly subscription page with QR import, node-level copy actions, theme support, and smart fallback links while keeping client access on the same `/sub/{token}` endpoint.
+The same `/sub/{token}` endpoint serves a browser info page with QR import, per-node copy and fallback links, or raw subscription content for clients.
 
 ## Tech Stack
 
