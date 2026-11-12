@@ -6,7 +6,7 @@ import { useSettingsDraft } from '@/store/settingsDraft'
 import { Btn } from '@/components/ui/Form'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Badge } from '@/components/ui/Badge'
-import { SETTINGS_SECTIONS, type SettingsFormContext, type SettingsMap, type SettingsSectionKey } from './context'
+import { getXrayStableVersionError, SETTINGS_SECTIONS, type SettingsFormContext, type SettingsMap, type SettingsSectionKey } from './context'
 
 // 设置页外壳：分组入口在侧栏二级菜单（Layout），这里只持有共享的 KV 表单与底部保存条。
 // 表单类分组（节点与同步 / 订阅与通知 / 数据备份）共用一份 form。
@@ -26,6 +26,7 @@ export default function SettingsLayout() {
   const [saved, setSaved] = useState(false)
   const base = useMemo<SettingsMap>(() => settings ?? {}, [settings])
   const form = draft ?? base
+  const stableVersionError = getXrayStableVersionError(form['xray.stable_version'])
   const setForm: React.Dispatch<React.SetStateAction<SettingsMap>> = (next) =>
     setDraft((prev) => (typeof next === 'function' ? next(prev ?? base) : next))
 
@@ -85,7 +86,7 @@ export default function SettingsLayout() {
               <Btn variant="secondary" disabled={!dirty || update.isPending} onClick={() => setDraft(null)}>
                 撤销
               </Btn>
-              <Btn loading={update.isPending} disabled={!dirty} onClick={() => update.mutate()}>
+              <Btn loading={update.isPending} disabled={!dirty || !!stableVersionError} onClick={() => update.mutate()}>
                 保存配置
               </Btn>
             </div>

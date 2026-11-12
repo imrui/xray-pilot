@@ -2,6 +2,12 @@ import { useOutletContext } from 'react-router-dom'
 
 export type SettingsMap = Record<string, string>
 
+export function getXrayStableVersionError(value = '26.3.27'): string | undefined {
+  if (!/^v?[0-9]+\.[0-9]+\.[0-9]+$/.test(value.trim())) {
+    return '请输入正式版本号，如 26.3.27（可带 v 前缀）'
+  }
+}
+
 // 设置页各表单分组共享的表单上下文：由 SettingsLayout 持有，子路由通过 useSettingsForm() 读写
 export interface SettingsFormContext {
   form: SettingsMap
@@ -19,7 +25,7 @@ export function useSettingsForm() {
 // 设置页分组路由定义（单一来源：侧栏导航与 App 路由都从这里取）
 export const SETTINGS_SECTIONS = [
   { key: 'status', label: '运行状态', hint: '系统信息与部署诊断', form: false },
-  { key: 'sync', label: '节点与同步', hint: 'SSH、Xray 日志、调度周期', form: true },
+  { key: 'sync', label: '节点与同步', hint: 'SSH、Xray 安装版本与日志、调度周期', form: true },
   { key: 'subscription', label: '订阅与通知', hint: '订阅链接、飞书机器人、节点告警', form: true },
   { key: 'backup', label: '数据备份', hint: '备份周期与快照文件', form: true },
   { key: 'admins', label: '管理员', hint: '面板登录账号', form: false, superAdminOnly: true },

@@ -48,6 +48,8 @@ type nodeMeta struct {
 	Remark  string `json:"remark,omitempty"`
 	SSHUser string `json:"ssh_user,omitempty"`
 	SSHPort int    `json:"ssh_port,omitempty"`
+	// 生成命令时固定版本，后续修改系统设置不影响本次安装。
+	XrayVersion string `json:"xray_version,omitempty"`
 }
 
 // InstallService 节点一键接入流程的业务编排
@@ -158,6 +160,11 @@ func (s *InstallService) CreateToken(req *dto.CreateInstallTokenRequest, adminUs
 	if meta.SSHPort == 0 {
 		meta.SSHPort = 22
 	}
+	version, err := normalizeXrayStableVersion(s.settingSvc.Get(KeyXrayStableVersion))
+	if err != nil {
+		return nil, err
+	}
+	meta.XrayVersion = version
 
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 	if ttl <= 0 {
@@ -189,7 +196,7 @@ func (s *InstallService) CreateToken(req *dto.CreateInstallTokenRequest, adminUs
 		return nil, fmt.Errorf("保存 token 失败: %w", err)
 	}
 
-	curl := buildInstallCurlCommand(strings.TrimRight(req.PanelURL, "/"), tokenStr)
+	curl := buildInstallCurlCommand(strings.TrimRight(req.PanelURL, "/"), tokenStr, meta.XrayVersion)
 
 	action := "install_token_create"
 	if req.ReplaceNodeID != nil {
@@ -468,6 +475,7 @@ func (s *InstallService) toResponse(t *entity.NodeInstallToken, curl string) *dt
 	var meta nodeMeta
 	if err := json.Unmarshal([]byte(t.NodeMeta), &meta); err == nil {
 		resp.NodeName = meta.Name
+		resp.XrayVersion = meta.XrayVersion
 	}
 	if curl != "" {
 		resp.CurlCommand = curl
@@ -501,7 +509,7 @@ func tokenShortID(token string) string {
 	return token[:8]
 }
 
-func buildInstallCurlCommand(panelURL, token string) string {
+func buildInstallCurlCommand(panelURL, token, xrayVersion string) string {
 	bootstrapURL := os.Getenv("XRAY_PILOT_BOOTSTRAP_URL")
 	if bootstrapURL == "" {
 		bootstrapURL = defaultBootstrapURL
@@ -511,7 +519,7 @@ func buildInstallCurlCommand(panelURL, token string) string {
 	//   2. 用户未在 sudoers 时 sudo 直接报错，体验差
 	// 改为前端文案明确提示"以 root 执行（普通用户先 sudo su - 切换）"。
 	return fmt.Sprintf(
-		"curl -fsSL %s | PANEL_URL=%s INSTALL_TOKEN=%s bash",
-		bootstrapURL, panelURL, token,
+		"curl -fsSL %s | PANEL_URL=%s INSTALL_TOKEN=%s XRAY_VERSION=%s bash",
+		bootstrapURL, panelURL, token, xrayVersion,
 	)
 }

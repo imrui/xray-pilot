@@ -3,6 +3,8 @@
 set -euo pipefail
 
 XRAY_INSTALL_URL="${XRAY_INSTALL_URL:-https://github.com/XTLS/Xray-install/raw/main/install-release.sh}"
+# 面板生成的命令会传入稳定版本；手动运行也固定使用稳定默认值。
+XRAY_VERSION="${XRAY_VERSION:-26.3.27}"
 AUTHORIZED_KEYS_INPUT="${AUTHORIZED_KEYS:-}"
 ENABLE_BBR="${ENABLE_BBR:-true}"
 ALLOW_ROOT_LOGIN="${ALLOW_ROOT_LOGIN:-yes}"
@@ -50,6 +52,14 @@ require_cmd() {
   if ! command -v "${cmd}" >/dev/null 2>&1; then
     echo "Missing required command: ${cmd}" >&2
     exit 1
+  fi
+}
+
+validate_xray_version() {
+  XRAY_VERSION="${XRAY_VERSION#v}"
+  if [[ ! "${XRAY_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Invalid XRAY_VERSION: use a release version such as 26.3.27." >&2
+    return 1
   fi
 }
 
@@ -213,7 +223,27 @@ configure_root_ssh() {
 }
 
 install_xray() {
-  bash -c "$(curl -L "${XRAY_INSTALL_URL}")" @ install
+  local installer installed_version
+  if ! installer="$(curl -fsSL "${XRAY_INSTALL_URL}")"; then
+    echo "Failed to download the Xray installer." >&2
+    return 1
+  fi
+  if [[ -z "${installer}" ]]; then
+    echo "The Xray installer response is empty." >&2
+    return 1
+  fi
+  if ! bash -c "${installer}" @ install --version "v${XRAY_VERSION}"; then
+    echo "Failed to install Xray ${XRAY_VERSION}." >&2
+    return 1
+  fi
+  if ! installed_version="$(xray version | awk 'NR == 1 {print $2}')"; then
+    echo "Failed to read the installed Xray version." >&2
+    return 1
+  fi
+  if [[ "${installed_version#v}" != "${XRAY_VERSION}" ]]; then
+    echo "Xray version mismatch: expected ${XRAY_VERSION}, got ${installed_version:-unknown}." >&2
+    return 1
+  fi
   systemctl enable xray >/dev/null 2>&1 || true
   systemctl restart xray
 }
@@ -236,6 +266,7 @@ main() {
   local ssh_service_name=""
 
   log_step "Checking prerequisites"
+  validate_xray_version
   require_root
   require_cmd curl
   require_cmd sed
@@ -268,7 +299,7 @@ main() {
   configure_root_ssh
   log_done "authorized_keys step completed"
 
-  log_step "Installing Xray"
+  log_step "Installing Xray ${XRAY_VERSION}"
   install_xray
   log_done "Xray installed and restarted"
 
@@ -305,4 +336,6 @@ main() {
   fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
+  main "$@"
+fi

@@ -1,7 +1,10 @@
 package service
 
 import (
+	"errors"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/repository"
@@ -31,6 +34,7 @@ const (
 	KeyXrayLogAccess            = "xray.log_access"
 	KeyXrayLogError             = "xray.log_error"
 	KeyXrayLogLevel             = "xray.log_level"
+	KeyXrayStableVersion        = "xray.stable_version"
 	// 用户增删时是否走 gRPC 即时生效（不重启 xray）。off 时回退到「标记漂移 → 全量 SSH push + restart」旧路径。
 	// v0.4.5 首发默认 off；v0.4.9 起默认 on（真节点已验证不掉线）。老面板 DB 中已有的值不受影响。
 	KeyXrayLiveApply = "xray.live_apply_enabled"
@@ -49,6 +53,22 @@ const (
 	KeyAlertRepeatHours      = "alert.repeat_hours"      // 未恢复时重复提醒间隔，0 = 不重复
 	KeyAlertKinds            = "alert.kinds"             // 启用的告警类型，逗号分隔
 )
+
+const DefaultXrayStableVersion = "26.3.27"
+
+var (
+	xrayStableVersionPattern    = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	ErrInvalidXrayStableVersion = errors.New("Xray 稳定版本号格式无效，请填写三段数字版本号，如 26.3.27")
+)
+
+// normalizeXrayStableVersion 只接受明确的正式版本，避免 latest 或 shell 内容进入安装命令。
+func normalizeXrayStableVersion(value string) (string, error) {
+	version := strings.TrimPrefix(strings.TrimSpace(value), "v")
+	if !xrayStableVersionPattern.MatchString(version) {
+		return "", ErrInvalidXrayStableVersion
+	}
+	return version, nil
+}
 
 // 硬编码默认值（三级优先级最后兜底）
 var settingDefaults = map[string]string{
@@ -74,6 +94,7 @@ var settingDefaults = map[string]string{
 	KeyXrayLogAccess:              "none",
 	KeyXrayLogError:               "/var/log/xray/error.log",
 	KeyXrayLogLevel:               "warning",
+	KeyXrayStableVersion:          DefaultXrayStableVersion,
 	KeyXrayLiveApply:              "true",
 	KeyTrafficSampleRetentionDays: "90",
 	KeyPanelOutboundIPAuto:        "",
@@ -128,6 +149,13 @@ func (s *SettingService) BatchUpdate(kv map[string]string) error {
 	filtered := make(map[string]string, len(kv))
 	for k, v := range kv {
 		if _, known := settingDefaults[k]; known {
+			if k == KeyXrayStableVersion {
+				var err error
+				v, err = normalizeXrayStableVersion(v)
+				if err != nil {
+					return err
+				}
+			}
 			filtered[k] = v
 		}
 	}

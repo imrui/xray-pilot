@@ -10,6 +10,7 @@ import (
 
 	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/dto"
+	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 )
 
@@ -308,15 +309,115 @@ func TestCleanupExpired_RemovesUnusedExpiredOnly(t *testing.T) {
 }
 
 func TestBuildInstallCurlCommand_FormatsPanelAndToken(t *testing.T) {
-	cmd := buildInstallCurlCommand("https://panel.example", "abc123")
+	cmd := buildInstallCurlCommand("https://panel.example", "abc123", "26.3.27")
 	if !strings.Contains(cmd, "PANEL_URL=https://panel.example") {
 		t.Errorf("missing PANEL_URL in cmd: %s", cmd)
 	}
 	if !strings.Contains(cmd, "INSTALL_TOKEN=abc123") {
 		t.Errorf("missing INSTALL_TOKEN in cmd: %s", cmd)
 	}
+	if !strings.Contains(cmd, "XRAY_VERSION=26.3.27 bash") {
+		t.Errorf("missing pinned XRAY_VERSION in cmd: %s", cmd)
+	}
 	// v0.4.1：命令内不再注入 sudo，要求用户先切换到 root（前端文案提示）
 	if strings.Contains(cmd, "sudo") {
 		t.Errorf("unexpected sudo in cmd: %s", cmd)
+	}
+}
+
+func TestCreateToken_PinsConfiguredXrayVersion(t *testing.T) {
+	setupInstallTestEnv(t)
+	svc := NewInstallService()
+	settings := NewSettingService()
+	create := func(name, want string) *dto.InstallTokenResponse {
+		t.Helper()
+		resp, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
+			Name: name, PanelURL: "https://panel.example",
+		}, "admin")
+		if err != nil {
+			t.Fatalf("create token: %v", err)
+		}
+		if resp.XrayVersion != want || !strings.Contains(resp.CurlCommand, "XRAY_VERSION="+want+" bash") {
+			t.Fatalf("token version = %q, command = %q, want %s", resp.XrayVersion, resp.CurlCommand, want)
+		}
+		return resp
+	}
+	initial := create("default-version", "26.3.27")
+	if err := settings.BatchUpdate(map[string]string{KeyXrayStableVersion: "v26.4.17"}); err != nil {
+		t.Fatalf("update version: %v", err)
+	}
+	custom := create("custom-version", "26.4.17")
+
+	// 设置修改后，轮询与列表仍返回每条命令生成时的版本。
+	for _, created := range []*dto.InstallTokenResponse{initial, custom} {
+		polled, err := svc.FindByToken(created.Token)
+		if err != nil {
+			t.Fatalf("poll token: %v", err)
+		}
+		if polled.XrayVersion != created.XrayVersion {
+			t.Errorf("polled version = %q, want snapshot %q", polled.XrayVersion, created.XrayVersion)
+		}
+	}
+	active, err := svc.ListActive()
+	if err != nil || len(active) != 2 {
+		t.Fatalf("active tokens: count=%d err=%v", len(active), err)
+	}
+	for _, token := range active {
+		want := custom.XrayVersion
+		if token.Token == initial.Token {
+			want = initial.XrayVersion
+		}
+		if token.XrayVersion != want {
+			t.Errorf("listed version = %q, want %q", token.XrayVersion, want)
+		}
+	}
+
+	// 更换服务器使用相同的版本配置。
+	node, err := NewNodeService().Create(&dto.CreateNodeRequest{Name: "replace-version", IP: "192.0.2.1"})
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	replaced, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
+		ReplaceNodeID: &node.ID, PanelURL: "https://panel.example",
+	}, "admin")
+	if err != nil {
+		t.Fatalf("create replacement token: %v", err)
+	}
+	if replaced.XrayVersion != "26.4.17" || !strings.Contains(replaced.CurlCommand, "XRAY_VERSION=26.4.17 bash") {
+		t.Fatalf("replacement did not use configured Xray version: %+v", replaced)
+	}
+}
+
+func TestCreateToken_RejectsInvalidStoredXrayVersion(t *testing.T) {
+	setupInstallTestEnv(t)
+	// 模拟绕过设置 API 写入坏值，命令生成也必须拒绝。
+	if err := repository.NewSettingRepository().Set(KeyXrayStableVersion, "26.3.27;id"); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewInstallService()
+	_, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
+		Name: "invalid-version", PanelURL: "https://panel.example",
+	}, "admin")
+	if !errors.Is(err, ErrInvalidXrayStableVersion) {
+		t.Fatalf("expected invalid version error, got %v", err)
+	}
+	active, err := svc.ListActive()
+	if err != nil || len(active) != 0 {
+		t.Fatalf("invalid version created a token: count=%d err=%v", len(active), err)
+	}
+}
+
+func TestInstallToken_LegacyMetadataWithoutXrayVersion(t *testing.T) {
+	setupInstallTestEnv(t)
+	legacy := &entity.NodeInstallToken{
+		Token: "legacy-token", NodeMeta: `{"name":"legacy-node"}`,
+		ExpiresAt: time.Now().Add(time.Minute),
+	}
+	if err := repository.NewNodeInstallTokenRepository().Create(legacy); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := NewInstallService().FindByToken(legacy.Token)
+	if err != nil || resp.NodeName != "legacy-node" || resp.XrayVersion != "" {
+		t.Fatalf("legacy token response = %+v, err = %v", resp, err)
 	}
 }

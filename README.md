@@ -120,6 +120,8 @@ Manual installation steps:
 
 For fresh nodes, use [`scripts/node-bootstrap.sh`](./scripts/node-bootstrap.sh) to prepare SSH access, install Xray, and optionally enable BBR before adding the node to the panel.
 
+The script installs the stable Xray version **26.3.27** by default. To choose another release when running it manually, pass `XRAY_VERSION`, for example `sudo XRAY_VERSION=26.3.27 bash` at the end of the pipeline. Version numbers use three numeric parts, with an optional `v` prefix.
+
 Typical flow:
 
 ```bash
@@ -141,10 +143,12 @@ If you already run a panel, open the "One-click install" dialog in the node list
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/scripts/node-bootstrap.sh | \
-  sudo PANEL_URL=https://your-panel INSTALL_TOKEN=abc123... bash
+  sudo PANEL_URL=https://your-panel INSTALL_TOKEN=abc123... XRAY_VERSION=26.3.27 bash
 ```
 
 `PANEL_URL` and `INSTALL_TOKEN` come from the dialog. Tokens default to 10-minute TTL, are single-use, and are bound to the first source IP that fetches the panel pubkey. The script falls back to the interactive flow when these variables are absent.
+
+Administrators can change **Xray 稳定版本** under **系统设置 → 节点与同步 → Xray 安装版本** (default: `26.3.27`). Each newly generated command includes that version as `XRAY_VERSION`; existing commands retain the version selected when they were generated. Changing this setting does not update existing nodes. Running a bootstrap command installs its specified version, including downgrading a different version already present on the target node, and stops if the installer fails or the installed version does not match.
 
 ## Upgrade
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -315,6 +316,10 @@ func (h *SystemHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	if err := h.settingSvc.BatchUpdate(kv); err != nil {
+		if errors.Is(err, service.ErrInvalidXrayStableVersion) {
+			response.BadRequest(c, err.Error())
+			return
+		}
 		response.Fail(c, 500, err.Error())
 		return
 	}

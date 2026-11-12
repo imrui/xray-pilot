@@ -311,6 +311,7 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
               脚本自动拉取 panel 公钥、装 xray、回填节点信息。
             </p>
           )}
+          <p className="text-xs text-soft">Xray 安装版本使用「系统设置 → 节点与同步」中保存的稳定版本。</p>
           {!isReplace && (
             <FieldGroup title="节点元数据" description="脚本注册时用这里的信息创建节点记录。">
               <Field label="节点名 *" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} placeholder="如：tw03-lk" />
@@ -352,6 +353,11 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
             <p className="mt-2 text-xs text-soft">
               请在{isReplace ? '新机器' : '目标机器'}上以 root 用户执行下面这行命令（若当前为普通用户，先执行 <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">sudo su -</code> 切换）。脚本完成自检后会自动注册回 panel，该对话框会自动关闭并刷新节点列表。
             </p>
+            {token.xray_version && (
+              <p className="mt-2 text-xs text-soft">
+                本次安装 Xray <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">{token.xray_version}</code>。如需更换版本，请在系统设置保存后重新生成命令。
+              </p>
+            )}
             <p className="mt-2 text-xs text-[var(--warning)]">
               ⚠️ 同时确保节点防火墙允许面板{token.panel_outbound_ip ? (
                 <> IP <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono text-[var(--warning)]">{token.panel_outbound_ip}</code></>

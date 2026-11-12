@@ -1,6 +1,6 @@
 import { Field, SelectField, Switch } from '@/components/ui/Form'
 import { Section } from './shared'
-import { useSettingsForm } from './context'
+import { getXrayStableVersionError, useSettingsForm } from './context'
 
 const LOG_LEVEL_OPTIONS = [
   { value: 'warning', label: 'warning' },
@@ -9,10 +9,11 @@ const LOG_LEVEL_OPTIONS = [
   { value: 'error', label: 'error' },
 ]
 
-// 节点与同步：SSH 默认参数、面板出网 IP、Xray 运行参数、调度周期
+// 节点与同步：SSH 默认参数、面板出网 IP、Xray 安装版本与运行参数、调度周期
 export default function SyncSection() {
   const { form, f, set } = useSettingsForm()
   const liveApplyEnabled = (form['xray.live_apply_enabled'] ?? 'true') === 'true'
+  const stableVersionError = getXrayStableVersionError(form['xray.stable_version'])
 
   return (
     <>
@@ -33,6 +34,23 @@ export default function SyncSection() {
         </div>
         <p className="text-xs text-soft">
           通过 `https://api.ipify.org` 探测，可用 `XRAY_PILOT_OUTBOUND_PROBE_URL` 环境变量换成私有探针。容器或反代环境下自动值可能是入口 IP，请改用手动覆盖。
+        </p>
+      </Section>
+
+      <Section title="Xray 安装版本" description="一键接入节点和更换服务器时，按此稳定版本安装 Xray。">
+        <Field
+          label="稳定版本号"
+          aria-label="Xray 稳定版本号"
+          value={form['xray.stable_version'] ?? '26.3.27'}
+          onChange={f('xray.stable_version')}
+          placeholder="26.3.27"
+          error={stableVersionError}
+          aria-invalid={!!stableVersionError}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <p className="text-xs text-soft">
+          默认 26.3.27。填写已发布的正式版本号（可带 v 前缀），保存后重新生成接入命令即可使用新版本。现有节点如需变更版本，请另行升级或重装。
         </p>
       </Section>
 

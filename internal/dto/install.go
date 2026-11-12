@@ -4,12 +4,12 @@ import "time"
 
 // CreateInstallTokenRequest 管理员侧创建一次性安装 token 的请求
 type CreateInstallTokenRequest struct {
-	Name     string `json:"name"`     // 节点名（新建模式必填；更换模式忽略，沿用现有节点名）
-	Region   string `json:"region"`   // 地区
-	Owner    string `json:"owner"`    // 所有者
-	Remark   string `json:"remark"`   // 备注
-	SSHUser  string `json:"ssh_user"` // 默认 root
-	SSHPort  int    `json:"ssh_port"` // 默认 22
+	Name    string `json:"name"`     // 节点名（新建模式必填；更换模式忽略，沿用现有节点名）
+	Region  string `json:"region"`   // 地区
+	Owner   string `json:"owner"`    // 所有者
+	Remark  string `json:"remark"`   // 备注
+	SSHUser string `json:"ssh_user"` // 默认 root
+	SSHPort int    `json:"ssh_port"` // 默认 22
 
 	// ReplaceNodeID 更换服务器模式：非空表示给该现有节点换新机，
 	// 注册时更新节点 IP/SSH 而非新建记录（分组/密钥/覆盖全保留）。
@@ -25,14 +25,15 @@ type CreateInstallTokenRequest struct {
 
 // InstallTokenResponse 创建后返回给前端展示
 type InstallTokenResponse struct {
-	ID           uint      `json:"id"`
-	Token        string    `json:"token"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	CurlCommand  string    `json:"curl_command"`   // 一行 curl 命令，含 PANEL_URL + INSTALL_TOKEN
-	NodeName     string    `json:"node_name"`      // 回显方便对话框显示
-	Used         bool      `json:"used"`
-	NodeID       *uint     `json:"node_id,omitempty"`
-	UsedByIP     string    `json:"used_by_ip,omitempty"`
+	ID          uint      `json:"id"`
+	Token       string    `json:"token"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	CurlCommand string    `json:"curl_command"`           // 一行 curl 命令，含 PANEL_URL + INSTALL_TOKEN + XRAY_VERSION
+	XrayVersion string    `json:"xray_version,omitempty"` // 本次安装固定的目标版本；旧 token 可能为空
+	NodeName    string    `json:"node_name"`              // 回显方便对话框显示
+	Used        bool      `json:"used"`
+	NodeID      *uint     `json:"node_id,omitempty"`
+	UsedByIP    string    `json:"used_by_ip,omitempty"`
 
 	// ReplaceNodeID 非空表示这是更换服务器模式的 token（前端据此切换文案）
 	ReplaceNodeID *uint `json:"replace_node_id,omitempty"`

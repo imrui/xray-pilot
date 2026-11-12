@@ -285,6 +285,8 @@ export interface InstallToken {
   token: string
   expires_at: string
   curl_command: string
+  /** 生成命令时锁定的 Xray 安装版本；旧版服务端可能不返回 */
+  xray_version?: string
   node_name: string
   used: boolean
   node_id?: number
