@@ -1,49 +1,12 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Link2, RefreshCcw, Server, Users } from 'lucide-react'
-import { logApi, nodeApi, profileApi, trafficApi, userApi } from '@/lib/api'
-import type { InboundProfile, Node, NodeKey, SyncLog } from '@/types'
+import { Activity, AlertTriangle, RefreshCcw } from 'lucide-react'
+import { logApi, nodeApi } from '@/lib/api'
+import type { Node, SyncLog } from '@/types'
 import { Btn } from '@/components/ui/Form'
 import { Badge } from '@/components/ui/Badge'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
-import { formatBytes } from '@/lib/utils'
-
-function StatCard({
-  title,
-  value,
-  change,
-  changeTone = 'positive',
-  icon: Icon,
-}: {
-  title: string
-  value: string | number
-  change?: string
-  changeTone?: 'positive' | 'negative' | 'neutral'
-  icon: typeof Server
-}) {
-  return (
-    <SurfaceCard className="p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-sm text-soft">{title}</div>
-          <div className="mt-3 text-4xl font-semibold tracking-[-0.05em]">{value}</div>
-          {change && (
-            <div
-              className={`mt-3 text-sm ${
-                changeTone === 'negative' ? 'text-[var(--danger)]' : 'text-soft'
-              }`}
-            >
-              {change}
-            </div>
-          )}
-        </div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-    </SurfaceCard>
-  )
-}
+import { TrafficAnalyticsPanel } from '@/components/traffic/TrafficAnalyticsPanel'
 
 function logIcon(log: SyncLog) {
   if (log.success) return <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--success-soft)] text-[var(--success)]"><Activity className="h-4 w-4" /></div>
@@ -69,7 +32,7 @@ function NodeHealthRow({ node }: { node: Node }) {
     <div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3">
-          <div className={`h-2.5 w-2.5 rounded-full ${ok ? 'bg-[var(--success)]' : 'bg-[var(--danger)]'}`} />
+          <div className={`h-2.5 w-2.5 rounded-full ${!node.last_check_at ? 'bg-[var(--border-strong)]' : ok ? 'bg-[var(--success)]' : 'bg-[var(--danger)]'}`} />
           <span className="text-sm font-medium">{node.name}</span>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-soft">
@@ -92,107 +55,30 @@ function NodeHealthRow({ node }: { node: Node }) {
 }
 
 export default function Dashboard() {
-  const usersQuery = useQuery({
-    queryKey: ['dashboard-users'],
-    queryFn: () => userApi.list({ page: 1, page_size: 200 }).then((r) => r.data.data!),
-  })
-
   const nodesQuery = useQuery({
     queryKey: ['dashboard-nodes'],
     queryFn: () => nodeApi.list({ page: 1, page_size: 200 }).then((r) => r.data.data!),
   })
-  const { data: profilesData } = useQuery({
-    queryKey: ['dashboard-profiles-all'],
-    queryFn: () => profileApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data!),
-  })
-  const { data: nodeKeysByNodeId = {} } = useQuery({
-    queryKey: ['dashboard-node-keys', nodesQuery.data?.list?.map((node) => node.id).join(',') ?? ''],
-    queryFn: async () => {
-      const nodes = nodesQuery.data?.list ?? []
-      const entries = await Promise.all(
-        nodes.map(async (node) => {
-          const res = await nodeApi.getKeys(node.id)
-          return [node.id, res.data.data ?? []] as const
-        }),
-      )
-      return Object.fromEntries(entries) as Record<number, NodeKey[]>
-    },
-    enabled: (nodesQuery.data?.list?.length ?? 0) > 0,
-  })
-
   const logsQuery = useQuery({
     queryKey: ['dashboard-logs'],
-    queryFn: () => logApi.list({ page: 1, page_size: 6 }).then((r) => r.data.data!),
+    queryFn: () => logApi.list({ page: 1, page_size: 6, important: true }).then((r) => r.data.data!),
   })
 
-  const trafficQuery = useQuery({
-    queryKey: ['dashboard-traffic'],
-    queryFn: () => trafficApi.summary().then((r) => r.data.data!),
-    refetchInterval: 60_000, // 1 分钟自动刷新；服务端拉取周期 5 分钟
-  })
-
-  const users = usersQuery.data?.list ?? []
-  const nodes = nodesQuery.data?.list ?? []
+  const nodes = useMemo(() => nodesQuery.data?.list ?? [], [nodesQuery.data])
   const logs = logsQuery.data?.list ?? []
-  const activeProfiles = (profilesData?.list ?? []).filter((profile: InboundProfile) => profile.active)
-  const activeProfileIDs = new Set(activeProfiles.map((profile) => profile.id))
-  const serviceReadyNodes = useMemo(
-    () => nodes.filter((node) => (nodeKeysByNodeId[node.id] ?? []).some((key) => activeProfileIDs.has(key.profile_id))),
-    [nodes, nodeKeysByNodeId, activeProfileIDs],
+  const sortedNodes = useMemo(
+    () => [...nodes].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })),
+    [nodes],
   )
-  const sortedServiceReadyNodes = useMemo(
-    () => [...serviceReadyNodes].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })),
-    [serviceReadyNodes],
-  )
-
-  const activeUsers = useMemo(() => users.filter((u) => u.active).length, [users])
-  const healthyNodes = useMemo(() => serviceReadyNodes.filter((n) => n.last_check_ok).length, [serviceReadyNodes])
-  const nodeLinks = useMemo(() => users.filter((u) => !!u.subscribe_url).length, [users])
-  const unhealthyNodes = useMemo(() => serviceReadyNodes.filter((n) => n.last_check_at && !n.last_check_ok), [serviceReadyNodes])
 
   return (
     <PageShell className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="节点总数" value={nodes.length} change={serviceReadyNodes.length ? `${healthyNodes}/${serviceReadyNodes.length} 健康` : '暂无可用节点'} icon={Server} />
-        <StatCard title="活跃用户" value={activeUsers} change={users.length ? `${users.length} 用户总数` : '暂无用户'} icon={Users} />
-        <StatCard title="订阅链接" value={nodeLinks} change={nodeLinks ? '已生成订阅分发' : '暂无订阅'} icon={Link2} />
-        <StatCard
-          title="健康节点"
-          value={serviceReadyNodes.length ? `${healthyNodes}/${serviceReadyNodes.length}` : 0}
-          change={unhealthyNodes.length ? `${unhealthyNodes.length} 个节点异常` : '所有已检测节点正常'}
-          changeTone={unhealthyNodes.length ? 'negative' : 'positive'}
-          icon={Activity}
-        />
-      </div>
+      <TrafficAnalyticsPanel />
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard
-          title="累计上行"
-          value={formatBytes(trafficQuery.data?.total_up_bytes)}
-          change={trafficQuery.data?.last_updated_at ? `最近更新 ${new Date(trafficQuery.data.last_updated_at).toLocaleString()}` : '等待首次采集'}
-          changeTone="neutral"
-          icon={ArrowUpFromLine}
-        />
-        <StatCard
-          title="累计下行"
-          value={formatBytes(trafficQuery.data?.total_down_bytes)}
-          change={trafficQuery.data?.last_updated_at ? `最近更新 ${new Date(trafficQuery.data.last_updated_at).toLocaleString()}` : '等待首次采集'}
-          changeTone="neutral"
-          icon={ArrowDownToLine}
-        />
-        <StatCard
-          title="近 7 天活跃用户"
-          value={trafficQuery.data?.active_users_7d ?? 0}
-          change={trafficQuery.data?.active_users_7d ? '有流量产生即计入' : '等待首次采集'}
-          changeTone="neutral"
-          icon={Users}
-        />
-      </div>
-
-      <div className="grid gap-4 xl:min-h-[calc(100vh-24rem)] xl:grid-cols-3">
-        <SurfaceCard className="flex h-full min-h-[360px] flex-col overflow-hidden xl:col-span-2">
+      <div className="grid gap-4 xl:grid-cols-3">
+        <SurfaceCard className="flex h-full max-h-[420px] flex-col overflow-hidden xl:col-span-2">
           <div className="flex h-14 items-center justify-between border-b border-[var(--border)] px-5">
-            <h3 className="text-lg font-semibold">最近操作</h3>
+            <h3 className="text-lg font-semibold">最近操作与异常</h3>
             <a href="/logs" className="text-sm text-[var(--accent)] transition hover:opacity-80">查看全部</a>
           </div>
           <div className="flex-1 overflow-auto">
@@ -218,7 +104,7 @@ export default function Dashboard() {
           </div>
         </SurfaceCard>
 
-        <SurfaceCard className="flex h-full min-h-[360px] flex-col overflow-hidden">
+        <SurfaceCard className="flex h-full max-h-[420px] flex-col overflow-hidden">
           <div className="flex h-14 items-center justify-between border-b border-[var(--border)] px-5">
             <h3 className="text-lg font-semibold">节点健康</h3>
             <Btn variant="ghost" onClick={() => void nodesQuery.refetch()}>
@@ -227,10 +113,10 @@ export default function Dashboard() {
             </Btn>
           </div>
           <div className="flex-1 overflow-auto">
-            {sortedServiceReadyNodes.length === 0 ? (
+            {sortedNodes.length === 0 ? (
               <div className="px-5 py-10 text-sm text-soft">暂无可用节点数据</div>
             ) : (
-              sortedServiceReadyNodes.map((node) => <NodeHealthRow key={node.id} node={node} />)
+              sortedNodes.map((node) => <NodeHealthRow key={node.id} node={node} />)
             )}
           </div>
         </SurfaceCard>

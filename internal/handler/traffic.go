@@ -1,8 +1,11 @@
 package handler
 
 import (
-	"github.com/gin-gonic/gin"
+	"strconv"
+	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/service"
 	"github.com/imrui/xray-pilot/pkg/response"
 )
@@ -10,6 +13,42 @@ import (
 // TrafficHandler 流量统计接口
 type TrafficHandler struct {
 	svc *service.TrafficService
+}
+
+// Analytics GET /api/traffic/analytics. All timestamps carry an explicit offset.
+func (h *TrafficHandler) Analytics(c *gin.Context) {
+	start, err := time.Parse(time.RFC3339, c.Query("start"))
+	if err != nil {
+		response.BadRequest(c, "开始时间必须包含时区")
+		return
+	}
+	end, err := time.Parse(time.RFC3339, c.Query("end"))
+	if err != nil {
+		response.BadRequest(c, "结束时间必须包含时区")
+		return
+	}
+	r := dto.TrafficRange{Start: start, End: end, Dimension: c.DefaultQuery("dimension", "node")}
+	for key, target := range map[string]*uint{"node_id": &r.NodeID, "user_id": &r.UserID} {
+		if raw := c.Query(key); raw != "" {
+			id, e := strconv.ParseUint(raw, 10, 32)
+			if e != nil || id == 0 {
+				response.BadRequest(c, "节点或用户 ID 无效")
+				return
+			}
+			*target = uint(id)
+		}
+	}
+	now := time.Now()
+	if err := service.ValidateTrafficRange(r, now); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	data, err := h.svc.Analytics(c.Request.Context(), r, now)
+	if err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.Success(c, data)
 }
 
 func NewTrafficHandler() *TrafficHandler {

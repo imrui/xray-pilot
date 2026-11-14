@@ -12,6 +12,7 @@ Self-hosted Xray node management for small teams. Onboard nodes in one command, 
 - **Health checks and alerts**: probes SSH and proxy ports, and posts Feishu group cards when a node goes down, Xray ports close or a sync fails — with recovery notices
 - **Subscriptions**: base64 / Clash / sing-box output picked by client, a browser info page with QR codes, traffic usage, and automatic removal of expired users from every node
 - **Users and access**: groups decide which nodes a user gets; subscription links can also be delivered through a Feishu bot
+- **Traffic analytics**: date shortcuts, custom ranges, node/user trends, usage rankings, active users and combined node/user filters
 - **Ops proxies**: HTTP / SOCKS5 inbounds with IP allowlists and optional auth, kept out of user subscriptions
 - **Administration**: multiple admin accounts (super admin / admin), operation logs with actors, scheduled SQLite backups, and runtime settings managed from the web UI
 - **Single binary**: the React frontend is embedded via `go:embed`; SQLite by default, PostgreSQL optional
@@ -30,7 +31,11 @@ Sign in to the control panel; light and dark themes are both supported.
 
 ![Dashboard](./docs/screenshots/02-dashboard.png)
 
-Node health, active users, cumulative traffic, recent operations and nodes waiting for sync in one view.
+Current node health, period traffic, active users, node/user trends and rankings, recent admin operations and failures in one view.
+
+Analytics defaults to the last 7 calendar days, including today. Choose a rolling 24-hour window, 30 days, or a custom range; the calendar also offers today, yesterday, 3 days and 90 days. Dates and daily buckets use Asia/Taipei (UTC+8), with a maximum query span of 90 days. Clicking a ranking item opens the other dimension with that node or user selected; both filters can be combined.
+
+Traffic is attributed to its collection timestamp: hourly buckets for ranges up to 24 hours, daily buckets for longer ranges, with the top 5 series by total usage plus “Other”. Sample retention is configurable (90 days by default); queries extending beyond retention show a warning. Collection outcomes are recorded after upgrading. Historical periods without traffic or successful collection evidence are shown as gaps. Recovered nodes may report delayed traffic in a later bucket, so this chart does not measure live bandwidth. Current node and enabled-user counts remain independent of the date range.
 
 ### Nodes
 

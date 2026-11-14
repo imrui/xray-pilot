@@ -111,7 +111,7 @@ func cleanupOrphanRelations(db *gorm.DB) error {
 }
 
 func autoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&entity.User{},
 		&entity.UserGroup{},
 		&entity.Group{},
@@ -121,11 +121,23 @@ func autoMigrate(db *gorm.DB) error {
 		&entity.NodeProfileKey{},
 		&entity.SystemSetting{},
 		&entity.TrafficSample{},
+		&entity.TrafficPoll{},
 		&entity.UserTrafficTotal{},
 		&entity.NodeInstallToken{},
 		&entity.AdminUser{},
 		&entity.NodeAlertState{},
-	)
+	); err != nil {
+		return err
+	}
+	if db.Dialector.Name() == "sqlite" {
+		// Expression indexes keep normalized legacy timestamp range queries indexed.
+		for _, table := range []string{"traffic_samples", "traffic_polls"} {
+			if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_" + table + "_instant ON " + table + " (" + sqliteTrafficInstant + ")").Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func migrateLegacyUserGroups(db *gorm.DB) error {

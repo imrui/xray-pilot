@@ -101,8 +101,10 @@ func (s *TrafficService) PollAll(ctx context.Context) *PollResult {
 
 	// 聚合：用户累计跨节点合并
 	allSamples := make([]entity.TrafficSample, 0)
+	polls := make([]entity.TrafficPoll, 0, len(nodes))
 	userTotals := make(map[uint][2]int64)
 	for r := range reports {
+		polls = append(polls, entity.TrafficPoll{NodeID: r.nodeID, PeriodEnd: periodEnd, Success: r.err == nil})
 		result.PolledNodes++
 		if r.err != nil {
 			result.FailedNodes++
@@ -132,7 +134,7 @@ func (s *TrafficService) PollAll(ctx context.Context) *PollResult {
 		})
 	}
 
-	if err := s.trafficRepo.WriteCycle(allSamples, totals); err != nil {
+	if err := s.trafficRepo.WriteCycle(allSamples, totals, polls...); err != nil {
 		result.Errors = append(result.Errors, "持久化失败: "+err.Error())
 		return result
 	}

@@ -53,7 +53,7 @@ const settingsChildren: NavChild[] = SETTINGS_SECTIONS.map((s) => ({
 const navGroups = [
   {
     title: '概览',
-    items: [{ path: '/dashboard', label: '仪表盘', subtitle: '系统概览与快捷操作', icon: LayoutDashboard }],
+    items: [{ path: '/dashboard', label: '仪表盘', subtitle: '运行概况与用量分析', icon: LayoutDashboard }],
   },
   {
     title: '用户订阅',
