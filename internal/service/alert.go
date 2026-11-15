@@ -17,6 +17,9 @@ import (
 // actorAlert 告警发送的操作日志 actor
 const actorAlert = "system:alert"
 
+// 与仪表盘统一为北京时间（UTC+8），不依赖面板服务器或数据库驱动的本地时区。
+var alertTimezone = time.FixedZone("Beijing", 8*60*60)
+
 // service 实例按需 New，锁必须是包级的：
 //   - alertFlushMu 串行化 Flush，防止健康检测与同步并发 Flush 重复发送同一条告警
 //   - alertStateMu 串行化 Observe 的读-改-写，防止同节点并发上报（如两次同步同时结束）互相覆盖计数
@@ -226,7 +229,7 @@ func (s *AlertService) SendTest(actor string) error {
 		"elements": []any{
 			map[string]any{"tag": "div", "text": map[string]any{
 				"tag":     "lark_md",
-				"content": fmt.Sprintf("这是一条测试消息，节点异常时将发送到本群。\n发送时间：%s", start.Format("2006-01-02 15:04:05")),
+				"content": fmt.Sprintf("这是一条测试消息，节点异常时将发送到本群。\n发送时间：%s（北京时间 UTC+8）", start.In(alertTimezone).Format("2006-01-02 15:04:05")),
 			}},
 		},
 	}
@@ -383,7 +386,7 @@ func alertItemText(it alertItem, now time.Time) string {
 	since := "-"
 	duration := ""
 	if st.Since != nil {
-		since = st.Since.Format("01-02 15:04")
+		since = st.Since.In(alertTimezone).Format("01-02 15:04") + "（北京时间 UTC+8）"
 		duration = formatAlertDuration(now.Sub(*st.Since))
 	}
 	switch it.notify {

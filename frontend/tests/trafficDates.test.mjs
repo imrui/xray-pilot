@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { presetRange, customRange, toDateInput, DAY } from '../src/lib/trafficDates.ts'
+import { presetRange, customRange, toDateInput, DAY, TRAFFIC_TIMEZONE } from '../src/lib/trafficDates.ts'
 
 const now = new Date('2026-11-14T09:35:20Z')
-test('presets use Taipei calendar boundaries independently of host timezone', () => {
+test('presets use Beijing calendar boundaries independently of host timezone', () => {
+  assert.equal(TRAFFIC_TIMEZONE, 'Asia/Shanghai')
   assert.equal(presetRange('today', now).start, '2026-11-13T16:00:00.000Z')
   assert.equal(presetRange('yesterday', now).end, '2026-11-13T16:00:00.000Z')
   assert.equal(presetRange('7d', now).start, '2026-11-07T16:00:00.000Z')

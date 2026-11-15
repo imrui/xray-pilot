@@ -1,5 +1,5 @@
 // All calendar arithmetic uses UTC+8 explicitly, independent of the browser's zone.
-export const TRAFFIC_TIMEZONE = 'Asia/Taipei'
+export const TRAFFIC_TIMEZONE = 'Asia/Shanghai'
 export const DAY = 86_400_000
 const OFFSET = 8 * 3_600_000
 export const DATE_SHORTCUTS = [

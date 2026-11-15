@@ -31,7 +31,7 @@ func TestTrafficAnalyticsBoundariesDimensionsAndFilters(t *testing.T) {
 	start, svc := analyticsFixture(t)
 	end := start.Add(48 * time.Hour)
 	now := end.Add(time.Hour)
-	zone := time.FixedZone("Taipei", 8*3600)
+	zone := time.FixedZone("Beijing", 8*3600)
 	samples := []entity.TrafficSample{
 		{NodeID: 1, UserID: 1, PeriodEnd: start.Add(-time.Second).In(zone), UpBytes: 999},
 		{NodeID: 1, UserID: 1, PeriodEnd: start.In(zone), UpBytes: 100},
@@ -47,6 +47,9 @@ func TestTrafficAnalyticsBoundariesDimensionsAndFilters(t *testing.T) {
 	result, err := svc.Analytics(context.Background(), r, now)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if result.Timezone != "Asia/Shanghai" {
+		t.Fatalf("timezone = %q, want Beijing time", result.Timezone)
 	}
 	if result.UpBytes != 220 || result.DownBytes != 20 || result.ActiveNodes != 2 || result.ActiveUsers != 2 {
 		t.Fatalf("wrong summary: %+v", result)

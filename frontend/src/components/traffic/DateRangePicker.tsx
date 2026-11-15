@@ -30,18 +30,18 @@ export function DateRangePicker({ value, onChange }: { value: DateSelection; onC
   const control = 'rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-[var(--accent)]'
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-1" role="group" aria-label="时间范围">
-          {(['24h', '7d', '30d'] as const).map((key) => <button key={key} className={cn(control, value.preset === key && 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]')} aria-pressed={value.preset === key} onClick={() => onChange(presetRange(key))}>{DATE_SHORTCUTS.find(([p]) => p === key)![1]}</button>)}
-          <button className={cn(control, !['24h', '7d', '30d'].includes(value.preset) && 'bg-[var(--accent-soft)] text-[var(--accent)]')} aria-pressed={!['24h', '7d', '30d'].includes(value.preset)} onClick={show}>自定义</button>
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <div className="flex flex-wrap gap-1 rounded-lg bg-[var(--panel-muted)] p-1" role="group" aria-label="时间范围">
+          {(['24h', '7d', '30d'] as const).map((key) => <button key={key} className={cn('rounded-md px-3 py-2 text-sm transition hover:text-[var(--accent)]', value.preset === key ? 'bg-[var(--panel-strong)] font-medium text-[var(--accent)] shadow-sm' : 'text-soft')} aria-pressed={value.preset === key} onClick={() => onChange(presetRange(key))}>{DATE_SHORTCUTS.find(([p]) => p === key)![1]}</button>)}
+          <button className={cn('rounded-md px-3 py-2 text-sm transition hover:text-[var(--accent)]', !['24h', '7d', '30d'].includes(value.preset) ? 'bg-[var(--panel-strong)] font-medium text-[var(--accent)] shadow-sm' : 'text-soft')} aria-pressed={!['24h', '7d', '30d'].includes(value.preset)} onClick={show}>自定义</button>
         </div>
-        <button className={cn(control, 'flex min-w-0 items-center gap-2 text-left')} onClick={show} aria-label="选择日期范围" aria-expanded={open}><CalendarDays className="h-4 w-4 shrink-0" /><span className="break-words">{rangeLabel(value)}</span></button>
+        <button className={cn(control, 'flex min-w-0 items-center gap-2 text-left text-soft')} onClick={show} aria-label="选择日期范围（北京时间 UTC+8）" aria-expanded={open} title="北京时间（UTC+8）"><CalendarDays className="h-4 w-4 shrink-0" /><span className="break-words">{rangeLabel(value)}</span></button>
       </div>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-[var(--overlay)]" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%-2rem)] max-w-4xl -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] p-5 shadow-xl">
           <div className="mb-4 flex items-center justify-between"><Dialog.Title className="font-semibold">选择日期范围</Dialog.Title><Dialog.Close className="rounded p-2 hover:bg-[var(--panel-muted)]" aria-label="关闭日期选择"><X className="h-4 w-4" /></Dialog.Close></div>
-          <Dialog.Description className="mb-4 text-xs text-soft">台北时间（UTC+8）。先选开始日期，再选结束日期；点击应用后更新统计，单次最多 90 天。</Dialog.Description>
+          <Dialog.Description className="mb-4 text-xs text-soft">北京时间（UTC+8）。先选开始日期，再选结束日期；点击应用后更新统计，单次最多 90 天。</Dialog.Description>
           <div className="grid gap-5 md:grid-cols-[120px_minmax(0,1fr)]">
             <div className="flex flex-wrap gap-1 md:flex-col md:border-r md:border-[var(--border)] md:pr-4" role="group" aria-label="日期快捷选择">
               {DATE_SHORTCUTS.map(([key, label]) => <button key={key} aria-pressed={quick === key} className={cn('rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--panel-muted)]', quick === key && 'bg-[var(--accent-soft)] text-[var(--accent)]')} onClick={() => load(presetRange(key))}>{label}</button>)}

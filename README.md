@@ -31,9 +31,9 @@ Sign in to the control panel; light and dark themes are both supported.
 
 ![Dashboard](./docs/screenshots/02-dashboard.png)
 
-Current node health, period traffic, active users, node/user trends and rankings, recent admin operations and failures in one view.
+Current node health, period traffic, active users, node/user trends and rankings, recent admin operations and failures in one view. Trends and rankings sit side by side on wide screens, with detailed notes collapsed by default. Use Refresh to update dashboard data; the page does not poll or refetch on window focus or network reconnection. Changing the date range or filters still loads the selected statistics.
 
-Analytics defaults to the last 7 calendar days, including today. Choose a rolling 24-hour window, 30 days, or a custom range; the calendar also offers today, yesterday, 3 days and 90 days. Dates and daily buckets use Asia/Taipei (UTC+8), with a maximum query span of 90 days. Clicking a ranking item opens the other dimension with that node or user selected; both filters can be combined.
+Analytics defaults to the last 7 calendar days, including today. Choose a rolling 24-hour window, 30 days, or a custom range; the calendar also offers today, yesterday, 3 days and 90 days. Dates and daily buckets use Beijing time (UTC+8), with a maximum query span of 90 days. Clicking a ranking item opens the other dimension with that node or user selected; both filters can be combined.
 
 Traffic is attributed to its collection timestamp: hourly buckets for ranges up to 24 hours, daily buckets for longer ranges, with the top 5 series by total usage plus “Other”. Sample retention is configurable (90 days by default); queries extending beyond retention show a warning. Collection outcomes are recorded after upgrading. Historical periods without traffic or successful collection evidence are shown as gaps. Recovered nodes may report delayed traffic in a later bucket, so this chart does not measure live bandwidth. Current node and enabled-user counts remain independent of the date range.
 

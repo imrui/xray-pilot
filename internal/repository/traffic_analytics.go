@@ -30,7 +30,7 @@ type PollBucket struct {
 const sqliteTrafficZone = "CASE WHEN instr(substr(period_end, 20), ' ') > 0 THEN substr(period_end, 20 + instr(substr(period_end, 20), ' '), 3) || ':' || substr(period_end, 23 + instr(substr(period_end, 20), ' '), 2) WHEN substr(period_end, -1) = 'Z' THEN 'Z' WHEN substr(period_end, -6, 1) IN ('+', '-') THEN substr(period_end, -6) ELSE '' END"
 const sqliteTrafficInstant = "(unixepoch(substr(period_end, 1, 19) || (" + sqliteTrafficZone + ")) * 1000000000 + CASE WHEN substr(period_end, 20, 1) = '.' THEN CAST(ROUND(CAST('0' || substr(period_end, 20) AS REAL) * 1000000000) AS INTEGER) ELSE 0 END)"
 
-// 统一采用台北时区 UTC+8，在 SQL 中聚合，避免长时间范围载入全部明细。
+// 统一采用北京时区 UTC+8，在 SQL 中聚合，避免长时间范围载入全部明细。
 func trafficBucketSQL(db *gorm.DB, seconds int64) string {
 	if db.Dialector.Name() == "postgres" {
 		return fmt.Sprintf("CAST(FLOOR((EXTRACT(EPOCH FROM period_end) + 28800) / %d) AS BIGINT)", seconds)

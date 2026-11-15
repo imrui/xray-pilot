@@ -22,6 +22,7 @@ type HealthService struct {
 	profileRepo *repository.InboundProfileRepository
 	logRepo     *repository.LogRepository
 	alertSvc    *AlertService
+	settingSvc  *SettingService
 }
 
 func NewHealthService() *HealthService {
@@ -30,6 +31,7 @@ func NewHealthService() *HealthService {
 		profileRepo: repository.NewInboundProfileRepository(),
 		logRepo:     repository.NewLogRepository(),
 		alertSvc:    NewAlertService(),
+		settingSvc:  NewSettingService(),
 	}
 }
 
@@ -38,6 +40,7 @@ type nodeProbeResult struct {
 	node        entity.Node
 	sshPort     int
 	sshOK       bool
+	sshError    error
 	latencyMs   int
 	ports       []int // 探测的 TCP 代理端口（SSH 不可达时不探测，为空）
 	failedPorts []int
@@ -76,9 +79,13 @@ func (s *HealthService) RunOnce() (*HealthCheckSummary, error) {
 func (s *HealthService) probeNode(node entity.Node) nodeProbeResult {
 	r := nodeProbeResult{node: node, sshPort: node.SSHPort}
 	if r.sshPort == 0 {
-		r.sshPort = 22
+		r.sshPort = s.settingSvc.GetInt(KeySSHDefaultPort)
+		if r.sshPort == 0 {
+			r.sshPort = 22
+		}
 	}
-	r.sshOK, r.latencyMs = TCPProbe(node.IP, r.sshPort)
+	r.latencyMs, r.sshError = tcpProbe(node.IP, r.sshPort)
+	r.sshOK = r.sshError == nil
 	if !r.sshOK {
 		return r
 	}
@@ -114,7 +121,7 @@ func (s *HealthService) persist(r nodeProbeResult) {
 			fmt.Sprintf("%s(%s)", r.node.Name, r.node.IP),
 			actorSchedulerHealthCheck,
 			false,
-			"节点不可达（TCP 连接失败）",
+			r.sshFailureDetail(),
 			int64(r.latencyMs),
 		)
 	}
@@ -144,7 +151,7 @@ func (s *HealthService) reportAlerts(results []nodeProbeResult) {
 	if !allDown {
 		for _, r := range results {
 			s.alertSvc.Observe(r.node.ID, entity.AlertKindNodeUnreachable, r.sshOK,
-				fmt.Sprintf("SSH 端口 %d 连接失败", r.sshPort))
+				r.sshFailureDetail())
 			// SSH 不可达那一轮不推进 xray_down，避免一次故障双告警
 			if r.sshOK && len(r.ports) > 0 {
 				s.alertSvc.Observe(r.node.ID, entity.AlertKindXrayDown, len(r.failedPorts) == 0,
@@ -154,6 +161,18 @@ func (s *HealthService) reportAlerts(results []nodeProbeResult) {
 	}
 
 	s.alertSvc.Flush()
+}
+
+// 保留具体的连接错误，区分超时、拒绝连接和地址解析失败。
+func (r nodeProbeResult) sshFailureDetail() string {
+	if r.sshOK {
+		return ""
+	}
+	detail := fmt.Sprintf("SSH 端口 %d 连接失败", r.sshPort)
+	if r.sshError != nil {
+		detail += "：" + r.sshError.Error()
+	}
+	return detail
 }
 
 // allSSHDown 至少 2 个节点且全部 SSH 不可达

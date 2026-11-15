@@ -34,7 +34,7 @@ func (s *TrafficService) Analytics(ctx context.Context, window dto.TrafficRange,
 		seconds = 3600
 		interval = "hour"
 	}
-	out := &dto.TrafficAnalytics{Start: window.Start, End: window.End, Timezone: "Asia/Taipei", Interval: interval,
+	out := &dto.TrafficAnalytics{Start: window.Start, End: window.End, Timezone: "Asia/Shanghai", Interval: interval,
 		Nodes: []dto.TrafficOption{}, Users: []dto.TrafficOption{}, Ranking: []dto.TrafficRanking{}, Series: []dto.TrafficSeries{}}
 	if cutoff, ok := retentionCutoff(s.settingSvc.GetInt(KeyTrafficSampleRetentionDays), now); ok {
 		out.RetentionStart = &cutoff

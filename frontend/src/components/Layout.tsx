@@ -92,12 +92,15 @@ export default function Layout() {
   const [collapsed, setCollapsed] = useState(false)
   const [changelogOpen, setChangelogOpen] = useState(false)
   const [passwordOpen, setPasswordOpen] = useState(false)
+  // 仪表盘统一手动刷新，避免顶栏继续在后台轮询。
+  const isDashboard = location.pathname === '/dashboard' || location.pathname === '/'
   const { data: syncSummary } = useQuery({
     queryKey: ['sync-summary'],
     queryFn: () => systemApi.getSyncSummary().then((r) => r.data.data!),
-    refetchInterval: 30000,
-    refetchOnWindowFocus: true,
-    retry: 1,
+    refetchInterval: isDashboard ? false : 30000,
+    refetchOnWindowFocus: !isDashboard,
+    refetchOnReconnect: !isDashboard,
+    retry: isDashboard ? false : 1,
   })
 
   const pendingSync = syncSummary?.needs_sync ? syncSummary.total_affected : 0

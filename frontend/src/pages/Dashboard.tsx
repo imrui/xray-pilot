@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { Activity, AlertTriangle, RefreshCcw } from 'lucide-react'
 import { logApi, nodeApi } from '@/lib/api'
 import type { Node, SyncLog } from '@/types'
@@ -29,32 +30,25 @@ function syncBadge(node: Node) {
 function NodeHealthRow({ node }: { node: Node }) {
   const ok = node.last_check_ok
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
+    <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3">
-          <div className={`h-2.5 w-2.5 rounded-full ${!node.last_check_at ? 'bg-[var(--border-strong)]' : ok ? 'bg-[var(--success)]' : 'bg-[var(--danger)]'}`} />
-          <span className="text-sm font-medium">{node.name}</span>
+          <div role="img" aria-label={!node.last_check_at ? '尚未检查' : ok ? '健康' : '异常'} className={`h-2 w-2 shrink-0 rounded-full ${!node.last_check_at ? 'bg-[var(--border-strong)]' : ok ? 'bg-[var(--success)]' : 'bg-[var(--danger)]'}`} />
+          <span className="truncate text-sm font-medium" title={`${node.name} · ${node.xray_version ? `Xray ${node.xray_version}` : 'Xray 版本未知'}`}>{node.name}</span>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-soft">
-          <span>{node.online_user_count} 人</span>
-          <span className="text-faint">|</span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className={`h-2 w-2 rounded-full ${node.xray_version ? 'bg-[var(--success)]' : 'bg-[var(--border-strong)]'}`} />
-            <span>{node.xray_version ? `Xray ${node.xray_version}` : 'Xray —'}</span>
-          </span>
-        </div>
+        <div className="mt-1 pl-5 text-xs text-soft">{node.online_user_count} 人在线</div>
       </div>
-      <div className="flex min-w-[74px] flex-col items-end gap-2">
+      <div className="flex shrink-0 items-center gap-3">
         <span className="font-mono text-xs text-soft">{ok && node.last_latency_ms ? `${node.last_latency_ms}ms` : '—'}</span>
-        <div className="scale-[0.9] origin-right">
-          {syncBadge(node)}
-        </div>
+        {syncBadge(node)}
       </div>
     </div>
   )
 }
 
 export default function Dashboard() {
+  const queryClient = useQueryClient()
+  const syncFetching = useIsFetching({ queryKey: ['sync-summary'], exact: true }) > 0
   const nodesQuery = useQuery({
     queryKey: ['dashboard-nodes'],
     queryFn: async () => {
@@ -65,10 +59,16 @@ export default function Dashboard() {
         if (!data.list?.length || list.length >= data.total) return { list }
       }
     },
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
   })
   const logsQuery = useQuery({
     queryKey: ['dashboard-logs'],
     queryFn: () => logApi.list({ page: 1, page_size: 6, important: true }).then((r) => r.data.data!),
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
   })
 
   const nodes = useMemo(() => nodesQuery.data?.list ?? [], [nodesQuery.data])
@@ -77,51 +77,57 @@ export default function Dashboard() {
     () => [...nodes].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })),
     [nodes],
   )
+  function refreshOverview() {
+    void nodesQuery.refetch()
+    void logsQuery.refetch()
+    void queryClient.refetchQueries({ queryKey: ['sync-summary'], exact: true })
+  }
 
   return (
     <PageShell className="space-y-5">
-      <TrafficAnalyticsPanel />
+      <TrafficAnalyticsPanel onRefresh={refreshOverview} refreshing={nodesQuery.isFetching || logsQuery.isFetching || syncFetching} />
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <SurfaceCard className="flex h-full max-h-[420px] flex-col overflow-hidden xl:col-span-2">
-          <div className="flex h-14 items-center justify-between border-b border-[var(--border)] px-5">
-            <h3 className="text-lg font-semibold">最近操作与异常</h3>
-            <a href="/logs" className="text-sm text-[var(--accent)] transition hover:opacity-80">查看全部</a>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <SurfaceCard className="flex h-[400px] min-w-0 flex-col overflow-hidden">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] px-5">
+            <h3 className="font-semibold">最近操作与异常</h3>
+            <Link to="/logs" className="text-sm text-[var(--accent)] transition hover:opacity-80">查看全部</Link>
           </div>
-          <div className="flex-1 overflow-auto">
-            {logs.length === 0 ? (
-              <div className="px-5 py-10 text-sm text-soft">暂无日志记录</div>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {logsQuery.isError ? (
+              <p role="alert" className="px-5 py-10 text-sm text-[var(--danger)]">操作记录加载失败，请点击顶部刷新重试。</p>
+            ) : logs.length === 0 ? (
+              <div className="px-5 py-10 text-sm text-soft">{logsQuery.isFetching ? '正在加载…' : '暂无日志记录'}</div>
             ) : (
               logs.map((log) => (
-                <div key={log.id} className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
+                <div key={log.id} className="flex items-start gap-3 border-b border-[var(--border)] px-5 py-3 last:border-b-0">
                   <div className="min-w-0 flex items-start gap-3">
                     {logIcon(log)}
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold">{log.action}</div>
-                      <div className="mt-1 text-sm text-soft">{log.message || log.target || '系统事件'}</div>
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm"><span className="font-medium">{log.action}</span>{log.target && <span className="break-all text-soft">{log.target}</span>}</div>
+                      <div className="mt-1 break-words text-sm text-soft">{log.message || '系统事件'}</div>
                     </div>
                   </div>
-                  <div className="shrink-0 text-right">
-                    <div className="text-xs text-faint">{new Date(log.created_at).toLocaleString('zh-CN')}</div>
-                    <div className="mt-1 text-xs text-faint">{log.target || '系统事件'}</div>
-                  </div>
+                  <time className="ml-auto shrink-0 pt-0.5 text-xs text-faint" dateTime={log.created_at} title={new Date(log.created_at).toLocaleString('zh-CN')}>{new Date(log.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time>
                 </div>
               ))
             )}
           </div>
         </SurfaceCard>
 
-        <SurfaceCard className="flex h-full max-h-[420px] flex-col overflow-hidden">
-          <div className="flex h-14 items-center justify-between border-b border-[var(--border)] px-5">
-            <h3 className="text-lg font-semibold">节点健康</h3>
-            <Btn variant="ghost" onClick={() => void nodesQuery.refetch()}>
-              <RefreshCcw className="h-4 w-4" />
+        <SurfaceCard className="flex h-[400px] min-w-0 flex-col overflow-hidden">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] px-5">
+            <h3 className="font-semibold">节点健康</h3>
+            <Btn variant="ghost" className="h-8 px-2" onClick={() => void nodesQuery.refetch()} disabled={nodesQuery.isFetching}>
+              <RefreshCcw className={`h-4 w-4 ${nodesQuery.isFetching ? 'animate-spin' : ''}`} />
               刷新
             </Btn>
           </div>
-          <div className="flex-1 overflow-auto">
-            {sortedNodes.length === 0 ? (
-              <div className="px-5 py-10 text-sm text-soft">暂无可用节点数据</div>
+          <div className="min-h-0 flex-1 overflow-auto">
+            {nodesQuery.isError ? (
+              <p role="alert" className="px-5 py-10 text-sm text-[var(--danger)]">节点健康加载失败，请刷新重试。</p>
+            ) : sortedNodes.length === 0 ? (
+              <div className="px-5 py-10 text-sm text-soft">{nodesQuery.isFetching ? '正在加载…' : '暂无可用节点数据'}</div>
             ) : (
               sortedNodes.map((node) => <NodeHealthRow key={node.id} node={node} />)
             )}
