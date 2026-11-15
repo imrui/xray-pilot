@@ -49,11 +49,12 @@ func (h *NodeHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	filter := repository.NodeListFilter{
-		Keyword:    c.Query("keyword"),
-		SyncStatus: c.Query("sync_status"),
-		Region:     c.Query("region"),
-		Owner:      c.Query("owner"),
-		Health:     c.Query("health"),
+		Keyword:         c.Query("keyword"),
+		SyncStatus:      c.Query("sync_status"),
+		Region:          c.Query("region"),
+		Owner:           c.Query("owner"),
+		Health:          c.Query("health"),
+		HealthDashboard: c.Query("health_dashboard") == "true",
 	}
 	nodes, total, err := h.svc.List(page, pageSize, filter)
 	if err != nil {

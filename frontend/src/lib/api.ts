@@ -89,6 +89,7 @@ export interface NodeListParams extends PageParams {
   owner?: string
   /** 健康检测筛选：healthy / unhealthy / unchecked */
   health?: string
+  health_dashboard?: boolean
 }
 
 export const nodeApi = {

@@ -173,3 +173,35 @@ func TestTrafficRangeValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyticsZeroUsesEnabledCollectors(t *testing.T) {
+	start, svc := analyticsFixture(t)
+	repository.DB.Model(&entity.Node{}).Where("1 = 1").Update("active", false)
+	repository.DB.Model(&entity.Node{}).Where("id IN ?", []uint{1, 2}).Update("active", true)
+	repository.DB.Model(&entity.Node{}).Where("id = ?", 1).Update("last_check_ok", true)
+	repository.NewTrafficRepository().WriteCycle([]entity.TrafficSample{{NodeID: 99, UserID: 1, PeriodEnd: start, UpBytes: 4}}, nil,
+		entity.TrafficPoll{NodeID: 1, PeriodEnd: start.Add(time.Hour), Success: true},
+		entity.TrafficPoll{NodeID: 2, PeriodEnd: start.Add(time.Hour), Success: true},
+		entity.TrafficPoll{NodeID: 1, PeriodEnd: start.Add(2 * time.Hour), Success: true},
+		entity.TrafficPoll{NodeID: 2, PeriodEnd: start.Add(2 * time.Hour), Success: false})
+	for _, dimension := range []string{"all", "user"} {
+		out, err := svc.Analytics(context.Background(), dto.TrafficRange{Start: start, End: start.Add(3 * time.Hour), Dimension: dimension}, start.Add(3*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := out.Series[0].Points
+		if p[0].UpBytes == nil || *p[0].UpBytes != 4 || p[1].UpBytes == nil || *p[1].UpBytes != 0 || p[2].UpBytes != nil {
+			t.Fatalf("%s incorrect missing/zero buckets: %+v", dimension, p)
+		}
+		if out.EnabledNodes != 2 || out.HealthyNodes != 1 || out.TotalNodes != 7 {
+			t.Fatalf("incorrect health denominator: %+v", out)
+		}
+	}
+	p := entity.InboundProfile{Name: "enabled", Active: true}
+	repository.DB.Create(&p)
+	repository.DB.Create(&[]entity.NodeProfileKey{{NodeID: 1, ProfileID: p.ID}, {NodeID: 3, ProfileID: p.ID}})
+	nodes, total, err := repository.NewNodeRepository().List(1, 200, repository.NodeListFilter{HealthDashboard: true})
+	if err != nil || total != 1 || len(nodes) != 1 || nodes[0].ID != 1 {
+		t.Fatalf("health list: %+v %d %v", nodes, total, err)
+	}
+}

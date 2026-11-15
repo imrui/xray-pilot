@@ -57,7 +57,14 @@ function NodeHealthRow({ node }: { node: Node }) {
 export default function Dashboard() {
   const nodesQuery = useQuery({
     queryKey: ['dashboard-nodes'],
-    queryFn: () => nodeApi.list({ page: 1, page_size: 200 }).then((r) => r.data.data!),
+    queryFn: async () => {
+      const list: Node[] = []
+      for (let page = 1; ; page++) {
+        const data = (await nodeApi.list({ page, page_size: 200, health_dashboard: true })).data.data!
+        list.push(...(data.list ?? []))
+        if (!data.list?.length || list.length >= data.total) return { list }
+      }
+    },
   })
   const logsQuery = useQuery({
     queryKey: ['dashboard-logs'],

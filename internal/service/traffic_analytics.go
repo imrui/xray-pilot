@@ -109,7 +109,7 @@ func (s *TrafficService) Analytics(ctx context.Context, window dto.TrafficRange,
 		}
 		return a.UpBytes+a.DownBytes > b.UpBytes+b.DownBytes
 	})
-	// A zero is only emitted with collection evidence for the relevant node(s).
+	// 仅当相关采集节点有成功证据且没有失败记录时补零。
 	successes := map[int64]map[uint]bool{}
 	failures := map[int64]map[uint]bool{}
 	for _, p := range polls {
@@ -131,11 +131,12 @@ func (s *TrafficService) Analytics(ctx context.Context, window dto.TrafficRange,
 	if window.NodeID != 0 {
 		allNodes[window.NodeID] = true
 	} else {
-		for id := range nodes {
-			allNodes[id] = true
+		collectors, err := s.nodeRepo.FindAll()
+		if err != nil {
+			return nil, err
 		}
-		for id := range activeNodes {
-			allNodes[id] = true
+		for _, n := range collectors {
+			allNodes[n.ID] = true
 		}
 	}
 	first := (window.Start.Unix() + 28800) / seconds

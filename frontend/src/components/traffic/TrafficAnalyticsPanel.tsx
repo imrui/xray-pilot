@@ -46,7 +46,7 @@ export function TrafficAnalyticsPanel() {
   return <div className="space-y-4">
     <SurfaceCard className="p-4">
       <div className="mb-4 flex flex-wrap gap-x-6 gap-y-2 text-sm" aria-label="当前运行概况">
-        <span>当前节点 <b>{data?.total_nodes ?? '—'}</b></span><span>健康 <b>{data ? `${data.healthy_nodes} / ${data.total_nodes}` : '—'}</b></span><span>已启用用户 <b>{data?.enabled_users ?? '—'}</b> / {data?.total_users ?? '—'}</span><span className="text-xs text-soft">当前状态，不随时间筛选变化</span>
+        <span>当前节点 <b>{data?.total_nodes ?? '—'}</b></span><span>启用节点健康 <b>{data ? `${data.healthy_nodes} / ${data.enabled_nodes}` : '—'}</b></span><span>已启用用户 <b>{data?.enabled_users ?? '—'}</b> / {data?.total_users ?? '—'}</span><span className="text-xs text-soft">当前状态，不随时间筛选变化</span>
       </div>
       <DateRangePicker value={range} onChange={changeRange} />
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-soft"><span>台北时间（UTC+8）· 按采集时间归入统计区间</span><button className="inline-flex items-center gap-1 rounded p-1 hover:text-[var(--accent)]" onClick={() => { setClock(new Date()); if (selection.preset === 'custom' || selection.preset === 'yesterday') void query.refetch() }} disabled={query.isFetching}><RefreshCcw className={`h-3 w-3 ${query.isFetching ? 'animate-spin' : ''}`} />{query.isFetching ? '更新中…' : '刷新'}</button></div>

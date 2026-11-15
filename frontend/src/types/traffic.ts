@@ -7,7 +7,7 @@ export interface TrafficSeries { id: string; name: string; points: TrafficPoint[
 export interface TrafficAnalytics extends TrafficAmount {
   start: string; end: string; timezone: string; interval: 'hour' | 'day'
   active_users: number; active_nodes: number
-  total_nodes: number; total_users: number; enabled_users: number; healthy_nodes: number
+  enabled_nodes: number; total_nodes: number; total_users: number; enabled_users: number; healthy_nodes: number
   successful_polls: number; failed_polls: number
   last_poll_at: string | null; retention_start: string | null; truncated: boolean
   nodes: TrafficOption[]; users: TrafficOption[]

@@ -56,7 +56,8 @@ type NodeListFilter struct {
 	Owner      string
 	// Health 健康检测筛选：healthy / unhealthy / unchecked（空 = 不筛选）。
 	// 语义与仪表盘一致：异常 = 检测过且失败；从未检测过的不算异常。
-	Health string
+	Health          string
+	HealthDashboard bool
 }
 
 func (f NodeListFilter) apply(db *gorm.DB) *gorm.DB {
@@ -75,6 +76,9 @@ func (f NodeListFilter) apply(db *gorm.DB) *gorm.DB {
 	}
 	if f.Owner != "" {
 		db = db.Where("owner = ?", f.Owner)
+	}
+	if f.HealthDashboard {
+		db = nodesWithActiveProtocolsScope(db.Where("nodes.active = ?", true))
 	}
 	switch f.Health {
 	case "healthy":

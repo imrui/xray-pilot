@@ -25,14 +25,12 @@ type PollBucket struct {
 	Count   int64
 }
 
-// modernc stores Go's "... +0800 CST" format; other installations use RFC3339.
-// Separate whole seconds from the fraction: SQLite date functions round to
-// milliseconds, which could move a sample just before midnight into tomorrow.
+// modernc 保存 Go 时区格式，其他环境使用 RFC3339。
+// 秒与小数分开解析，避免 SQLite 毫秒舍入把午夜前样本计入下一天。
 const sqliteTrafficZone = "CASE WHEN instr(substr(period_end, 20), ' ') > 0 THEN substr(period_end, 20 + instr(substr(period_end, 20), ' '), 3) || ':' || substr(period_end, 23 + instr(substr(period_end, 20), ' '), 2) WHEN substr(period_end, -1) = 'Z' THEN 'Z' WHEN substr(period_end, -6, 1) IN ('+', '-') THEN substr(period_end, -6) ELSE '' END"
 const sqliteTrafficInstant = "(unixepoch(substr(period_end, 1, 19) || (" + sqliteTrafficZone + ")) * 1000000000 + CASE WHEN substr(period_end, 20, 1) = '.' THEN CAST(ROUND(CAST('0' || substr(period_end, 20) AS REAL) * 1000000000) AS INTEGER) ELSE 0 END)"
 
-// Timezone is explicitly Asia/Taipei (UTC+8) throughout the dashboard.
-// Aggregate in SQL, so a 90-day query doesn't load millions of raw samples.
+// 统一采用台北时区 UTC+8，在 SQL 中聚合，避免长时间范围载入全部明细。
 func trafficBucketSQL(db *gorm.DB, seconds int64) string {
 	if db.Dialector.Name() == "postgres" {
 		return fmt.Sprintf("CAST(FLOOR((EXTRACT(EPOCH FROM period_end) + 28800) / %d) AS BIGINT)", seconds)
@@ -81,6 +79,9 @@ func (r *TrafficRepository) AnalyticsContext(ctx context.Context, window dto.Tra
 		return err
 	}
 	out.TotalNodes = int64(len(out.Nodes))
+	if err := db.Model(&entity.Node{}).Where("active = ?", true).Count(&out.EnabledNodes).Error; err != nil {
+		return err
+	}
 	out.TotalUsers = int64(len(out.Users))
 	if err := db.Model(&entity.User{}).Where("active = ?", true).Count(&out.EnabledUsers).Error; err != nil {
 		return err

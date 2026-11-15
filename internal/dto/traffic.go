@@ -4,7 +4,7 @@ import "time"
 
 type TrafficRange struct {
 	Start     time.Time
-	End       time.Time // exclusive: adjacent queries never double count a sample
+	End       time.Time // 不含结束时刻，避免相邻区间重复计数
 	Dimension string
 	NodeID    uint
 	UserID    uint
@@ -27,7 +27,7 @@ type TrafficRanking struct {
 
 type TrafficPoint struct {
 	Time time.Time `json:"time"`
-	// nil means no evidence of a successful collection, not zero usage.
+	// nil 表示缺少成功采集证据，不代表零用量。
 	UpBytes   *int64 `json:"up_bytes"`
 	DownBytes *int64 `json:"down_bytes"`
 }
@@ -46,6 +46,7 @@ type TrafficAnalytics struct {
 	TrafficAmount
 	ActiveUsers     int              `json:"active_users"`
 	ActiveNodes     int              `json:"active_nodes"`
+	EnabledNodes    int64            `json:"enabled_nodes"`
 	TotalNodes      int64            `json:"total_nodes"`
 	TotalUsers      int64            `json:"total_users"`
 	EnabledUsers    int64            `json:"enabled_users"`
