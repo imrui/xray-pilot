@@ -13,12 +13,22 @@ import (
 // VerifyConfigReceipt confirms the disk hash and the exact process instance that
 // passed the protocol probe. A matching file alone is deliberately insufficient.
 func (c *Client) VerifyConfigReceipt(content, configPath string) (string, error) {
+	return c.verifyReceipt(content, configPath, "verified")
+}
+
+// A recovery receipt confirms the restored file and running process, not the
+// failed policy's protocol health. It must never count as a successful apply.
+func (c *Client) VerifyRecoveryReceipt(content, configPath string) (string, error) {
+	return c.verifyReceipt(content, configPath, "restored")
+}
+
+func (c *Client) verifyReceipt(content, configPath, phase string) (string, error) {
 	raw, err := c.ReadRemoteFile(path.Join(path.Dir(configPath), ".pilot-config-state"))
 	if err != nil {
 		return "", fmt.Errorf("缺少完整应用回执")
 	}
 	var receipt struct{ Phase, Hash, Process string }
-	if json.Unmarshal([]byte(raw), &receipt) != nil || receipt.Phase != "verified" {
+	if json.Unmarshal([]byte(raw), &receipt) != nil || receipt.Phase != phase || receipt.Process == "" {
 		return "", fmt.Errorf("远端尚未确认健康")
 	}
 	sum := sha256.Sum256([]byte(content))

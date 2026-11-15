@@ -19,9 +19,18 @@ import (
 // 使用真实本地 SSH 会话验证响应丢失后的路径，不允许发出任何修改命令。
 func TestMatchingTargetOnlyReconciles(t *testing.T) {
 	for _, tc := range []struct {
-		name                      string
-		verified, manual, initial bool
-	}{{name: "verified", verified: true}, {name: "unknown"}, {name: "manual", manual: true}, {name: "manual-with-initial-permit", manual: true, initial: true}} {
+		name                              string
+		verified, manual, initial         bool
+		phase                             string
+		recovery, badHash, changedProcess bool
+	}{
+		{name: "verified", verified: true}, {name: "unknown"}, {name: "manual", manual: true}, {name: "manual-with-initial-permit", manual: true, initial: true},
+		{name: "restored", phase: "restored", recovery: true, verified: true},
+		{name: "restored-file-changed", phase: "restored", recovery: true, badHash: true},
+		{name: "restored-process-changed", phase: "restored", recovery: true, changedProcess: true},
+		{name: "restored-is-not-healthy", phase: "restored"},
+		{name: "healthy-is-not-restored", phase: "verified", recovery: true},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			verified := tc.verified
 			_, key, err := ed25519.GenerateKey(rand.Reader)
@@ -41,8 +50,16 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 			defer listener.Close()
 			raw := `{"inbounds":[],"outbounds":[{"tag":"direct","protocol":"freedom"}]}`
 			sum := sha256.Sum256([]byte(raw))
-			receipt, _ := json.Marshal(map[string]string{"phase": "verified", "hash": hex.EncodeToString(sum[:]), "process": "17\n123"})
-			if !verified {
+			phase := tc.phase
+			if phase == "" {
+				phase = "verified"
+			}
+			receiptHash := hex.EncodeToString(sum[:])
+			if tc.badHash {
+				receiptHash = strings.Repeat("0", 64)
+			}
+			receipt, _ := json.Marshal(map[string]string{"phase": phase, "hash": receiptHash, "process": "17\n123"})
+			if !verified && tc.phase == "" {
 				receipt = []byte("persisted")
 			}
 			var mutations atomic.Int32
@@ -86,6 +103,9 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 								response = base64.StdEncoding.EncodeToString(data)
 							case strings.HasPrefix(cmd.Command, "systemctl is-active --quiet xray && systemctl show"):
 								response = "17\n123"
+								if tc.changedProcess {
+									response = "18\n456"
+								}
 							default:
 								mutations.Add(1)
 								status = 1
@@ -106,7 +126,11 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 			if tc.manual {
 				candidate = strings.Replace(raw, "direct", "new-direct", 1)
 			}
-			err = client.ApplyXrayConfig(candidate, "/etc/xray/config.json", true, false, TransactionOptions{AllowInitial: tc.initial})
+			if tc.recovery {
+				_, err = client.VerifyRecoveryReceipt(candidate, "/etc/xray/config.json")
+			} else {
+				err = client.ApplyXrayConfig(candidate, "/etc/xray/config.json", true, false, TransactionOptions{AllowInitial: tc.initial})
+			}
 			client.Close()
 			select {
 			case <-done:
@@ -125,7 +149,7 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 			if verified && err != nil {
 				t.Fatal(err)
 			}
-			if !verified && (err == nil || !strings.Contains(err.Error(), "未完成")) {
+			if !verified && err == nil {
 				t.Fatalf("unverified target reported success: %v", err)
 			}
 		})

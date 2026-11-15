@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/imrui/xray-pilot/pkg/crypto"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -15,12 +14,14 @@ import (
 // ApplyXrayConfig validates before replacing, serializes remote writers and refuses
 // rollback across an authorization change. validateOnly never mutates live config.
 type TransactionOptions struct {
-	BaselineHash    string
-	AllowInitial    bool
-	BeforeApply     func() error
-	ProbeURL        string
-	OnPhase         func(string)
-	RollbackContent string
+	BaselineHash        string
+	AllowInitial        bool
+	InitialBaselineHash string
+	OnBaseline          func(string) error
+	BeforeApply         func() error
+	ProbeURL            string
+	OnPhase             func(string)
+	RollbackContent     string
 }
 
 func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly bool, opts ...TransactionOptions) error {
@@ -40,17 +41,8 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 		return nil
 	}
 	if !validateOnly {
-		baseline := opt.BaselineHash
-		if baseline == "" {
-			baseline = crypto.HashConfig(content)
-			// 首装许可只接受空的安装器配置，不授权覆盖后来写入的手工配置。
-			var bootstrap map[string]any
-			if opt.AllowInitial && json.Unmarshal([]byte(old), &bootstrap) == nil && bootstrap != nil && len(bootstrap) == 0 {
-				baseline = crypto.HashConfig(old)
-			}
-		}
-		if baseline != "" && crypto.HashConfig(old) != baseline && crypto.HashConfig(old) != crypto.HashConfig(content) {
-			return fmt.Errorf("DRIFT_CONFLICT：当前文件与纳管基线不一致，请先核对")
+		if err := acceptConfigBaseline(old, content, opt); err != nil {
+			return err
 		}
 		if opt.BeforeApply != nil {
 			if err := opt.BeforeApply(); err != nil {
@@ -130,6 +122,25 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 		return fmt.Errorf("节点配置任务未完成，请核对远端状态后重试")
 	}
 	return nil
+}
+
+func acceptConfigBaseline(old, desired string, opt TransactionOptions) error {
+	if crypto.HashConfig(old) == crypto.HashConfig(desired) {
+		return nil
+	}
+	if opt.BaselineHash != "" && crypto.HashConfig(old) == opt.BaselineHash {
+		return nil
+	}
+	raw := sha256.Sum256([]byte(old))
+	if opt.BaselineHash == "" && opt.AllowInitial && opt.InitialBaselineHash == hex.EncodeToString(raw[:]) {
+		// Establish the attested baseline before preflight. A preflight failure
+		// can then be retried without granting permission for a different file.
+		if opt.OnBaseline != nil {
+			return opt.OnBaseline(crypto.HashConfig(old))
+		}
+		return nil
+	}
+	return fmt.Errorf("DRIFT_CONFLICT：当前文件与纳管基线不一致，请先核对")
 }
 
 type limitedOutput struct {
@@ -274,10 +285,11 @@ if systemctl restart xray; then
  sleep 2
  echo PILOT:PHASE:verifying
  if healthy; then
-  python3 - "$path" "$dir" <<'PILOT_RECEIPT'
-import hashlib,json,os,shutil,sys,time,subprocess,tempfile
-p,d=sys.argv[1:]
-receipt={"phase":"verified","hash":hashlib.sha256(open(p,"rb").read()).hexdigest(),"process":subprocess.check_output(["systemctl","show","xray","-p","MainPID","-p","ExecMainStartTimestampMonotonic","--value"],text=True).strip()}
+  process=$(systemctl show xray -p MainPID -p ExecMainStartTimestampMonotonic --value)
+  python3 - "$path" "$dir" "$process" <<'PILOT_RECEIPT'
+import hashlib,json,os,shutil,sys,time,tempfile
+p,d,process=sys.argv[1:]
+receipt={"phase":"verified","hash":hashlib.sha256(open(p,"rb").read()).hexdigest(),"process":process.strip()}
 state=d+"/.pilot-config-state"
 fd,receipt_tmp=tempfile.mkstemp(prefix=".pilot-receipt.",dir=d)
 with os.fdopen(fd,"w") as f:
@@ -305,7 +317,16 @@ if test "$decision" = COMMIT; then
  mv -f "$tmp.rollback" "$path"
  sync -f "$dir"
  if test "$(sha256sum "$path" | cut -d ' ' -f1)" = "$rollback_hash" && systemctl restart xray && systemctl is-active --quiet xray; then
-  printf '%s\n' restored_unverified > "$dir/.pilot-config-state"
+  process=$(systemctl show xray -p MainPID -p ExecMainStartTimestampMonotonic --value)
+  python3 - "$path" "$dir" "$process" <<'PILOT_RECOVERY_RECEIPT'
+import hashlib,json,os,sys,tempfile
+p,d,process=sys.argv[1:]
+receipt={"phase":"restored","hash":hashlib.sha256(open(p,"rb").read()).hexdigest(),"process":process.strip()}
+fd,tmp=tempfile.mkstemp(prefix=".pilot-receipt.",dir=d)
+with os.fdopen(fd,"w") as f:
+    json.dump(receipt,f);f.flush();os.fsync(f.fileno())
+os.replace(tmp,d+"/.pilot-config-state")
+PILOT_RECOVERY_RECEIPT
   echo ROLLED_BACK; exit 27
  fi
  echo ROLLBACK_FAILED
@@ -322,28 +343,43 @@ exit 26`
 
 // 恢复文件必须满足当前授权，不能回放旧 UUID、密钥或已删除协议。
 func rollbackCandidate(old, desired, fallback string) (string, error) {
-	var a, b map[string]any
-	if json.Unmarshal([]byte(old), &a) != nil || json.Unmarshal([]byte(desired), &b) != nil {
+	want := AuthorizationHash(desired)
+	if want == "" {
 		return "", fmt.Errorf("恢复配置无效")
 	}
-	protected := func(v map[string]any) []any {
-		var out []any
-		r, _ := v["routing"].(map[string]any)
-		rules, _ := r["rules"].([]any)
-		for _, rule := range rules {
-			m, _ := rule.(map[string]any)
-			if m["inboundTag"] != nil || m["source"] != nil || m["ip"] != nil {
-				out = append(out, rule)
-			}
-		}
-		return out
-	}
-	if reflect.DeepEqual(a["inbounds"], b["inbounds"]) && reflect.DeepEqual(protected(a), protected(b)) {
+	if AuthorizationHash(old) == want {
 		return old, nil
 	}
-	var f map[string]any
-	if fallback == "" || json.Unmarshal([]byte(fallback), &f) != nil || !reflect.DeepEqual(f["inbounds"], b["inbounds"]) || !reflect.DeepEqual(protected(f), protected(b)) {
+	if AuthorizationHash(fallback) != want {
 		return "", fmt.Errorf("PREFLIGHT_FAILED：缺少符合当前授权的恢复配置")
 	}
 	return fallback, nil
+}
+
+// AuthorizationHash identifies current credentials and system protection rules,
+// independently of administrator-controlled destination routing (including IPs).
+// Invalid JSON has no usable authorization fingerprint.
+func AuthorizationHash(content string) string {
+	var cfg map[string]any
+	if json.Unmarshal([]byte(content), &cfg) != nil || cfg == nil {
+		return ""
+	}
+	var protected []any
+	routing, _ := cfg["routing"].(map[string]any)
+	rules, _ := routing["rules"].([]any)
+	for _, rule := range rules {
+		m, _ := rule.(map[string]any)
+		guard := m["inboundTag"] != nil || m["source"] != nil
+		ips, _ := m["ip"].([]any)
+		for _, ip := range ips {
+			if ip == "geoip:private" {
+				guard = true
+			}
+		}
+		if guard {
+			protected = append(protected, rule)
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"inbounds": cfg["inbounds"], "protected": protected})
+	return crypto.HashConfig(string(raw))
 }

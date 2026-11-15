@@ -19,29 +19,32 @@ const xrayConfigPath = RemoteConfigPath
 
 // SSHParams SSH 连接参数
 type SSHParams struct {
-	Host            string
-	Port            int
-	User            string
-	KeyPath         string
-	KnownHostsPath  string // TOFU known_hosts 文件路径
-	BaselineHash    string
-	AllowInitial    bool
-	BeforeApply     func() error
-	ProbeURL        string
-	ConfigPath      string
-	OnPhase         func(string)
-	RollbackContent string
+	Host                string
+	Port                int
+	User                string
+	KeyPath             string
+	KnownHostsPath      string // TOFU known_hosts 文件路径
+	BaselineHash        string
+	AllowInitial        bool
+	InitialBaselineHash string
+	OnBaseline          func(string) error
+	BeforeApply         func() error
+	ProbeURL            string
+	ConfigPath          string
+	OnPhase             func(string)
+	RollbackContent     string
 }
 
 // SyncResult 单次同步结果
 type SyncResult struct {
-	Success       bool
-	ElapsedMs     int64
-	XrayVersion   string
-	Error         string
-	ObservedHash  string
-	RecoveredHash string
-	ProcessID     string
+	Success                    bool
+	ElapsedMs                  int64
+	XrayVersion                string
+	Error                      string
+	ObservedHash               string
+	RecoveredHash              string
+	RecoveredAuthorizationHash string
+	ProcessID                  string
 }
 
 // SyncWithFallback 通过 SSH 事务应用完整配置；用户差异由 LiveSync 单独处理。
@@ -69,7 +72,7 @@ func SyncWithFallback(params SSHParams, configContent string) *SyncResult {
 	}
 	defer client.Close()
 
-	if err := client.ApplyXrayConfig(configContent, configPath, true, false, xssh.TransactionOptions{BaselineHash: params.BaselineHash, AllowInitial: params.AllowInitial, BeforeApply: params.BeforeApply, ProbeURL: params.ProbeURL, OnPhase: params.OnPhase, RollbackContent: params.RollbackContent}); err != nil {
+	if err := client.ApplyXrayConfig(configContent, configPath, true, false, xssh.TransactionOptions{BaselineHash: params.BaselineHash, AllowInitial: params.AllowInitial, InitialBaselineHash: params.InitialBaselineHash, OnBaseline: params.OnBaseline, BeforeApply: params.BeforeApply, ProbeURL: params.ProbeURL, OnPhase: params.OnPhase, RollbackContent: params.RollbackContent}); err != nil {
 		result := &SyncResult{ElapsedMs: time.Since(start).Milliseconds(), Error: fmt.Sprintf("上传配置失败: %v", err)}
 		if strings.Contains(err.Error(), "目标文件已存在") {
 			if raw, e := client.ReadRemoteFile(configPath); e == nil && ConfigHash(raw) == ConfigHash(configContent) {
@@ -79,6 +82,10 @@ func SyncWithFallback(params SSHParams, configContent string) *SyncResult {
 		if strings.Contains(err.Error(), "ROLLED_BACK") {
 			if raw, e := client.ReadRemoteFile(configPath); e == nil {
 				result.RecoveredHash = ConfigHash(raw)
+				if process, e := client.VerifyRecoveryReceipt(raw, configPath); e == nil {
+					result.RecoveredAuthorizationHash = xssh.AuthorizationHash(raw)
+					result.ProcessID = process
+				}
 			}
 		}
 		return result

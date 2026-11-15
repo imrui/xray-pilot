@@ -161,7 +161,8 @@ func TestReplaceToken_UpdatesExistingNode(t *testing.T) {
 	if err := svc.BindTokenIP(tok, "192.0.2.2"); err != nil {
 		t.Fatalf("bind ip: %v", err)
 	}
-	regResp, err := svc.RegisterNode(tok, "192.0.2.2", &dto.RegisterNodeRequest{PublicIP: "192.0.2.2"})
+	bootstrapHash := strings.Repeat("ab", 32)
+	regResp, err := svc.RegisterNode(tok, "192.0.2.2", &dto.RegisterNodeRequest{PublicIP: "192.0.2.2", BootstrapConfigSHA256: bootstrapHash})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -186,6 +187,9 @@ func TestReplaceToken_UpdatesExistingNode(t *testing.T) {
 	}
 	if state.DiskHash != "" || state.RuntimeHash != "" || state.ProcessID != "" || state.VerifiedAt != nil || !state.RecoveryPending {
 		t.Fatalf("stale machine receipt: %+v", state)
+	}
+	if !state.InitialBaseline || state.InitialBaselineHash != bootstrapHash || state.RuntimeAuthorizationHash != "" {
+		t.Fatal("replacement lost new installation baseline or retained old authorization")
 	}
 	var count int64
 	repository.DB.Table("nodes").Where("name = ?", "sg01").Count(&count)

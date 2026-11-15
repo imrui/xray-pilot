@@ -44,6 +44,7 @@ func TestTransactionStopsBeforeReplace(t *testing.T) {
 		name                                           string
 		fail, validate, drift, abort                   bool
 		restart, healthFail, rollbackFail, restartFail bool
+		customIP, initial                              bool
 	}{
 		{name: "preflight-failure", fail: true}, {name: "preview-only", validate: true},
 		{name: "drift-conflict", drift: true}, {name: "stale-before-commit", abort: true}, {name: "atomic-persist"},
@@ -51,6 +52,9 @@ func TestTransactionStopsBeforeReplace(t *testing.T) {
 		{name: "restart-health-restores", restart: true, healthFail: true},
 		{name: "restart-failure-restores", restart: true, restartFail: true},
 		{name: "restart-rollback-fails", restart: true, healthFail: true, rollbackFail: true},
+		{name: "custom-ip-restores", restart: true, healthFail: true, customIP: true},
+		{name: "installer-sample-first-apply", restart: true, initial: true},
+		{name: "api-only-first-apply", restart: true, initial: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -84,9 +88,23 @@ esac
 			path := filepath.Join(dir, "config.json")
 			old := `{"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"old"}]}`
 			next := `{"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"new"}]}`
+			if tc.initial {
+				old = `{"inbounds":[{"protocol":"socks","port":1080}],"outbounds":[{"protocol":"freedom","tag":"old"}]}`
+				if tc.name == "api-only-first-apply" {
+					next = strings.Replace(next, `"inbounds":[]`, `"inbounds":[{"protocol":"dokodemo-door","port":10085,"listen":"127.0.0.1","settings":{"address":"127.0.0.1"}}]`, 1)
+				}
+			}
+			if tc.customIP {
+				next = strings.TrimSuffix(next, "}") + `,"routing":{"rules":[{"type":"field","ip":["203.0.113.0/24"],"outboundTag":"new"}]}}`
+			}
 			os.WriteFile(path, []byte(old), 0600)
 			hash := sha256.Sum256([]byte(old))
 			expected := hex.EncodeToString(hash[:])
+			if tc.initial {
+				if err := acceptConfigBaseline(old, next, TransactionOptions{AllowInitial: true, InitialBaselineHash: expected}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if tc.drift {
 				expected = strings.Repeat("0", 64)
 			}
@@ -100,7 +118,11 @@ esac
 			}
 			var payload map[string]any
 			json.Unmarshal([]byte(envelope), &payload)
-			payload["rollback"] = old
+			rollback, err := rollbackCandidate(old, next, next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload["rollback"] = rollback
 			rawEnvelope, _ := json.Marshal(payload)
 			envelope = string(rawEnvelope)
 			script := "PATH=\"$PILOT_BIN:$PATH\"\n" + xrayTransactionScript(msys(path), expected, tc.restart, tc.validate)
@@ -150,6 +172,13 @@ esac
 					}
 					if !strings.Contains(string(out), marker) {
 						t.Fatalf("missing %s: %s", marker, out)
+					}
+					if !tc.rollbackFail {
+						raw, _ := os.ReadFile(filepath.Join(dir, ".pilot-config-state"))
+						var receipt struct{ Phase, Hash, Process string }
+						if json.Unmarshal(raw, &receipt) != nil || receipt.Phase != "restored" || receipt.Hash != hex.EncodeToString(hash[:]) || receipt.Process == "" {
+							t.Fatalf("missing recovery receipt: %s", raw)
+						}
 					}
 				}
 			}

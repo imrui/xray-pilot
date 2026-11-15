@@ -53,6 +53,7 @@ type ConfigDeployment struct {
 type NodeConfigState struct {
 	NodeID                      uint       `gorm:"primaryKey;autoIncrement:false" json:"node_id"`
 	InitialBaseline             bool       `json:"-"`
+	InitialBaselineHash         string     `json:"-"`
 	ChangeRevision              uint       `json:"change_revision"`
 	DesiredRevision             uint       `json:"desired_revision"`
 	DesiredHash                 string     `json:"desired_hash"`
@@ -60,6 +61,7 @@ type NodeConfigState struct {
 	DiskHash                    string     `json:"disk_hash"`
 	RuntimeRevision             uint       `json:"runtime_revision"`
 	RuntimeHash                 string     `json:"runtime_hash"`
+	RuntimeAuthorizationHash    string     `json:"-"`
 	LastHealthyRevision         uint       `json:"last_healthy_revision"`
 	LastHealthyPolicy           string     `gorm:"type:text" json:"-"`
 	LastHealthyTemplateID       uint       `json:"last_healthy_template_id"`

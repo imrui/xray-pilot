@@ -49,17 +49,22 @@ func confirmNodeRevocation(id uint) bool {
 		return false
 	}
 	raw, _, buildErr := svc.buildConfig(n)
-	if buildErr == nil && state.VerifiedAt != nil && state.RuntimeHash == xray.ConfigHash(raw) && state.DiskHash == state.RuntimeHash {
-		return true
+	if buildErr == nil && state.VerifiedAt != nil && state.RuntimeHash != "" && state.DiskHash == state.RuntimeHash {
+		// Recovery may run the previous routing policy with current credentials.
+		// A confirmed authorization receipt suffices for revocation; the policy
+		// itself stays pending and is retried on its normal recovery schedule.
+		if state.RuntimeHash == xray.ConfigHash(raw) || state.RuntimeAuthorizationHash != "" && state.RuntimeAuthorizationHash == xssh.AuthorizationHash(raw) {
+			return true
+		}
 	}
 	// 无法证明撤权已生效时，在线节点停止服务；离线节点保留待处理，不标为已摘除。
 	if err := stopRevokedNode(svc.sshParams(n)); err != nil {
-		_ = leaseUpdate(repository.DB, state, map[string]any{"recovery_pending": true, "last_error": "撤权未确认，节点不可达或停止失败", "runtime_hash": "", "verified_at": nil})
+		_ = leaseUpdate(repository.DB, state, map[string]any{"recovery_pending": true, "last_error": "撤权未确认，节点不可达或停止失败", "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil})
 		svc.reportSyncAlert(id, false, "撤权未确认：节点不可达或停止失败")
 		return false
 	}
 	msg := "AUTHORIZATION_STOPPED：已停止节点，等待当前授权配置恢复"
-	_ = leaseUpdate(repository.DB, state, map[string]any{"recovery_pending": true, "runtime_hash": "", "verified_at": nil, "last_error": msg, "next_retry_at": time.Now().Add(time.Minute)})
+	_ = leaseUpdate(repository.DB, state, map[string]any{"recovery_pending": true, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil, "last_error": msg, "next_retry_at": time.Now().Add(time.Minute)})
 	_ = svc.nodeRepo.UpdateSyncStatus(id, entity.SyncStatusDrifted, "")
 	repository.NewLogRepository().RecordWithActor("authorization_stop", fmt.Sprintf("node:%d", id), "system:expiry", false, msg, 0)
 	svc.reportSyncAlert(id, false, msg)

@@ -12,6 +12,9 @@ ROOT_HOME="${ROOT_HOME:-/root}"
 SSH_CONFIG_FILE="${SSH_CONFIG_FILE:-/etc/ssh/sshd_config}"
 AUTHORIZED_KEYS_FILE="${AUTHORIZED_KEYS_FILE:-${ROOT_HOME}/.ssh/authorized_keys}"
 SSH_CONFIG_BACKUP=""
+XRAY_CONFIG_FILE="/usr/local/etc/xray/config.json"
+# Captured immediately after installation; never recomputed during registration.
+BOOTSTRAP_CONFIG_SHA256=""
 
 # 自动接入模式（v0.4.0+）：检测 PANEL_URL + INSTALL_TOKEN 后从面板拉公钥并注册回填。
 # 这两个变量留空时脚本仍按原有交互模式运行，README 老用法不受影响。
@@ -129,8 +132,8 @@ report_to_panel() {
   fi
 
   local payload
-  payload="$(printf '{"public_ip":"%s","xray_version":"%s","kernel":"%s","distro":"%s"}' \
-    "${public_ip}" "${xray_version}" "${kernel}" "${distro}")"
+  payload="$(printf '{"public_ip":"%s","xray_version":"%s","kernel":"%s","distro":"%s","bootstrap_config_sha256":"%s"}' \
+    "${public_ip}" "${xray_version}" "${kernel}" "${distro}" "${BOOTSTRAP_CONFIG_SHA256}")"
 
   if ! curl -fsSL -X POST -H 'Content-Type: application/json' \
         -d "${payload}" "${url}" >/dev/null; then
@@ -223,7 +226,11 @@ configure_root_ssh() {
 }
 
 install_xray() {
-  local installer installed_version
+  local installer installed_version config_existed=false
+  BOOTSTRAP_CONFIG_SHA256=""
+  if [[ -e "${XRAY_CONFIG_FILE}" || -L "${XRAY_CONFIG_FILE}" ]]; then
+    config_existed=true
+  fi
   if ! installer="$(curl -fsSL "${XRAY_INSTALL_URL}")"; then
     echo "Failed to download the Xray installer." >&2
     return 1
@@ -235,6 +242,11 @@ install_xray() {
   if ! bash -c "${installer}" @ install --version "v${XRAY_VERSION}"; then
     echo "Failed to install Xray ${XRAY_VERSION}." >&2
     return 1
+  fi
+  # The official installer may preserve an existing manual configuration. Such
+  # a file must never gain first-install overwrite permission by re-running us.
+  if [[ "${config_existed}" == false && -f "${XRAY_CONFIG_FILE}" && ! -L "${XRAY_CONFIG_FILE}" ]]; then
+    BOOTSTRAP_CONFIG_SHA256="$(sha256sum "${XRAY_CONFIG_FILE}" | awk '{print $1}')"
   fi
   if ! installed_version="$(xray version | awk 'NR == 1 {print $2}')"; then
     echo "Failed to read the installed Xray version." >&2
@@ -273,6 +285,7 @@ main() {
   require_cmd systemctl
   require_cmd grep
   require_cmd awk
+  require_cmd sha256sum
   log_done "Prerequisites ready"
 
   if [[ "${AUTO_MODE}" == "true" ]]; then

@@ -11,6 +11,7 @@ import (
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/xray"
+	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
 
 // SyncService 节点配置同步与漂移检测服务
@@ -111,6 +112,19 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 		params.BaselineHash = node.ConfigHash
 	}
 	params.AllowInitial = state.InitialBaseline
+	params.InitialBaselineHash = state.InitialBaselineHash
+	params.OnBaseline = func(hash string) error {
+		if !s.stillCurrent(state, xray.ConfigHash(configContent)) {
+			return fmt.Errorf("期望配置已更新，请重新下发")
+		}
+		if err := leaseUpdate(repository.DB, state, map[string]any{"initial_baseline": false, "initial_baseline_hash": "", "disk_hash": hash}); err != nil {
+			return err
+		}
+		state.InitialBaseline = false
+		state.InitialBaselineHash = ""
+		state.DiskHash = hash
+		return nil
+	}
 	params.RollbackContent, _, err = s.buildConfigPolicy(node, state.LastHealthyPolicy)
 	if err != nil {
 		result.Error = "恢复配置生成失败：" + err.Error()
@@ -120,11 +134,6 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	params.BeforeApply = func() error {
 		if !s.stillCurrent(state, xray.ConfigHash(configContent)) {
 			return fmt.Errorf("期望配置已更新，请重新下发")
-		}
-		if state.InitialBaseline {
-			if err := leaseUpdate(repository.DB, state, map[string]any{"initial_baseline": false}); err != nil {
-				return err
-			}
 		}
 		return nil
 	}
@@ -141,11 +150,19 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 		}
 		s.failNode(node, actor, result.Error, syncResult.ElapsedMs)
 		if syncResult.ObservedHash != "" {
-			_ = leaseUpdate(repository.DB, state, map[string]any{"disk_hash": syncResult.ObservedHash, "disk_revision": state.DesiredRevision, "runtime_hash": "", "verified_at": nil})
+			_ = leaseUpdate(repository.DB, state, map[string]any{"disk_hash": syncResult.ObservedHash, "disk_revision": state.DesiredRevision, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil})
 		}
 		if strings.Contains(result.Error, "ROLLED_BACK") {
 			if syncResult.RecoveredHash != "" {
-				_ = leaseUpdate(repository.DB, state, map[string]any{"disk_hash": syncResult.RecoveredHash, "runtime_hash": "", "verified_at": nil})
+				updates := map[string]any{"disk_hash": syncResult.RecoveredHash, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil}
+				if syncResult.ProcessID != "" && syncResult.RecoveredAuthorizationHash != "" && syncResult.RecoveredAuthorizationHash == xssh.AuthorizationHash(configContent) && s.stillCurrent(state, xray.ConfigHash(configContent)) {
+					updates["runtime_hash"] = syncResult.RecoveredHash
+					updates["runtime_authorization_hash"] = syncResult.RecoveredAuthorizationHash
+					updates["verified_at"] = time.Now()
+					updates["process_id"] = syncResult.ProcessID
+					updates["verification"] = "recovery_service"
+				}
+				_ = leaseUpdate(repository.DB, state, updates)
 			}
 			_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusDrifted, "")
 		}

@@ -7,6 +7,7 @@ import (
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/xray"
+	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 	"gorm.io/gorm"
 	"strings"
 	"time"
@@ -48,7 +49,8 @@ func (s *SyncService) recordApplied(state *entity.NodeConfigState, content, proc
 	now := time.Now()
 	updates := map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": hash,
 		"runtime_revision": state.DesiredRevision, "runtime_hash": hash, "process_id": processID, "verified_at": now,
-		"last_error": "", "recovery_attempts": 0, "initial_baseline": false}
+		"runtime_authorization_hash": xssh.AuthorizationHash(content),
+		"last_error":                 "", "recovery_attempts": 0, "initial_baseline": false, "initial_baseline_hash": ""}
 	verification := "service_only"
 	var cfg struct {
 		Inbounds []struct {
@@ -96,12 +98,13 @@ func recordConfigFailure(id uint, message string) {
 		}
 	}
 	updates := map[string]any{"last_error": truncateRunes(message, 400), "recovery_attempts": gorm.Expr("recovery_attempts + 1"),
-		"next_retry_at": time.Now().Add(time.Minute), "recovery_pending": true, "runtime_hash": "", "verified_at": nil}
+		"next_retry_at": time.Now().Add(time.Minute), "recovery_pending": true, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil}
 	if terminal {
 		updates["recovery_attempts"] = 3
 	}
 	if strings.Contains(message, "ROLLED_BACK") {
 		delete(updates, "runtime_hash")
+		delete(updates, "runtime_authorization_hash")
 		delete(updates, "verified_at")
 		updates["recovery_pending"] = true
 		updates["next_retry_at"] = time.Now().Add(10 * time.Minute)
@@ -147,7 +150,7 @@ func deploymentPhaseRecorder(state *entity.NodeConfigState) func(string) {
 		}
 		repository.DB.Model(&entity.ConfigDeployment{}).Where("node_id = ? AND desired_hash = ? AND status IN ?", state.NodeID, state.DesiredHash, activeDeploymentPhases).Updates(map[string]any{"status": phase, "desired_revision": state.DesiredRevision})
 		if phase == "persisted" {
-			repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", state.NodeID, state.LeaseOwner).Updates(map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": state.DesiredHash, "runtime_hash": "", "verified_at": nil})
+			_ = leaseUpdate(repository.DB, state, map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": state.DesiredHash, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil})
 		}
 	}
 }
@@ -217,7 +220,7 @@ func (s *SyncService) recoverHealthyPolicy(nodeID uint, leaseOwner, actor, basel
 		return fmt.Errorf("%s", r.Error)
 	}
 	// 自动恢复只记录实际文件，不改变绑定、期望修订或期望哈希。
-	if err := leaseUpdate(repository.DB, &state, map[string]any{"disk_hash": xray.ConfigHash(content), "runtime_hash": xray.ConfigHash(content), "verified_at": time.Now(), "process_id": r.ProcessID, "recovery_pending": true, "next_retry_at": time.Now().Add(10 * time.Minute)}); err != nil {
+	if err := leaseUpdate(repository.DB, &state, map[string]any{"disk_hash": xray.ConfigHash(content), "runtime_hash": xray.ConfigHash(content), "runtime_authorization_hash": xssh.AuthorizationHash(content), "verified_at": time.Now(), "process_id": r.ProcessID, "verification": "recovery_verified", "recovery_pending": true, "next_retry_at": time.Now().Add(10 * time.Minute)}); err != nil {
 		return err
 	}
 	return finishNodeStatus(&state, xray.ConfigHash(content), false)

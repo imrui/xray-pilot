@@ -28,8 +28,8 @@ func probeEnvelope(content, probeURL string) (string, error) {
 	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
 		return "", err
 	}
-	var probes []any
-	var ports []any
+	probes := []any{}
+	ports := []any{}
 	inbounds, _ := cfg["inbounds"].([]any)
 	for _, raw := range inbounds {
 		in, ok := raw.(map[string]any)

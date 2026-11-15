@@ -70,7 +70,9 @@ func ReconcileDeployment(id uint) (*entity.ConfigDeployment, error) {
 		} else {
 			job.Status = "superseded"
 			job.Error = "旧版本曾成功应用，当前期望已变化"
-			repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ?", n.ID).Updates(map[string]any{"runtime_hash": actual, "process_id": process, "verified_at": time.Now(), "recovery_pending": true})
+			if err := leaseUpdate(repository.DB, state, map[string]any{"runtime_hash": actual, "runtime_authorization_hash": xssh.AuthorizationHash(raw), "process_id": process, "verified_at": time.Now(), "recovery_pending": true}); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := repository.DB.Model(&entity.ConfigDeployment{}).Where("id = ? AND status = ?", id, "unknown").Updates(map[string]any{"status": job.Status, "error": job.Error}).Error; err != nil {

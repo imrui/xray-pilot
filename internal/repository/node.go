@@ -147,7 +147,7 @@ func (r *NodeRepository) UpdateActive(id uint, active bool) error {
 
 // ReplaceHost invalidates receipts from the old machine while preserving routing bindings.
 // The caller holds the configuration lease throughout replacement registration.
-func (r *NodeRepository) ReplaceHost(node *entity.Node) error {
+func (r *NodeRepository) ReplaceHost(node *entity.Node, bootstrapHash string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(node).Error; err != nil {
 			return err
@@ -156,7 +156,8 @@ func (r *NodeRepository) ReplaceHost(node *entity.Node) error {
 			return err
 		}
 		if err := tx.Model(&entity.NodeConfigState{}).Where("node_id = ?", node.ID).Updates(map[string]any{
-			"initial_baseline": true, "desired_hash": "", "disk_hash": "", "runtime_hash": "", "disk_revision": 0, "runtime_revision": 0,
+			"initial_baseline": bootstrapHash != "", "initial_baseline_hash": bootstrapHash,
+			"desired_hash": "", "disk_hash": "", "runtime_hash": "", "runtime_authorization_hash": "", "disk_revision": 0, "runtime_revision": 0,
 			"verified_at": nil, "process_id": "", "verification": "", "last_error": "",
 		}).Error; err != nil {
 			return err
