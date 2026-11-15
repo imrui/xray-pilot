@@ -150,6 +150,8 @@ curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/scripts/node-
 
 Administrators can change **Xray 稳定版本** under **系统设置 → 节点与同步 → Xray 安装版本** (default: `26.3.27`). Each newly generated command includes that version as `XRAY_VERSION`; existing commands retain the version selected when they were generated. Changing this setting does not update existing nodes. Running a bootstrap command installs its specified version, including downgrading a different version already present on the target node, and stops if the installer fails or the installed version does not match.
 
+For LAN or NAT deployments, add `NODE_IP=192.168.10.3` before `bash` in the generated command to register the address reachable from the panel. Both IPv4 and IPv6 addresses are supported; without this option, the script detects the public IPv4 address as before.
+
 ## Upgrade
 
 Existing Linux installations can be upgraded by re-running the installer:

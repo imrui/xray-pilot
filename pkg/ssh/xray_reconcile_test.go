@@ -23,13 +23,18 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 		verified, manual, initial         bool
 		phase                             string
 		recovery, badHash, changedProcess bool
+		recheck, live, badPath            bool
 	}{
 		{name: "verified", verified: true}, {name: "unknown"}, {name: "manual", manual: true}, {name: "manual-with-initial-permit", manual: true, initial: true},
 		{name: "restored", phase: "restored", recovery: true, verified: true},
 		{name: "restored-file-changed", phase: "restored", recovery: true, badHash: true},
 		{name: "restored-process-changed", phase: "restored", recovery: true, changedProcess: true},
 		{name: "restored-is-not-healthy", phase: "restored"},
+		{name: "restored-rechecked", phase: "restored", recheck: true, verified: true},
+		{name: "live-rechecked", live: true, recheck: true, verified: true},
+		{name: "live-process-changed", live: true, changedProcess: true},
 		{name: "healthy-is-not-restored", phase: "verified", recovery: true},
+		{name: "matching-file-wrong-path", phase: "verified", badPath: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			verified := tc.verified
@@ -59,10 +64,11 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 				receiptHash = strings.Repeat("0", 64)
 			}
 			receipt, _ := json.Marshal(map[string]string{"phase": phase, "hash": receiptHash, "process": "17\n123"})
-			if !verified && tc.phase == "" {
+			if tc.live || !verified && tc.phase == "" {
 				receipt = []byte("persisted")
 			}
 			var mutations atomic.Int32
+			var probes atomic.Int32
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
@@ -106,6 +112,20 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 								if tc.changedProcess {
 									response = "18\n456"
 								}
+							case strings.Contains(cmd.Command, "PILOT:VERIFY_ONLY"):
+								probes.Add(1)
+								if strings.Contains(cmd.Command, "systemctl restart") || strings.Contains(cmd.Command, "mv -f") || strings.Contains(cmd.Command, "cp -p") {
+									mutations.Add(1)
+								}
+								io.Copy(io.Discard, ch)
+								status = 1
+								if tc.recheck && !tc.changedProcess && !strings.Contains(cmd.Command, "123\n") {
+									response, status = "VERIFIED", 0
+								}
+							case strings.Contains(cmd.Command, "PILOT:CHECK_PATH"):
+								if tc.badPath {
+									status = 1
+								}
 							default:
 								mutations.Add(1)
 								status = 1
@@ -129,7 +149,11 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 			if tc.recovery {
 				_, err = client.VerifyRecoveryReceipt(candidate, "/etc/xray/config.json")
 			} else {
-				err = client.ApplyXrayConfig(candidate, "/etc/xray/config.json", true, false, TransactionOptions{AllowInitial: tc.initial})
+				opt := TransactionOptions{AllowInitial: tc.initial}
+				if tc.live {
+					opt.ConfirmedProcess = "17\n123\n"
+				}
+				err = client.ApplyXrayConfig(candidate, "/etc/xray/config.json", true, false, opt)
 			}
 			client.Close()
 			select {
@@ -139,6 +163,12 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 			}
 			if mutations.Load() != 0 {
 				t.Fatal("matching target replayed a write or restart")
+			}
+			if tc.recheck && probes.Load() != 1 {
+				t.Fatal("restored/live receipt bypassed health recheck")
+			}
+			if tc.badPath && (err == nil || !strings.Contains(err.Error(), "PATH_MISMATCH")) {
+				t.Fatalf("matching bytes bypassed service path validation: %v", err)
 			}
 			if tc.manual {
 				if err == nil || !strings.Contains(err.Error(), "DRIFT_CONFLICT") {

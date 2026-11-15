@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-unset XRAY_VERSION
+unset XRAY_VERSION NODE_IP
 # shellcheck source=node-bootstrap.sh
 source "${SCRIPT_DIR}/node-bootstrap.sh"
 test_dir="$(mktemp -d)"
@@ -123,6 +123,20 @@ curl() {
 }
 report_to_panel >/dev/null
 grep -Fq "\"bootstrap_config_sha256\":\"${expected_hash}\"" "${test_dir}/registered.json" || fail 'registration recomputed the baseline'
+grep -Fq '"public_ip":"192.0.2.1"' "${test_dir}/registered.json" || fail 'public IP detection failed'
+NODE_IP=192.168.10.3
+report_to_panel >/dev/null
+grep -Fq '"public_ip":"192.168.10.3"' "${test_dir}/registered.json" || fail 'panel-reachable address ignored'
+NODE_IP=2001:db8::1
+report_to_panel >/dev/null
+grep -Fq '"public_ip":"2001:db8::1"' "${test_dir}/registered.json" || fail 'IPv6 registration override ignored'
+NODE_IP='invalid; echo bad'
+# Exercise the real entry point with only prerequisite checks replaced.
+require_root() { :; }
+require_cmd() { :; }
+if output="$(main 2>&1)"; then fail 'invalid NODE_IP accepted'; fi
+[[ "${output}" == *'Invalid NODE_IP'* && "${output}" != *'Fetching panel SSH'* ]] || fail 'invalid address reached side effects'
+NODE_IP=''
 install_xray >/dev/null
 [[ -z "${BOOTSTRAP_CONFIG_SHA256}" ]] || fail 'existing manual config gained installation permission'
 report_to_panel >/dev/null

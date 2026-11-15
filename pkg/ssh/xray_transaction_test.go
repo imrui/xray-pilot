@@ -66,7 +66,14 @@ func TestTransactionStopsBeforeReplace(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			write("xray", "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'Xray 26.3.27'; exit 0; fi\n[ \"$PILOT_FAIL\" != 1 ]\n")
+			write("xray", `#!/bin/sh
+if [ "$1" = version ]; then echo 'Xray 26.3.27'; exit 0; fi
+# Real Xray cannot infer JSON from the extensionless staging/rollback paths.
+if [ "$1" = run ]; then
+ case " $* " in *" -format json "*) ;; *) exit 1 ;; esac
+fi
+[ "$PILOT_FAIL" != 1 ]
+`)
 			write("systemctl", `#!/bin/sh
 case "$*" in
  *ExecStart*) printf 'xray run -config %s\n' "$PILOT_CONFIG" ;;
@@ -84,6 +91,8 @@ esac
 			write("chown", "#!/bin/sh\nexit 0\n")
 			write("sync", "#!/bin/sh\nexit 0\n")
 			write("python3", "#!/bin/sh\nexec '"+msys(python)+"' \"$@\"\n")
+			// Ubuntu 18.04 ships Python 3.6, which has no time.time_ns.
+			write("sitecustomize.py", "import time\nif hasattr(time, 'time_ns'): del time.time_ns\n")
 			write("socket.py", "from _socket import *\ndef getaddrinfo(*a,**kw): return [(AF_INET,SOCK_STREAM,6,'',('93.184.216.34',443))]\n")
 			path := filepath.Join(dir, "config.json")
 			old := `{"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"old"}]}`

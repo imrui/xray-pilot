@@ -323,11 +323,11 @@ type SweepResult struct {
 }
 
 // SweepExpired 把已过期但仍启用的用户从节点运行时摘除（给调度器周期调用）。
-//   - live-apply on：逐用户 RemoveUserLive（失败节点已在 livesync 内标记漂移兜底）
-//   - live-apply off：MarkAllDrifted 一次，交给 restart 同步路径
+//   - live-apply on：逐用户 RemoveUserLive，再确认相关节点已撤权
+//   - live-apply off：标记漂移并执行完整同步；无法确认当前授权时在线停止保护
 //
 // 处理过的用户打 ExpiredSweptAt 标记，不重复扫；续期会清标记。
-// 订阅层的 403 拦截与本方法互补：前者挡新取订阅，后者断已连会话。
+// 订阅层的 403 拦截与本方法互补：前者挡新取订阅，后者撤销节点账号。
 func (s *UserService) SweepExpired(now time.Time) (*SweepResult, error) {
 	users, err := s.userRepo.FindExpiredUnswept(now)
 	if err != nil {

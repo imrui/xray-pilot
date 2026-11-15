@@ -103,6 +103,9 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	}
 
 	params := s.sshParams(node)
+	if state.VerifiedAt != nil && state.RuntimeHash == xray.ConfigHash(configContent) && state.DiskHash == state.RuntimeHash {
+		params.ConfirmedProcess = state.ProcessID
+	}
 	if err := rememberDesired(state, xray.ConfigHash(configContent)); err != nil {
 		result.Error = "无法保存期望版本"
 		return result

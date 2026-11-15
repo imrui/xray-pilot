@@ -22,6 +22,8 @@ type TransactionOptions struct {
 	ProbeURL            string
 	OnPhase             func(string)
 	RollbackContent     string
+	// ConfirmedProcess is supplied only for this exact content's acknowledged runtime.
+	ConfirmedProcess string
 }
 
 func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly bool, opts ...TransactionOptions) error {
@@ -35,8 +37,30 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 		opt = opts[0]
 	}
 	if restart && !validateOnly && crypto.HashConfig(old) == crypto.HashConfig(content) {
-		if _, err := c.VerifyConfigReceipt(old, path); err != nil {
-			return fmt.Errorf("节点配置任务未完成：目标文件已存在，仅核对，不重复重启")
+		if err := c.verifyXrayPath(path); err != nil {
+			return err
+		}
+		if _, err := c.VerifyConfigReceipt(old, path); err == nil {
+			return nil
+		}
+		process, err := c.VerifyRecoveryReceipt(old, path)
+		if err != nil {
+			process = opt.ConfirmedProcess
+		}
+		process = strings.TrimSpace(process)
+		if process == "" {
+			return fmt.Errorf("节点配置任务未完成：目标文件已存在，缺少运行回执，不重复重启")
+		}
+		if opt.BeforeApply != nil {
+			if err := opt.BeforeApply(); err != nil {
+				return err
+			}
+		}
+		if err := c.recheckXrayConfig(old, path, process, opt.ProbeURL); err != nil {
+			return fmt.Errorf("节点配置任务未完成：目标文件已存在，运行健康尚未确认，不重复重启")
+		}
+		if opt.BeforeApply != nil {
+			return opt.BeforeApply()
 		}
 		return nil
 	}
@@ -190,14 +214,7 @@ exec 9>"$dir/.pilot-config.lock"
 flock -w 30 9
 actual=$(sha256sum "$path" | cut -d ' ' -f1)
 test "$actual" = __HASH__ || { echo DRIFT_CONFLICT; exit 20; }
-execstart=$(systemctl show xray -p ExecStart --value)
-if ! python3 - "$path" "$execstart" <<'PILOT_PATH'
-import shlex,sys
-parts=shlex.split(sys.argv[2].replace(";"," "))
-paths=[parts[i+1] for i,x in enumerate(parts[:-1]) if x in ("-c","-config")]+[x.split("=",1)[1] for x in parts if x.startswith(("-c=","-config="))]
-sys.exit(0 if paths==[sys.argv[1]] and not any(x.startswith("-confdir") for x in parts) else 1)
-PILOT_PATH
-then echo PATH_MISMATCH; exit 21; fi
+__CHECK_PATH__
 pid=$(systemctl show xray -p MainPID --value)
 if test "$pid" != 0 && test -e "/proc/$pid/exe"; then binary=$(readlink -f "/proc/$pid/exe"); else binary=$(command -v xray); fi
 tmp=$(mktemp "$dir/.pilot-config.XXXXXX")
@@ -236,7 +253,7 @@ if grep -q '"direct-v6"' "$tmp"; then
  probe_url=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["probe_url"])' "$tmp.probes")
  timeout 10 curl -6 -fsS --max-time 8 "$probe_url" >/dev/null || { echo IPV6_UNAVAILABLE; exit 23; }
 fi
-if ! timeout 30 "$binary" run -test -config "$tmp" >/dev/null 2>&1; then echo PREFLIGHT_FAILED; exit 24; fi
+if ! timeout 30 "$binary" run -test -format json -config "$tmp" >/dev/null 2>&1; then echo PREFLIGHT_FAILED; exit 24; fi
 __ROLLBACK_PREFLIGHT__
 sync -f "$tmp"
 echo PILOT:PHASE:staged
@@ -259,6 +276,7 @@ echo PILOT:PHASE:persisted
 __RESTART__
 `
 	s = strings.ReplaceAll(s, "__PATH__", shellQuote(path))
+	s = strings.ReplaceAll(s, "__CHECK_PATH__", xrayPathCheckScript)
 	s = strings.ReplaceAll(s, "__HASH__", shellQuote(expected))
 	pre := ""
 	if validateOnly {
@@ -268,7 +286,7 @@ __RESTART__
 	rollbackPreflight := ""
 	if restart {
 		rollbackPreflight = `command -v curl >/dev/null || { echo PREFLIGHT_FAILED; exit 24; }
- timeout 30 "$binary" run -test -config "$tmp.rollback" >/dev/null 2>&1 || { echo PREFLIGHT_FAILED; exit 24; }`
+ timeout 30 "$binary" run -test -format json -config "$tmp.rollback" >/dev/null 2>&1 || { echo PREFLIGHT_FAILED; exit 24; }`
 	}
 	s = strings.ReplaceAll(s, "__ROLLBACK_PREFLIGHT__", rollbackPreflight)
 	apply := "echo PERSISTED"
@@ -287,7 +305,7 @@ if systemctl restart xray; then
  if healthy; then
   process=$(systemctl show xray -p MainPID -p ExecMainStartTimestampMonotonic --value)
   python3 - "$path" "$dir" "$process" <<'PILOT_RECEIPT'
-import hashlib,json,os,shutil,sys,time,tempfile
+import hashlib,json,os,shutil,sys,time,tempfile,uuid
 p,d,process=sys.argv[1:]
 receipt={"phase":"verified","hash":hashlib.sha256(open(p,"rb").read()).hexdigest(),"process":process.strip()}
 state=d+"/.pilot-config-state"
@@ -298,7 +316,7 @@ os.replace(receipt_tmp,state)
 backups=d+"/.pilot-healthy"
 if os.path.islink(backups): raise RuntimeError("unsafe backup directory")
 os.makedirs(backups,mode=0o700,exist_ok=True);os.chmod(backups,0o700)
-target=backups+"/config."+receipt["hash"]+"."+str(time.time_ns())+".json"
+target=backups+"/config."+receipt["hash"]+"."+uuid.uuid4().hex+".json"
 shutil.copyfile(p,target);os.chmod(target,0o600)
 files=sorted((os.path.join(backups,x) for x in os.listdir(backups) if x.startswith("config.") and x.endswith(".json") and not os.path.islink(os.path.join(backups,x))),key=os.path.getmtime,reverse=True)
 for i,f in enumerate(files):

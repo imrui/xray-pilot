@@ -105,9 +105,10 @@ func TestActualXrayRoutingFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(t.TempDir(), tc.name+".json")
+			// Match the extensionless staging files used for remote transactions.
+			path := filepath.Join(t.TempDir(), ".pilot-config."+tc.name)
 			os.WriteFile(path, []byte(data), 0600)
-			cmd := exec.Command(binary, "run", "-test", "-config", path)
+			cmd := exec.Command(binary, "run", "-test", "-format", "json", "-config", path)
 			cmd.Env = append(os.Environ(), "XRAY_LOCATION_ASSET="+filepath.Dir(binary))
 			out, err := cmd.CombinedOutput()
 			if err != nil {

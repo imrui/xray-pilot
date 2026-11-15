@@ -20,6 +20,8 @@ BOOTSTRAP_CONFIG_SHA256=""
 # 这两个变量留空时脚本仍按原有交互模式运行，README 老用法不受影响。
 PANEL_URL="${PANEL_URL:-}"
 INSTALL_TOKEN="${INSTALL_TOKEN:-}"
+# LAN/NAT deployments may supply the address reachable from the panel.
+NODE_IP="${NODE_IP:-}"
 AUTO_MODE="false"
 if [[ -n "${PANEL_URL}" && -n "${INSTALL_TOKEN}" ]]; then
   AUTO_MODE="true"
@@ -121,7 +123,10 @@ report_to_panel() {
 
   local url="${PANEL_URL%/}/api/install/register?token=${INSTALL_TOKEN}"
   local public_ip xray_version kernel distro
-  public_ip="$(curl -fsSL --max-time 10 https://api.ipify.org 2>/dev/null || echo unknown)"
+  public_ip="${NODE_IP}"
+  if [[ -z "${public_ip}" ]]; then
+    public_ip="$(curl -fsSL --max-time 10 https://api.ipify.org 2>/dev/null || echo unknown)"
+  fi
   xray_version="$(xray version 2>/dev/null | head -n 1 | awk '{print $2}' || echo unknown)"
   kernel="$(uname -r 2>/dev/null || echo unknown)"
   if [[ -r /etc/os-release ]]; then
@@ -286,6 +291,13 @@ main() {
   require_cmd grep
   require_cmd awk
   require_cmd sha256sum
+  if [[ -n "${NODE_IP}" ]]; then
+    require_cmd python3
+    if ! python3 -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "${NODE_IP}" >/dev/null 2>&1; then
+      echo "Invalid NODE_IP: supply an IPv4 or IPv6 address reachable from the panel." >&2
+      exit 1
+    fi
+  fi
   log_done "Prerequisites ready"
 
   if [[ "${AUTO_MODE}" == "true" ]]; then

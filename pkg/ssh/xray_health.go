@@ -128,7 +128,7 @@ for probe in probes:
     child=None
     try:
         with os.fdopen(fd,"w") as f: json.dump(probe,f)
-        child=subprocess.Popen([sys.argv[2],"run","-config",path],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        child=subprocess.Popen([sys.argv[2],"run","-format","json","-config",path],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         deadline=time.monotonic()+3
         while True:
             try:
@@ -136,7 +136,14 @@ for probe in probes:
             except OSError:
                 if time.monotonic()>deadline: raise
                 time.sleep(.1)
-        subprocess.run(["curl","--silent","--fail","--max-time","6","--socks5-hostname","127.0.0.1:"+str(port),"--connect-to",host+":443:"+target+":443",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,timeout=8)
+        # Cold TLS/Reality handshakes can exceed six seconds. Retry once, within
+        # the transaction's outer health timeout; persistent failures still roll back.
+        for attempt in range(2):
+            try:
+                subprocess.run(["curl","--noproxy","","--silent","--fail","--max-time","10","--socks5-hostname","127.0.0.1:"+str(port),"--connect-to",host+":443:"+target+":443",url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,timeout=12)
+                break
+            except (subprocess.CalledProcessError,subprocess.TimeoutExpired):
+                if attempt == 1: raise
     finally:
         if child is not None:
             child.terminate()
