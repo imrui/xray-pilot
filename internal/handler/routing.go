@@ -99,7 +99,9 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 			}
 			b.Scope = scope
 			b.TargetID = id(c)
-			reply(c, nil, s.SaveBinding(b, b.Version, actorFrom(c), c.GetString(ctxRole) == entity.RoleSuperAdmin))
+			var impact service.BindingImpact
+			err := s.SaveBinding(b, b.Version, actorFrom(c), c.GetString(ctxRole) == entity.RoleSuperAdmin, &impact)
+			reply(c, impact, err)
 		})
 	}
 	api.POST("/nodes/:id/preflight", func(c *gin.Context) { reply(c, nil, service.NewSyncService().PreflightNode(id(c))) })

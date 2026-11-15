@@ -52,6 +52,7 @@ type ConfigDeployment struct {
 // RuntimeHash is an application receipt, not a hash read from the Xray API.
 type NodeConfigState struct {
 	NodeID                      uint       `gorm:"primaryKey;autoIncrement:false" json:"node_id"`
+	InitialBaseline             bool       `json:"-"`
 	ChangeRevision              uint       `json:"change_revision"`
 	DesiredRevision             uint       `json:"desired_revision"`
 	DesiredHash                 string     `json:"desired_hash"`

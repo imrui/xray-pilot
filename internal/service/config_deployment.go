@@ -102,7 +102,9 @@ func RunConfigDeployments(ctx context.Context) {
 					msg = "期望配置已更新，请重新下发"
 				} else {
 					r := NewSyncService().syncExpected(job.NodeID, job.Actor, job.DesiredHash)
-					if r.Success {
+					if r.Busy {
+						state = "pending"
+					} else if r.Success {
 						state = "succeeded"
 					} else {
 						msg = r.Error
@@ -121,6 +123,9 @@ func RunConfigDeployments(ctx context.Context) {
 				}
 			}
 			repository.DB.Model(&entity.ConfigDeployment{}).Where("id = ? AND status IN ?", job.ID, activeDeploymentPhases).Updates(map[string]any{"status": state, "error": msg})
+			if state == "pending" {
+				continue
+			}
 			repository.NewLogRepository().RecordWithActor("config_deployment", fmt.Sprintf("node:%d/job:%d", job.NodeID, job.ID), job.Actor, state == "succeeded", state+": "+msg, 0)
 		}
 	}

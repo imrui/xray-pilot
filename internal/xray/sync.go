@@ -2,6 +2,7 @@ package xray
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
@@ -18,26 +19,29 @@ const xrayConfigPath = RemoteConfigPath
 
 // SSHParams SSH 连接参数
 type SSHParams struct {
-	Host           string
-	Port           int
-	User           string
-	KeyPath        string
-	KnownHostsPath string // TOFU known_hosts 文件路径
-	BaselineHash   string
-	AllowInitial   bool
-	BeforeApply    func() error
-	ProbeURL       string
-	ConfigPath     string
-	OnPhase        func(string)
+	Host            string
+	Port            int
+	User            string
+	KeyPath         string
+	KnownHostsPath  string // TOFU known_hosts 文件路径
+	BaselineHash    string
+	AllowInitial    bool
+	BeforeApply     func() error
+	ProbeURL        string
+	ConfigPath      string
+	OnPhase         func(string)
+	RollbackContent string
 }
 
 // SyncResult 单次同步结果
 type SyncResult struct {
-	Success     bool
-	ElapsedMs   int64
-	XrayVersion string
-	Error       string
-	ProcessID   string
+	Success       bool
+	ElapsedMs     int64
+	XrayVersion   string
+	Error         string
+	ObservedHash  string
+	RecoveredHash string
+	ProcessID     string
 }
 
 // SyncWithFallback 通过 SSH 事务应用完整配置；用户差异由 LiveSync 单独处理。
@@ -65,12 +69,19 @@ func SyncWithFallback(params SSHParams, configContent string) *SyncResult {
 	}
 	defer client.Close()
 
-	if err := client.ApplyXrayConfig(configContent, configPath, true, false, xssh.TransactionOptions{BaselineHash: params.BaselineHash, AllowInitial: params.AllowInitial, BeforeApply: params.BeforeApply, ProbeURL: params.ProbeURL, OnPhase: params.OnPhase}); err != nil {
-		return &SyncResult{
-			Success:   false,
-			ElapsedMs: time.Since(start).Milliseconds(),
-			Error:     fmt.Sprintf("上传配置失败: %v", err),
+	if err := client.ApplyXrayConfig(configContent, configPath, true, false, xssh.TransactionOptions{BaselineHash: params.BaselineHash, AllowInitial: params.AllowInitial, BeforeApply: params.BeforeApply, ProbeURL: params.ProbeURL, OnPhase: params.OnPhase, RollbackContent: params.RollbackContent}); err != nil {
+		result := &SyncResult{ElapsedMs: time.Since(start).Milliseconds(), Error: fmt.Sprintf("上传配置失败: %v", err)}
+		if strings.Contains(err.Error(), "目标文件已存在") {
+			if raw, e := client.ReadRemoteFile(configPath); e == nil && ConfigHash(raw) == ConfigHash(configContent) {
+				result.ObservedHash = ConfigHash(raw)
+			}
 		}
+		if strings.Contains(err.Error(), "ROLLED_BACK") {
+			if raw, e := client.ReadRemoteFile(configPath); e == nil {
+				result.RecoveredHash = ConfigHash(raw)
+			}
+		}
+		return result
 	}
 
 	// 尝试获取 xray 版本

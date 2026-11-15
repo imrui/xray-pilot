@@ -185,8 +185,10 @@ func (s *LiveSyncService) applyOnNode(node *entity.Node) error {
 			return err
 		}
 		if err := finishNodeStatus(state, xray.ConfigHash(configContent), true); err != nil {
-			zap.L().Warn("更新同步状态失败", zap.Uint("nodeID", node.ID), zap.Error(err))
+			return err
 		}
+	} else {
+		return fmt.Errorf("期望配置已更新，撤销尚未确认")
 	}
 	return nil
 }

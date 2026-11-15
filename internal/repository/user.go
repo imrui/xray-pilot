@@ -209,7 +209,7 @@ func (r *UserRepository) FindExpiredUnswept(now time.Time) ([]entity.User, error
 
 // MarkExpiredSwept 记录过期用户已被摘除
 func (r *UserRepository) MarkExpiredSwept(id uint, at time.Time) error {
-	return DB.Model(&entity.User{}).Where("id = ?", id).Update("expired_swept_at", at).Error
+	return DB.Model(&entity.User{}).Where("id = ? AND expires_at IS NOT NULL AND expires_at <= ?", id, at).Update("expired_swept_at", at).Error
 }
 
 // Count 返回用户总数

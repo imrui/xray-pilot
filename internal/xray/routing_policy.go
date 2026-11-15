@@ -192,11 +192,7 @@ func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 		return "", fmt.Errorf("缺少系统路由")
 	}
 	// Retain API and existing proxy allowlists, including explicit allow_private.
-	for i := range cfg.Routing.Rules {
-		if cfg.Routing.Rules[i].OutboundTag == "direct" {
-			cfg.Routing.Rules[i].OutboundTag = "direct-v4"
-		}
-	}
+
 	cfg.Routing.Rules = append(cfg.Routing.Rules, p.CustomRules...)
 	if len(p.IPv4Domains) > 0 {
 		cfg.Routing.Rules = append(cfg.Routing.Rules, RoutingRule{Type: "field", Domain: p.IPv4Domains, OutboundTag: "direct-v4"})
@@ -209,7 +205,7 @@ func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 		cfg.Routing.Rules = append(cfg.Routing.Rules, RoutingRule{Type: "field", Domain: p.IPv6Domains, OutboundTag: tag})
 	}
 	cfg.Routing.Rules = append(cfg.Routing.Rules, RoutingRule{Type: "field", Network: "tcp,udp", OutboundTag: "direct-v4"})
-	cfg.Outbounds = []Outbound{{Protocol: "freedom", Tag: "direct-v4", Settings: map[string]string{"domainStrategy": "ForceIPv4"}}, {Protocol: "blackhole", Tag: "block"}}
+	cfg.Outbounds = []Outbound{{Protocol: "freedom", Tag: "direct", Settings: map[string]string{"domainStrategy": "AsIs"}}, {Protocol: "freedom", Tag: "direct-v4", Settings: map[string]string{"domainStrategy": "ForceIPv4"}}, {Protocol: "blackhole", Tag: "block"}}
 	if p.EnableIPv6 {
 		cfg.Outbounds = append(cfg.Outbounds, Outbound{Protocol: "freedom", Tag: "direct-v6", Settings: map[string]string{"domainStrategy": "ForceIPv6"}})
 	}

@@ -3,8 +3,10 @@ package ssh
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"github.com/imrui/xray-pilot/pkg/crypto"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -13,11 +15,12 @@ import (
 // ApplyXrayConfig validates before replacing, serializes remote writers and refuses
 // rollback across an authorization change. validateOnly never mutates live config.
 type TransactionOptions struct {
-	BaselineHash string
-	AllowInitial bool
-	BeforeApply  func() error
-	ProbeURL     string
-	OnPhase      func(string)
+	BaselineHash    string
+	AllowInitial    bool
+	BeforeApply     func() error
+	ProbeURL        string
+	OnPhase         func(string)
+	RollbackContent string
 }
 
 func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly bool, opts ...TransactionOptions) error {
@@ -30,10 +33,21 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	if restart && !validateOnly && crypto.HashConfig(old) == crypto.HashConfig(content) {
+		if _, err := c.VerifyConfigReceipt(old, path); err != nil {
+			return fmt.Errorf("节点配置任务未完成：目标文件已存在，仅核对，不重复重启")
+		}
+		return nil
+	}
 	if !validateOnly {
 		baseline := opt.BaselineHash
-		if baseline == "" && !opt.AllowInitial {
+		if baseline == "" {
 			baseline = crypto.HashConfig(content)
+			// 首装许可只接受空的安装器配置，不授权覆盖后来写入的手工配置。
+			var bootstrap map[string]any
+			if opt.AllowInitial && json.Unmarshal([]byte(old), &bootstrap) == nil && bootstrap != nil && len(bootstrap) == 0 {
+				baseline = crypto.HashConfig(old)
+			}
 		}
 		if baseline != "" && crypto.HashConfig(old) != baseline && crypto.HashConfig(old) != crypto.HashConfig(content) {
 			return fmt.Errorf("DRIFT_CONFLICT：当前文件与纳管基线不一致，请先核对")
@@ -48,6 +62,15 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 	if err != nil {
 		return err
 	}
+	var payload map[string]any
+	_ = json.Unmarshal([]byte(envelope), &payload)
+	rollback, err := rollbackCandidate(old, content, opt.RollbackContent)
+	if err != nil && restart && !validateOnly {
+		return err
+	}
+	payload["rollback"] = rollback
+	encoded, _ := json.Marshal(payload)
+	envelope = string(encoded)
 	script := xrayTransactionScript(path, hex.EncodeToString(expected[:]), restart, validateOnly)
 	sess, err := c.client.NewSession()
 	if err != nil {
@@ -61,7 +84,7 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 	var output limitedOutput
 	checkpointErr := make(chan error, 1)
 	output.onLine = func(line string) {
-		if line == "PILOT:READY" {
+		if line == "PILOT:READY" || line == "PILOT:ROLLBACK_READY" {
 			if opt.BeforeApply != nil {
 				if err := opt.BeforeApply(); err != nil {
 					checkpointErr <- err
@@ -71,7 +94,6 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 				}
 			}
 			_, _ = stdin.Write([]byte("COMMIT\n"))
-			_ = stdin.Close()
 		} else if strings.HasPrefix(line, "PILOT:PHASE:") && opt.OnPhase != nil {
 			opt.OnPhase(strings.TrimPrefix(line, "PILOT:PHASE:"))
 		}
@@ -92,6 +114,9 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 	err = sess.Wait()
 	select {
 	case checkErr := <-checkpointErr:
+		if strings.Contains(output.text, "AUTHORIZATION_STOPPED") {
+			return fmt.Errorf("AUTHORIZATION_STOPPED：%w", checkErr)
+		}
 		return checkErr
 	default:
 	}
@@ -165,7 +190,7 @@ then echo PATH_MISMATCH; exit 21; fi
 pid=$(systemctl show xray -p MainPID --value)
 if test "$pid" != 0 && test -e "/proc/$pid/exe"; then binary=$(readlink -f "/proc/$pid/exe"); else binary=$(command -v xray); fi
 tmp=$(mktemp "$dir/.pilot-config.XXXXXX")
-trap 'rm -f "$tmp" "$tmp.probes"' EXIT
+trap 'rm -f "$tmp" "$tmp.probes" "$tmp.rollback"' EXIT
 IFS= read -r envelope
 printf '%s' "$envelope" > "$tmp"
 unset envelope
@@ -175,6 +200,7 @@ import json,sys,os
 p=sys.argv[1]
 data=json.load(open(p))
 with open(p,"w") as f: json.dump(data.pop("config"),f,ensure_ascii=False,indent=2)
+with open(p+".rollback","x") as f: f.write(data.pop("rollback", ""))
 with open(p+".probes","x") as f: json.dump(data,f)
 import socket,ipaddress,urllib.parse
 host=urllib.parse.urlparse(data["probe_url"]).hostname
@@ -188,6 +214,8 @@ test -n "$service_user" || service_user=root
 test -n "$service_group" || service_group=$(id -gn "$service_user")
 chown "$service_user:$service_group" "$tmp"
 chmod 600 "$tmp"
+chown "$service_user:$service_group" "$tmp.rollback"
+chmod 600 "$tmp.rollback"
 # Strict policy is enabled only on the baseline whose configuration was verified.
 if grep -q 'ForceIPv' "$tmp"; then
  "$binary" version | head -1 | grep -Eq 'Xray 26\.3\.27([[:space:]]|$)' || { echo VERSION_UNSUPPORTED; exit 22; }
@@ -198,6 +226,7 @@ if grep -q '"direct-v6"' "$tmp"; then
  timeout 10 curl -6 -fsS --max-time 8 "$probe_url" >/dev/null || { echo IPV6_UNAVAILABLE; exit 23; }
 fi
 if ! timeout 30 "$binary" run -test -config "$tmp" >/dev/null 2>&1; then echo PREFLIGHT_FAILED; exit 24; fi
+__ROLLBACK_PREFLIGHT__
 sync -f "$tmp"
 echo PILOT:PHASE:staged
 __VALIDATE__
@@ -225,6 +254,12 @@ __RESTART__
 		pre = "echo VALIDATED; exit 0"
 	}
 	s = strings.ReplaceAll(s, "__VALIDATE__", pre)
+	rollbackPreflight := ""
+	if restart {
+		rollbackPreflight = `command -v curl >/dev/null || { echo PREFLIGHT_FAILED; exit 24; }
+ timeout 30 "$binary" run -test -config "$tmp.rollback" >/dev/null 2>&1 || { echo PREFLIGHT_FAILED; exit 24; }`
+	}
+	s = strings.ReplaceAll(s, "__ROLLBACK_PREFLIGHT__", rollbackPreflight)
 	apply := "echo PERSISTED"
 	if restart {
 		apply = `healthy() {
@@ -263,7 +298,19 @@ fi
 echo HEALTH_FAILED
 __ROLLBACK__
 `
-		rollback := `systemctl stop xray || true
+		rollback := `echo PILOT:ROLLBACK_READY
+IFS= read -r decision || decision=ABORT
+if test "$decision" = COMMIT; then
+ rollback_hash=$(sha256sum "$tmp.rollback" | cut -d ' ' -f1)
+ mv -f "$tmp.rollback" "$path"
+ sync -f "$dir"
+ if test "$(sha256sum "$path" | cut -d ' ' -f1)" = "$rollback_hash" && systemctl restart xray && systemctl is-active --quiet xray; then
+  printf '%s\n' restored_unverified > "$dir/.pilot-config-state"
+  echo ROLLED_BACK; exit 27
+ fi
+ echo ROLLBACK_FAILED
+fi
+systemctl stop xray || true
 printf '%s\n' authorization_stopped > "$dir/.pilot-config-state"
 echo AUTHORIZATION_STOPPED
 exit 26`
@@ -271,4 +318,32 @@ exit 26`
 		apply = strings.ReplaceAll(apply, "__PROXY_HEALTH__", proxyHealthPython)
 	}
 	return strings.ReplaceAll(s, "__RESTART__", apply)
+}
+
+// 恢复文件必须满足当前授权，不能回放旧 UUID、密钥或已删除协议。
+func rollbackCandidate(old, desired, fallback string) (string, error) {
+	var a, b map[string]any
+	if json.Unmarshal([]byte(old), &a) != nil || json.Unmarshal([]byte(desired), &b) != nil {
+		return "", fmt.Errorf("恢复配置无效")
+	}
+	protected := func(v map[string]any) []any {
+		var out []any
+		r, _ := v["routing"].(map[string]any)
+		rules, _ := r["rules"].([]any)
+		for _, rule := range rules {
+			m, _ := rule.(map[string]any)
+			if m["inboundTag"] != nil || m["source"] != nil || m["ip"] != nil {
+				out = append(out, rule)
+			}
+		}
+		return out
+	}
+	if reflect.DeepEqual(a["inbounds"], b["inbounds"]) && reflect.DeepEqual(protected(a), protected(b)) {
+		return old, nil
+	}
+	var f map[string]any
+	if fallback == "" || json.Unmarshal([]byte(fallback), &f) != nil || !reflect.DeepEqual(f["inbounds"], b["inbounds"]) || !reflect.DeepEqual(protected(f), protected(b)) {
+		return "", fmt.Errorf("PREFLIGHT_FAILED：缺少符合当前授权的恢复配置")
+	}
+	return fallback, nil
 }

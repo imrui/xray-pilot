@@ -113,3 +113,27 @@ func TestActualXrayRoutingFixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestRoutingPreservesOperationalDirect(t *testing.T) {
+	raw := `{"routing":{"rules":[{"type":"field","inboundTag":["proxy-http"],"source":["::1/128"],"outboundTag":"direct"}]},"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}]}`
+	policy, _ := DecodeRoutingPolicy(entity.DefaultRoutingPolicy)
+	out, err := ApplyRoutingPolicy(raw, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c Config
+	json.Unmarshal([]byte(out), &c)
+	if c.Routing.Rules[0].OutboundTag != "direct" {
+		t.Fatal("operational rule forced to IPv4")
+	}
+	for _, o := range c.Outbounds {
+		if o.Tag == "direct" {
+			data, _ := json.Marshal(o)
+			if strings.Contains(string(data), "ForceIPv") {
+				t.Fatal("operational outbound changed")
+			}
+			return
+		}
+	}
+	t.Fatal("operational direct removed")
+}

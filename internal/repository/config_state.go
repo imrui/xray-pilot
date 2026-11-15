@@ -1,13 +1,15 @@
 package repository
 
 import (
-	"fmt"
+	"errors"
 	"github.com/google/uuid"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"time"
 )
+
+var ErrConfigLeased = errors.New("节点已有配置任务执行中")
 
 // InvalidateConfigs is called inside the same transaction as a desired-state edit.
 // The row doubles as a durable recovery outbox, even if the caller dies before live apply.
@@ -58,7 +60,7 @@ func AcquireConfigLease(id uint) (*entity.NodeConfigState, func(), error) {
 		return nil, nil, r.Error
 	}
 	if r.RowsAffected != 1 {
-		return nil, nil, fmt.Errorf("节点已有配置任务执行中")
+		return nil, nil, ErrConfigLeased
 	}
 	release := func() {
 		DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", id, owner).Updates(map[string]any{"lease_owner": "", "lease_until": nil})

@@ -367,6 +367,13 @@ func (s *InstallService) registerCreate(t *entity.NodeInstallToken, ip string, n
 		}
 		return nil, err
 	}
+	if err := repository.EnsureConfigState(repository.DB, node.ID); err != nil {
+		return nil, err
+	}
+	if err := repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ?", node.ID).Update("initial_baseline", true).Error; err != nil {
+		return nil, err
+	}
+
 	return node, nil
 }
 

@@ -156,7 +156,7 @@ func (r *NodeRepository) ReplaceHost(node *entity.Node) error {
 			return err
 		}
 		if err := tx.Model(&entity.NodeConfigState{}).Where("node_id = ?", node.ID).Updates(map[string]any{
-			"desired_hash": "", "disk_hash": "", "runtime_hash": "", "disk_revision": 0, "runtime_revision": 0,
+			"initial_baseline": true, "desired_hash": "", "disk_hash": "", "runtime_hash": "", "disk_revision": 0, "runtime_revision": 0,
 			"verified_at": nil, "process_id": "", "verification": "", "last_error": "",
 		}).Error; err != nil {
 			return err

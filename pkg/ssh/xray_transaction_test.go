@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,11 +41,16 @@ func TestTransactionStopsBeforeReplace(t *testing.T) {
 		return p
 	}
 	for _, tc := range []struct {
-		name                         string
-		fail, validate, drift, abort bool
+		name                                           string
+		fail, validate, drift, abort                   bool
+		restart, healthFail, rollbackFail, restartFail bool
 	}{
-		{"preflight-failure", true, false, false, false}, {"preview-only", false, true, false, false},
-		{"drift-conflict", false, false, true, false}, {"stale-before-commit", false, false, false, true}, {"atomic-persist", false, false, false, false},
+		{name: "preflight-failure", fail: true}, {name: "preview-only", validate: true},
+		{name: "drift-conflict", drift: true}, {name: "stale-before-commit", abort: true}, {name: "atomic-persist"},
+		{name: "restart-preflight-rejected", restart: true, fail: true},
+		{name: "restart-health-restores", restart: true, healthFail: true},
+		{name: "restart-failure-restores", restart: true, restartFail: true},
+		{name: "restart-rollback-fails", restart: true, healthFail: true, rollbackFail: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -57,7 +63,18 @@ func TestTransactionStopsBeforeReplace(t *testing.T) {
 				}
 			}
 			write("xray", "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'Xray 26.3.27'; exit 0; fi\n[ \"$PILOT_FAIL\" != 1 ]\n")
-			write("systemctl", "#!/bin/sh\ncase \"$*\" in *ExecStart*) printf 'xray run -config %s\\n' \"$PILOT_CONFIG\" ;; *MainPID*) echo 0 ;; *User*) echo xray ;; *Group*) echo xray ;; *) exit 0 ;; esac\n")
+			write("systemctl", `#!/bin/sh
+case "$*" in
+ *ExecStart*) printf 'xray run -config %s\n' "$PILOT_CONFIG" ;;
+ *MainPID*) echo 0 ;;
+ *User*|*Group*) echo xray ;;
+ restart*) echo restart >> "$PILOT_CONFIG.calls"; if [ "$PILOT_RESTART_FAIL" = 1 ] && grep -q new "$PILOT_CONFIG"; then exit 1; fi; cp "$PILOT_CONFIG" "$PILOT_CONFIG.running"; if [ "$PILOT_ROLLBACK_FAIL" = 1 ] && grep -q old "$PILOT_CONFIG"; then exit 1; fi ;;
+ stop*) echo stop >> "$PILOT_CONFIG.calls" ;;
+ *) exit 0 ;;
+esac
+`)
+			write("sleep", "#!/bin/sh\nexit 0\n")
+			write("curl", "#!/bin/sh\nexit 0\n")
 			// External system tools are isolated; this test exercises script control flow and file replacement.
 			write("flock", "#!/bin/sh\nexit 0\n")
 			write("chown", "#!/bin/sh\nexit 0\n")
@@ -81,23 +98,31 @@ func TestTransactionStopsBeforeReplace(t *testing.T) {
 			if tc.abort {
 				decision = "ABORT"
 			}
-			script := "PATH=\"$PILOT_BIN:$PATH\"\n" + xrayTransactionScript(msys(path), expected, false, tc.validate)
+			var payload map[string]any
+			json.Unmarshal([]byte(envelope), &payload)
+			payload["rollback"] = old
+			rawEnvelope, _ := json.Marshal(payload)
+			envelope = string(rawEnvelope)
+			script := "PATH=\"$PILOT_BIN:$PATH\"\n" + xrayTransactionScript(msys(path), expected, tc.restart, tc.validate)
+			if tc.healthFail {
+				script = strings.Replace(script, proxyHealthPython, "raise SystemExit(1)", 1)
+			}
 			scriptPath := filepath.Join(dir, "apply.sh")
 			os.WriteFile(scriptPath, []byte(script), 0600)
 			cmd := exec.Command(bash, msys(scriptPath))
-			cmd.Stdin = strings.NewReader(envelope + "\n" + decision + "\n")
+			cmd.Stdin = strings.NewReader(envelope + "\n" + decision + "\nCOMMIT\n")
 			fail := "0"
 			if tc.fail {
 				fail = "1"
 			}
-			cmd.Env = append(os.Environ(), "PILOT_BIN="+msys(bin), "PILOT_CONFIG="+filepath.ToSlash(path), "PILOT_FAIL="+fail, "PYTHONPATH="+bin)
+			cmd.Env = append(os.Environ(), "PILOT_BIN="+msys(bin), "PILOT_CONFIG="+filepath.ToSlash(path), "PILOT_FAIL="+fail, "PYTHONPATH="+bin, fmt.Sprintf("PILOT_ROLLBACK_FAIL=%d", map[bool]int{true: 1}[tc.rollbackFail]), fmt.Sprintf("PILOT_RESTART_FAIL=%d", map[bool]int{true: 1}[tc.restartFail]))
 			out, runErr := cmd.CombinedOutput()
-			shouldFail := tc.fail || tc.drift || tc.abort
+			shouldFail := tc.fail || tc.drift || tc.abort || tc.healthFail || tc.restartFail
 			if (runErr != nil) != shouldFail {
 				t.Fatalf("exit mismatch: %v\n%s", runErr, out)
 			}
 			actual, _ := os.ReadFile(path)
-			if tc.fail || tc.validate || tc.drift || tc.abort {
+			if tc.fail || tc.validate || tc.drift || tc.abort || tc.healthFail || tc.restartFail {
 				if string(actual) != old {
 					t.Fatal("live file changed before commit")
 				}
@@ -107,6 +132,28 @@ func TestTransactionStopsBeforeReplace(t *testing.T) {
 					t.Fatal("candidate not persisted")
 				}
 			}
+			if tc.restart {
+				calls, _ := os.ReadFile(path + ".calls")
+				if tc.fail && len(calls) > 0 {
+					t.Fatal("preflight touched service")
+				}
+				if tc.healthFail || tc.restartFail {
+					running, _ := os.ReadFile(path + ".running")
+					if string(running) != old || strings.Count(string(calls), "restart") != 2 {
+						t.Fatalf("rollback not bounded: %s", calls)
+					}
+					marker := "ROLLED_BACK"
+					if tc.rollbackFail {
+						marker = "ROLLBACK_FAILED"
+					} else if strings.Contains(string(calls), "stop") {
+						t.Fatal("healthy old service stopped")
+					}
+					if !strings.Contains(string(out), marker) {
+						t.Fatalf("missing %s: %s", marker, out)
+					}
+				}
+			}
+
 			entries, _ := os.ReadDir(dir)
 			for _, e := range entries {
 				if strings.HasPrefix(e.Name(), ".pilot-config.") && e.Name() != ".pilot-config.lock" {
@@ -150,5 +197,17 @@ func TestPhaseOutputAcrossChunks(t *testing.T) {
 	out.Write([]byte(strings.Repeat("x", 30000)))
 	if len(out.text) > 8192 {
 		t.Fatal("output unbounded")
+	}
+}
+
+func TestRollbackCannotRestoreRevokedIdentity(t *testing.T) {
+	old := `{"inbounds":[{"settings":{"clients":[{"id":"revoked"}]}}]}`
+	desired := `{"inbounds":[{"settings":{"clients":[]}}]}`
+	if _, err := rollbackCandidate(old, desired, old); err == nil {
+		t.Fatal("old identity restored")
+	}
+	raw, err := rollbackCandidate(old, desired, desired)
+	if err != nil || strings.Contains(raw, "revoked") {
+		t.Fatal("current authorization not preserved")
 	}
 }

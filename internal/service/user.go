@@ -347,6 +347,13 @@ func (s *UserService) SweepExpired(now time.Time) (*SweepResult, error) {
 		if result.LiveApply {
 			s.liveSync.RemoveUserLive(s.userNodeIDs(u), u.Username)
 		}
+		var affected []uint
+		if err := repository.DB.Table("group_nodes").Joins("JOIN user_groups ON user_groups.group_id = group_nodes.group_id").Where("user_groups.user_id = ?", u.ID).Distinct("group_nodes.node_id").Pluck("group_nodes.node_id", &affected).Error; err != nil {
+			return result, err
+		}
+		if !s.confirmRevoked(affected) {
+			continue
+		}
 		if err := s.userRepo.MarkExpiredSwept(u.ID, now); err != nil {
 			return result, fmt.Errorf("标记用户 %s 已摘除失败: %w", u.Username, err)
 		}

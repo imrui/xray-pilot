@@ -96,8 +96,9 @@ func TestRoutingInheritanceConflictAndOverride(t *testing.T) {
 	defaultBinding, _ := s.Binding("global", 0)
 	gb.TargetID = second.ID
 	gb.TemplateID = defaultBinding.TemplateID
-	if err := s.SaveBinding(gb, 0, "test", true); err == nil || !strings.Contains(err.Error(), "冲突") {
-		t.Fatalf("conflict accepted %v", err)
+	var impact BindingImpact
+	if err := s.SaveBinding(gb, 0, "test", true, &impact); err != nil || !strings.Contains(impact.Conflicts[n.ID], "冲突") {
+		t.Fatalf("conflict not isolated: %+v %v", impact, err)
 	}
 	// Group membership edits can also create conflicts; render must still refuse.
 	repository.DB.Create(&entity.RoutingBinding{Scope: "group", TargetID: second.ID, Mode: "template", TemplateID: defaultBinding.TemplateID, Revision: 1, Overrides: "{}"})
@@ -204,8 +205,16 @@ func TestRollbackRegeneratesCurrentAuthorization(t *testing.T) {
 	}
 	var state entity.NodeConfigState
 	repository.DB.First(&state, "node_id = ?", n.ID)
-	if state.RuntimeHash == "" || state.RecoveryPending {
-		t.Fatal("successful recovery lost receipt")
+	saved, _ := NewRoutingService().Binding("node", n.ID)
+	if saved.Overrides != b.Overrides || saved.Mode != b.Mode {
+		t.Fatal("automatic recovery rewrote desired binding")
+	}
+	desired, _, _ := svc.buildConfig(n)
+	if state.DesiredHash != xray.ConfigHash(desired) {
+		t.Fatal("automatic recovery rewrote desired hash")
+	}
+	if state.RuntimeHash == "" || !state.RecoveryPending {
+		t.Fatal("successful recovery lost receipt or target retry")
 	}
 }
 func TestPendingRevisionSurvivesConcurrentEdit(t *testing.T) {
@@ -221,8 +230,8 @@ func TestPendingRevisionSurvivesConcurrentEdit(t *testing.T) {
 		}
 		return &xray.SyncResult{Success: true}
 	}
-	if r := s.SyncNode(n.ID, "test"); !r.Success {
-		t.Fatal(r.Error)
+	if r := s.SyncNode(n.ID, "test"); r.Success || !strings.Contains(r.Error, "期望配置已更新") {
+		t.Fatalf("stale task succeeded: %+v", r)
 	}
 	var state entity.NodeConfigState
 	repository.DB.First(&state, "node_id = ?", n.ID)
@@ -257,10 +266,21 @@ func TestSubscriptionPolicyInheritanceAndLimits(t *testing.T) {
 		t.Fatal("user override ignored")
 	}
 	sub := NewSubscribeService()
+	if raw, err := sub.GenerateClash(u.Token); err != nil || !strings.Contains(raw, "xtls-rprx-vision") {
+		t.Fatalf("block missing from Clash: %s %v", raw, err)
+	}
+	if raw, err := sub.GenerateSingbox(u.Token); err != nil || !strings.Contains(raw, "xtls-rprx-vision") {
+		t.Fatalf("block missing from singbox: %s %v", raw, err)
+	}
+	user, _ = s.Binding("user", u.ID)
+	user.UDP443Policy = "allow"
+	if err := s.SaveBinding(user, user.Version, "test", false); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := sub.GenerateClash(u.Token); err == nil {
-		t.Fatal("unverified Clash policy silently emitted")
+		t.Fatal("unverified allow accepted")
 	}
 	if _, err := sub.GenerateSingbox(u.Token); err == nil {
-		t.Fatal("unverified sing-box policy silently emitted")
+		t.Fatal("unverified allow accepted")
 	}
 }

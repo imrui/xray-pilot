@@ -28,7 +28,7 @@ func incompatibleVision(node, user uint, p *entity.InboundProfile) (bool, error)
 	if p == nil || p.Protocol != types.ProtocolVlessReality {
 		return false, nil
 	}
-	return explicitUDP443(node, user)
+	return NewRoutingService().UDP443Policy(node,user) == "allow", nil
 }
 func (s *SubscribeService) CompatibilityWarnings(token, format string) ([]string, error) {
 	warnings := []string{}

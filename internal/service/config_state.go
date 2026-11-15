@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
@@ -11,17 +12,28 @@ import (
 	"time"
 )
 
+var ErrConfigLeaseLost = errors.New("配置租约已失效，结果未确认")
+
+func leaseUpdate(tx *gorm.DB, state *entity.NodeConfigState, updates map[string]any) error {
+	r := tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ? AND lease_until > ?", state.NodeID, state.LeaseOwner, time.Now()).Updates(updates)
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected != 1 {
+		return ErrConfigLeaseLost
+	}
+	return nil
+}
 func rememberDesired(state *entity.NodeConfigState, hash string) error {
 	if state.DesiredHash != hash {
 		state.DesiredRevision++
 		state.DesiredHash = hash
 	}
-	return repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", state.NodeID, state.LeaseOwner).
-		Updates(map[string]any{"desired_revision": state.DesiredRevision, "desired_hash": hash}).Error
+	return leaseUpdate(repository.DB, state, map[string]any{"desired_revision": state.DesiredRevision, "desired_hash": hash})
 }
 func (s *SyncService) stillCurrent(state *entity.NodeConfigState, hash string) bool {
 	var latest entity.NodeConfigState
-	if repository.DB.First(&latest, "node_id = ?", state.NodeID).Error != nil || latest.LeaseOwner != state.LeaseOwner || latest.ChangeRevision != state.ChangeRevision {
+	if repository.DB.First(&latest, "node_id = ?", state.NodeID).Error != nil || latest.LeaseOwner != state.LeaseOwner || latest.ChangeRevision != state.ChangeRevision || latest.LeaseUntil == nil || !latest.LeaseUntil.After(time.Now()) {
 		return false
 	}
 	n, err := s.nodeRepo.FindByID(state.NodeID)
@@ -36,7 +48,7 @@ func (s *SyncService) recordApplied(state *entity.NodeConfigState, content, proc
 	now := time.Now()
 	updates := map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": hash,
 		"runtime_revision": state.DesiredRevision, "runtime_hash": hash, "process_id": processID, "verified_at": now,
-		"last_error": "", "recovery_attempts": 0}
+		"last_error": "", "recovery_attempts": 0, "initial_baseline": false}
 	verification := "service_only"
 	var cfg struct {
 		Inbounds []struct {
@@ -69,7 +81,7 @@ func (s *SyncService) recordApplied(state *entity.NodeConfigState, content, proc
 	}
 	// A receipt belongs to its snapshot. Never clear work queued during the SSH call.
 	return repository.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", state.NodeID, state.LeaseOwner).Updates(updates).Error; err != nil {
+		if err := leaseUpdate(tx, state, updates); err != nil {
 			return err
 		}
 		return tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND change_revision = ? AND lease_owner = ?", state.NodeID, state.ChangeRevision, state.LeaseOwner).
@@ -78,7 +90,7 @@ func (s *SyncService) recordApplied(state *entity.NodeConfigState, content, proc
 }
 func recordConfigFailure(id uint, message string) {
 	terminal := false
-	for _, marker := range []string{"ROLLED_BACK", "ROLLBACK_FAILED", "AUTHORIZATION_STOPPED", "DRIFT_CONFLICT", "PATH_MISMATCH", "VERSION_UNSUPPORTED", "PREFLIGHT_FAILED", "IPV6_UNAVAILABLE"} {
+	for _, marker := range []string{"ROLLBACK_FAILED", "AUTHORIZATION_STOPPED", "DRIFT_CONFLICT", "PATH_MISMATCH", "VERSION_UNSUPPORTED", "PREFLIGHT_FAILED", "IPV6_UNAVAILABLE"} {
 		if strings.Contains(message, marker) {
 			terminal = true
 		}
@@ -91,7 +103,8 @@ func recordConfigFailure(id uint, message string) {
 	if strings.Contains(message, "ROLLED_BACK") {
 		delete(updates, "runtime_hash")
 		delete(updates, "verified_at")
-		updates["recovery_pending"] = false
+		updates["recovery_pending"] = true
+		updates["next_retry_at"] = time.Now().Add(10 * time.Minute)
 	}
 	repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ?", id).Updates(updates)
 }
@@ -104,6 +117,7 @@ func finishNodeStatus(state *entity.NodeConfigState, hash string, current bool) 
 	now := time.Now()
 	return repository.DB.Transaction(func(tx *gorm.DB) error {
 		q := tx.Model(&entity.Node{}).Where("id = ?", state.NodeID)
+		q = q.Where("EXISTS (SELECT 1 FROM node_config_states s WHERE s.node_id = nodes.id AND s.lease_owner = ? AND s.lease_until > ?)", state.LeaseOwner, time.Now())
 		if current {
 			q = q.Where("EXISTS (SELECT 1 FROM node_config_states s WHERE s.node_id = nodes.id AND s.change_revision = ? AND s.lease_owner = ?)", state.ChangeRevision, state.LeaseOwner)
 		}
@@ -112,7 +126,7 @@ func finishNodeStatus(state *entity.NodeConfigState, hash string, current bool) 
 			return r.Error
 		}
 		if r.RowsAffected == 0 {
-			return tx.Model(&entity.Node{}).Where("id = ?", state.NodeID).Updates(map[string]any{"sync_status": entity.SyncStatusDrifted, "config_hash": hash, "last_sync_at": now}).Error
+			return ErrConfigLeaseLost
 		}
 		return nil
 	})
@@ -166,40 +180,35 @@ func (s *SyncService) RestorePolicy(nodeID uint, expected uint, actor string) er
 
 // Caller holds both the process lock and DB lease. Only policy is rolled back;
 // every credential and permission is rebuilt from the latest database snapshot.
-func (s *SyncService) recoverHealthyPolicy(nodeID, bindingVersion uint, actor, baseline string) error {
-	if err := s.RestorePolicy(nodeID, bindingVersion, "system:rollback:"+actor); err != nil {
-		return err
-	}
+func (s *SyncService) recoverHealthyPolicy(nodeID uint, leaseOwner, actor, baseline string) error {
 	var state entity.NodeConfigState
 	if err := repository.DB.First(&state, "node_id = ?", nodeID).Error; err != nil {
 		return err
 	}
-	if state.LeaseUntil == nil || state.LeaseUntil.Before(time.Now()) {
-		return fmt.Errorf("配置租约已过期，停止自动恢复")
-	}
-	if err := repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", nodeID, state.LeaseOwner).Update("lease_until", time.Now().Add(5*time.Minute)).Error; err != nil {
-		return err
+	if state.LeaseOwner != leaseOwner || state.LeaseUntil == nil || !state.LeaseUntil.After(time.Now()) {
+		return ErrConfigLeaseLost
 	}
 	n, err := s.nodeRepo.FindByID(nodeID)
 	if err != nil {
 		return err
 	}
-	content, _, err := s.buildConfig(n)
+	desired, _, err := s.buildConfig(n)
 	if err != nil {
 		return err
 	}
-	snapshot, err := NewRoutingService().Effective(nodeID)
+	content, _, err := s.buildConfigPolicy(n, state.LastHealthyPolicy)
 	if err != nil {
 		return err
 	}
-	if err := rememberDesired(&state, xray.ConfigHash(content)); err != nil {
+	if err := rememberDesired(&state, xray.ConfigHash(desired)); err != nil {
 		return err
 	}
 	p := s.sshParams(n)
 	p.BaselineHash = baseline
+	p.RollbackContent = content
 	p.BeforeApply = func() error {
-		if !s.stillCurrent(&state, xray.ConfigHash(content)) {
-			return fmt.Errorf("恢复期间期望配置再次变化，停止恢复")
+		if !s.stillCurrent(&state, xray.ConfigHash(desired)) {
+			return fmt.Errorf("恢复期间期望配置再次变化")
 		}
 		return nil
 	}
@@ -207,8 +216,9 @@ func (s *SyncService) recoverHealthyPolicy(nodeID, bindingVersion uint, actor, b
 	if !r.Success {
 		return fmt.Errorf("%s", r.Error)
 	}
-	if err := s.recordApplied(&state, content, r.ProcessID, snapshot); err != nil {
+	// 自动恢复只记录实际文件，不改变绑定、期望修订或期望哈希。
+	if err := leaseUpdate(repository.DB, &state, map[string]any{"disk_hash": xray.ConfigHash(content), "runtime_hash": xray.ConfigHash(content), "verified_at": time.Now(), "process_id": r.ProcessID, "recovery_pending": true, "next_retry_at": time.Now().Add(10 * time.Minute)}); err != nil {
 		return err
 	}
-	return s.nodeRepo.UpdateLastSync(nodeID, entity.SyncStatusFailed, xray.ConfigHash(content))
+	return finishNodeStatus(&state, xray.ConfigHash(content), false)
 }

@@ -74,7 +74,7 @@ func resolveRouting(db *gorm.DB, nodeID uint) (*EffectiveRouting, error) {
 			if gb.TemplateID == 0 {
 				continue
 			}
-			out.Groups = append(out.Groups, g.Name)
+			out.Groups = append(out.Groups, fmt.Sprintf("%s [模板 %d 修订 %d]", g.Name, gb.TemplateID, gb.Revision))
 			if base.TemplateID != 0 && (base.TemplateID != gb.TemplateID || base.Revision != gb.Revision) {
 				return nil, fmt.Errorf("分组路由冲突：%s；请为节点指定模板", strings.Join(out.Groups, "、"))
 			}
@@ -204,7 +204,25 @@ func (s *RoutingService) DeleteTemplate(id uint) error {
 		return tx.Delete(&entity.RoutingTemplate{}, id).Error
 	})
 }
-func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, actor string, super bool) error {
+
+type BindingImpact struct {
+	Changed   []uint          `json:"changed_nodes"`
+	Conflicts map[uint]string `json:"conflicts"`
+}
+
+func effectiveKey(e *EffectiveRouting, err error) string {
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	b, _ := json.Marshal([]any{e.TemplateID, e.Revision, e.Policy, e.Binding.ConfigPath})
+	return string(b)
+}
+func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, actor string, super bool, reports ...*BindingImpact) error {
+	impact := BindingImpact{Changed: []uint{}, Conflicts: map[uint]string{}}
+	if len(reports) > 0 {
+		defer func() { *reports[0] = impact }()
+	}
+
 	if b.Scope != "global" && b.Scope != "group" && b.Scope != "node" && b.Scope != "user" {
 		return fmt.Errorf("无效配置范围")
 	}
@@ -295,6 +313,24 @@ func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, act
 		if b.Mode == "template" && b.TemplateID == 0 {
 			return fmt.Errorf("请选择已发布模板")
 		}
+
+		var nodes []entity.Node
+		before := map[uint]string{}
+		q := tx.Model(&entity.Node{})
+		if b.Scope == "node" {
+			q = q.Where("nodes.id = ?", b.TargetID)
+		}
+		if b.Scope == "group" {
+			q = q.Joins("JOIN group_nodes ON group_nodes.node_id = nodes.id").Where("group_nodes.group_id = ?", b.TargetID)
+		}
+		if b.Scope != "user" {
+			if err := q.Find(&nodes).Error; err != nil {
+				return err
+			}
+		}
+		for _, n := range nodes {
+			before[n.ID] = effectiveKey(resolveRouting(tx, n.ID))
+		}
 		b.Version = expected + 1
 		b.UpdatedAt = time.Now()
 		if expected == 0 {
@@ -310,34 +346,29 @@ func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, act
 				return ErrRoutingConflict
 			}
 		}
-		var nodes []entity.Node
-		if old.Mode == b.Mode && old.TemplateID == b.TemplateID && old.Revision == b.Revision && old.Overrides == b.Overrides && old.ConfigPath == b.ConfigPath {
-			return tx.Create(&entity.SyncLog{Actor: actor, Action: "routing_subscription_policy", Target: fmt.Sprintf("%s:%d", b.Scope, b.TargetID), Success: true, Message: fmt.Sprintf("订阅策略版本 %d", b.Version)}).Error
-		}
-		q := tx.Model(&entity.Node{})
-		if b.Scope == "node" {
-			q = q.Where("id = ?", b.TargetID)
-		}
-		if err := q.Find(&nodes).Error; err != nil {
-			return err
-		}
 		for _, n := range nodes {
-			if b.Scope == "user" {
-				continue
-			}
 			effective, err := resolveRouting(tx, n.ID)
-			if err != nil {
+			if err != nil && b.Scope == "node" {
 				return err
 			}
-			if effective.Mode != "legacy" || b.Scope == "node" {
-				if err := repository.InvalidateConfigs(tx, []uint{n.ID}); err != nil {
-					return err
+			if effectiveKey(effective, err) == before[n.ID] {
+				continue
+			}
+			if err != nil {
+				impact.Conflicts[n.ID] = err.Error()
+			}
+			if err := repository.InvalidateConfigs(tx, []uint{n.ID}); err != nil {
+				return err
+			}
+			if err != nil {
+				if e := tx.Model(&entity.NodeConfigState{}).Where("node_id = ?", n.ID).Updates(map[string]any{"recovery_pending": false, "last_error": err.Error(), "recovery_attempts": 3}).Error; e != nil {
+					return e
 				}
-				if err := tx.Model(&entity.Node{}).Where("id = ?", n.ID).Update("sync_status", entity.SyncStatusDrifted).Error; err != nil {
-					return err
-				}
+			} else {
+				impact.Changed = append(impact.Changed, n.ID)
 			}
 		}
+
 		return tx.Create(&entity.SyncLog{Actor: actor, Action: "routing_binding", Target: fmt.Sprintf("%s:%d", b.Scope, b.TargetID), Success: true, Message: fmt.Sprintf("绑定版本 %d", b.Version)}).Error
 	})
 }

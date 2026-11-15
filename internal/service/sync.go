@@ -44,7 +44,8 @@ type SyncResult struct {
 	Name         string
 	Success      bool
 	Error        string
-	InboundCount int      // 成功生成的 inbound 数量
+	InboundCount int // 成功生成的 inbound 数量
+	Busy         bool
 	Warnings     []string // inbound 生成警告（某个协议失败但整体继续）
 }
 
@@ -67,9 +68,18 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	state, release, err := repository.AcquireConfigLease(nodeID)
 	if err != nil {
 		result.Error = err.Error()
+		result.Busy = errors.Is(err, repository.ErrConfigLeased)
 		return result
 	}
 	defer release()
+	// 获锁后重新判断，避免等待热更新的过期恢复任务再次重启。
+	if strings.HasPrefix(actor, "system:") && !state.RecoveryPending && state.VerifiedAt != nil && state.RuntimeHash != "" && state.RuntimeHash == state.DiskHash {
+		raw, _, e := s.buildConfig(node)
+		if e == nil && xray.ConfigHash(raw) == state.RuntimeHash {
+			result.Success = true
+			return result
+		}
+	}
 
 	configContent, warnings, err := s.buildConfig(node)
 	if err != nil {
@@ -100,11 +110,21 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	if params.BaselineHash == "" {
 		params.BaselineHash = node.ConfigHash
 	}
-	params.AllowInitial = node.RegisteredAt != nil
+	params.AllowInitial = state.InitialBaseline
+	params.RollbackContent, _, err = s.buildConfigPolicy(node, state.LastHealthyPolicy)
+	if err != nil {
+		result.Error = "恢复配置生成失败：" + err.Error()
+		return result
+	}
 	params.OnPhase = deploymentPhaseRecorder(state)
 	params.BeforeApply = func() error {
 		if !s.stillCurrent(state, xray.ConfigHash(configContent)) {
 			return fmt.Errorf("期望配置已更新，请重新下发")
+		}
+		if state.InitialBaseline {
+			if err := leaseUpdate(repository.DB, state, map[string]any{"initial_baseline": false}); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -112,14 +132,23 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 
 	if !syncResult.Success {
 		result.Error = syncResult.Error
-		if strings.Contains(result.Error, "AUTHORIZATION_STOPPED") && state.LastHealthyPolicy != "" {
-			if err := s.recoverHealthyPolicy(node.ID, snapshot.Binding.Version, actor, xray.ConfigHash(configContent)); err != nil {
+		if strings.Contains(result.Error, "AUTHORIZATION_STOPPED") {
+			if err := s.recoverHealthyPolicy(node.ID, state.LeaseOwner, actor, xray.ConfigHash(configContent)); err != nil {
 				result.Error = "ROLLBACK_FAILED：" + err.Error()
 			} else {
 				result.Error = "ROLLED_BACK：已恢复最近健康策略，并保留当前用户与密钥"
 			}
 		}
 		s.failNode(node, actor, result.Error, syncResult.ElapsedMs)
+		if syncResult.ObservedHash != "" {
+			_ = leaseUpdate(repository.DB, state, map[string]any{"disk_hash": syncResult.ObservedHash, "disk_revision": state.DesiredRevision, "runtime_hash": "", "verified_at": nil})
+		}
+		if strings.Contains(result.Error, "ROLLED_BACK") {
+			if syncResult.RecoveredHash != "" {
+				_ = leaseUpdate(repository.DB, state, map[string]any{"disk_hash": syncResult.RecoveredHash, "runtime_hash": "", "verified_at": nil})
+			}
+			_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusDrifted, "")
+		}
 		return result
 	}
 
@@ -133,7 +162,8 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 		return result
 	}
 	if err := finishNodeStatus(state, newHash, status == entity.SyncStatusSynced); err != nil {
-		zap.L().Warn("更新同步状态失败", zap.Uint("nodeID", nodeID), zap.Error(err))
+		result.Error = err.Error()
+		return result
 	}
 
 	// 同步时顺带更新 XrayVersion
@@ -144,6 +174,10 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	s.logRepo.RecordWithActor("sync", fmt.Sprintf("node:%s(%d)", node.Name, nodeID), actor, true, "同步成功", syncResult.ElapsedMs)
 	s.reportSyncAlert(nodeID, true, "")
 
+	if status != entity.SyncStatusSynced {
+		result.Error = "期望配置已更新，旧版本回执已记录"
+		return result
+	}
 	result.Success = true
 	return result
 }
@@ -292,6 +326,10 @@ func (s *SyncService) CheckDriftAll() (driftCount int, errs []string) {
 // ---- 内部工具方法 ----
 
 func (s *SyncService) buildConfig(node *entity.Node) (string, []string, error) {
+	return s.buildConfigPolicy(node, "desired")
+}
+
+func (s *SyncService) buildConfigPolicy(node *entity.Node, policy string) (string, []string, error) {
 	// 查询节点关联的所有激活协议密钥（LEFT JOIN 语义，无节点密钥则 fallback 到协议默认值）
 	profileKeys, err := s.profileRepo.FindActiveKeysForNode(node.ID)
 	if err != nil {
@@ -326,12 +364,20 @@ func (s *SyncService) buildConfig(node *entity.Node) (string, []string, error) {
 	if len(warnings) > 0 {
 		return "", warnings, fmt.Errorf("协议配置不完整，拒绝覆盖: %s", strings.Join(warnings, "; "))
 	}
-	effective, err := NewRoutingService().Effective(node.ID)
-	if err != nil {
-		return "", nil, err
-	}
-	if effective.Policy != nil {
-		content, err = xray.ApplyRoutingPolicy(content, *effective.Policy)
+	if policy == "desired" {
+		effective, e := NewRoutingService().Effective(node.ID)
+		if e != nil {
+			return "", nil, e
+		}
+		if effective.Policy != nil {
+			content, err = xray.ApplyRoutingPolicy(content, *effective.Policy)
+		}
+	} else if policy != "" && policy != "legacy" {
+		p, e := xray.DecodeRoutingPolicy(policy)
+		if e != nil {
+			return "", nil, e
+		}
+		content, err = xray.ApplyRoutingPolicy(content, p)
 	}
 	return content, warnings, err
 }
