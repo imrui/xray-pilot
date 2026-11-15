@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
@@ -14,30 +13,28 @@ import (
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
 
-// LiveSyncService 用户增删的 gRPC 即时生效编排（v0.4.5）。
+// LiveSyncService 基于当前授权快照进行持久化与 gRPC 用户差异同步。
 //
 // 定位：用户增删时，对相关节点的 xray 走 gRPC HandlerService.AlterInbound 即时增删用户，
 // 不重启 xray，消除「加一个用户 → 全节点 restart → 断所有现有连接」的抖动。
 //
 // 双写语义（关键）：
-//   - scp 最新 config.json（不重启）—— 持久化，重启可恢复，是正确性保证
+//   - 预检后原子持久化当前 config.json（不重启），保持重启后的权限一致
 //   - gRPC AddUser/RemoveUser —— 即时运行时生效
-//   - 任一节点的 SSH/scp/dial 失败 → 该节点标记 drifted，回退到现有 restart 同步路径兜底
+//   - 任一步骤失败均标记未完成，由持久化恢复队列限次重试；不忽略单 inbound 错误
 //
 // 受 xray.live_apply_enabled 开关控制（默认 off）。
 type LiveSyncService struct {
-	syncSvc     *SyncService // 复用 buildConfig / sshParams（同包可访问私有方法）
-	nodeRepo    *repository.NodeRepository
-	profileRepo *repository.InboundProfileRepository
-	settingSvc  *SettingService
+	syncSvc    *SyncService // 复用 buildConfig / sshParams（同包可访问私有方法）
+	nodeRepo   *repository.NodeRepository
+	settingSvc *SettingService
 }
 
 func NewLiveSyncService() *LiveSyncService {
 	return &LiveSyncService{
-		syncSvc:     NewSyncService(),
-		nodeRepo:    repository.NewNodeRepository(),
-		profileRepo: repository.NewInboundProfileRepository(),
-		settingSvc:  NewSettingService(),
+		syncSvc:    NewSyncService(),
+		nodeRepo:   repository.NewNodeRepository(),
+		settingSvc: NewSettingService(),
 	}
 }
 
@@ -46,45 +43,21 @@ func (s *LiveSyncService) Enabled() bool {
 	return s.settingSvc.Get(KeyXrayLiveApply) == "true"
 }
 
-// inboundFn 对单个 inbound（按 tag 定位）执行的操作（AddUser / RemoveUser）。
-// profile 提供协议类型，供 add 侧构造账号。返回错误时被容忍（仅 warn）——
-// 因为 scp 已保证磁盘配置正确，单 inbound 的 gRPC 失败最常见是「用户已存在/本就不在」，end-state 正确。
-type inboundFn func(ctx context.Context, conn *grpc.ClientConn, tag string, profile *entity.InboundProfile) error
-
-// AddUserLive 对给定节点集即时新增用户（按协议构造账号，email/uuid 来自用户）。
+// AddUserLive 根据数据库当前授权同步，避免重放过期的 UUID 参数。
 func (s *LiveSyncService) AddUserLive(nodeIDs []uint, email, uuid string) {
-	s.applyOverNodes(nodeIDs, "新增用户", email, func(ctx context.Context, conn *grpc.ClientConn, tag string, profile *entity.InboundProfile) error {
-		account, err := xray.BuildAccountForProtocol(profile.Protocol, uuid)
-		if err != nil {
-			return err // 不可管理协议已被 InboundTag 过滤，正常不会走到这
-		}
-		return xray.AddUser(ctx, conn, tag, email, account)
-	})
+	s.applyOverNodes(nodeIDs, "新增用户", email)
 }
 
-// RemoveUserLive 对给定节点集即时摘除用户（按 email 定位）。
 func (s *LiveSyncService) RemoveUserLive(nodeIDs []uint, email string) {
-	s.applyOverNodes(nodeIDs, "摘除用户", email, func(ctx context.Context, conn *grpc.ClientConn, tag string, _ *entity.InboundProfile) error {
-		return xray.RemoveUser(ctx, conn, tag, email)
-	})
+	s.applyOverNodes(nodeIDs, "摘除用户", email)
 }
 
-// ReplaceUserLive 对给定节点集即时替换用户账号（email 不变、UUID 变，用于 ResetUUID）。
-// 每 inbound 先删旧账号（按 email；不存在也无妨）再加新 UUID 账号。
 func (s *LiveSyncService) ReplaceUserLive(nodeIDs []uint, email, newUUID string) {
-	s.applyOverNodes(nodeIDs, "重置用户UUID", email, func(ctx context.Context, conn *grpc.ClientConn, tag string, profile *entity.InboundProfile) error {
-		_ = xray.RemoveUser(ctx, conn, tag, email) // 旧账号；按 email 摘除，不存在不报致命
-		account, err := xray.BuildAccountForProtocol(profile.Protocol, newUUID)
-		if err != nil {
-			return err
-		}
-		return xray.AddUser(ctx, conn, tag, email, account)
-	})
+	s.applyOverNodes(nodeIDs, "重置用户UUID", email)
 }
 
-// applyOverNodes 在节点集上扇出执行 perInbound：每节点独立处理，失败标记 drifted 兜底。
-// 不返回错误——失败已就地降级，不阻断上层用户操作（DB 已写入为准）。
-func (s *LiveSyncService) applyOverNodes(nodeIDs []uint, action, email string, perInbound inboundFn) {
+// applyOverNodes 每个节点独立处理。数据库修改已提交，失败交由恢复队列处理。
+func (s *LiveSyncService) applyOverNodes(nodeIDs []uint, action, email string) {
 	if len(nodeIDs) == 0 {
 		return
 	}
@@ -97,12 +70,13 @@ func (s *LiveSyncService) applyOverNodes(nodeIDs []uint, action, email string, p
 	ok, failed := 0, 0
 	for i := range nodes {
 		node := &nodes[i]
-		if err := s.applyOnNode(node, perInbound); err != nil {
+		if err := s.applyOnNode(node); err != nil {
 			failed++
 			zap.L().Warn("live-apply 失败，已标记节点漂移待 restart 同步",
 				zap.String("action", action), zap.String("node", node.Name),
 				zap.Uint("nodeID", node.ID), zap.String("email", email), zap.Error(err))
 			_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusDrifted, "")
+			recordConfigFailure(node.ID, err.Error())
 		} else {
 			ok++
 		}
@@ -112,10 +86,19 @@ func (s *LiveSyncService) applyOverNodes(nodeIDs []uint, action, email string, p
 		zap.Int("ok", ok), zap.Int("failed", failed))
 }
 
-// applyOnNode 单节点脚手架：scp 最新 config（不重启）+ 逐 inbound 经 gRPC 执行 perInbound。
-// 返回非 nil（SSH/scp/dial/配置生成失败）时，调用方将该节点标记 drifted 兜底。
-func (s *LiveSyncService) applyOnNode(node *entity.Node, perInbound inboundFn) error {
+// applyOnNode 先持久化当前配置，再根据已确认运行快照对齐各 inbound 用户。
+// 任一环节失败都不确认运行态成功。
+func (s *LiveSyncService) applyOnNode(node *entity.Node) error {
 	defer lockNode(node.ID)()
+	state, release, err := repository.AcquireConfigLease(node.ID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	node, err = s.nodeRepo.FindByID(node.ID)
+	if err != nil {
+		return err
+	}
 
 	// 1. 生成最新 config（buildConfig 只含激活用户，反映增删后的最终状态）
 	configContent, _, err := s.syncSvc.buildConfig(node)
@@ -123,7 +106,7 @@ func (s *LiveSyncService) applyOnNode(node *entity.Node, perInbound inboundFn) e
 		return fmt.Errorf("生成配置失败: %w", err)
 	}
 
-	// 2. SSH 连接（一条连接复用于 scp + gRPC 隧道）
+	// 2. SSH 连接（一条连接复用于配置持久化和 gRPC 隧道）
 	params := s.syncSvc.sshParams(node)
 	client, err := xssh.Connect(xssh.Config{
 		Host:           params.Host,
@@ -136,10 +119,32 @@ func (s *LiveSyncService) applyOnNode(node *entity.Node, perInbound inboundFn) e
 		return fmt.Errorf("SSH 连接失败: %w", err)
 	}
 	defer client.Close()
+	old, err := client.ReadRemoteFile(params.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("无法读取节点配置")
+	}
+	if state.DesiredRevision > 0 && state.RuntimeHash != xray.ConfigHash(old) {
+		return fmt.Errorf("上次运行版本尚未确认，需完整同步")
+	}
+	// Live apply is valid only for a pure user delta against the last confirmed runtime.
+	if node.ConfigHash == "" || xray.ConfigHash(old) != node.ConfigHash || !xray.SameNonUserConfig(old, configContent) {
+		return fmt.Errorf("存在非用户配置或未确认磁盘版本，需完整同步")
+	}
+	if err := rememberDesired(state, xray.ConfigHash(configContent)); err != nil {
+		return err
+	}
 
 	// 3. scp 最新配置（不重启）—— 持久化，重启可恢复
-	if err := client.UploadContent(configContent, xray.RemoteConfigPath); err != nil {
+	if err := client.ApplyXrayConfig(configContent, params.ConfigPath, false, false, xssh.TransactionOptions{BaselineHash: node.ConfigHash, ProbeURL: params.ProbeURL, BeforeApply: func() error {
+		if !s.syncSvc.stillCurrent(state, xray.ConfigHash(configContent)) {
+			return fmt.Errorf("期望配置已更新")
+		}
+		return nil
+	}}); err != nil {
 		return fmt.Errorf("上传配置失败: %w", err)
+	}
+	if err := repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", node.ID, state.LeaseOwner).Updates(map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": xray.ConfigHash(configContent)}).Error; err != nil {
+		return err
 	}
 
 	// 4. gRPC 逐 inbound 即时生效
@@ -152,22 +157,22 @@ func (s *LiveSyncService) applyOnNode(node *entity.Node, perInbound inboundFn) e
 	}
 	defer conn.Close()
 
-	keys, err := s.profileRepo.FindActiveKeysForNode(node.ID)
+	changes, err := xray.DiffUsers(old, configContent)
 	if err != nil {
 		return fmt.Errorf("查询节点协议失败: %w", err)
 	}
-	for _, key := range keys {
-		if key.Profile == nil {
-			continue
+	for _, change := range changes {
+		if change.Remove {
+			err = xray.RemoveUser(ctx, conn, change.Tag, change.Email)
+		} else {
+			account, accountErr := xray.BuildAccountForProtocol(change.Protocol, change.UUID)
+			if accountErr != nil {
+				return accountErr
+			}
+			err = xray.AddUser(ctx, conn, change.Tag, change.Email, account)
 		}
-		tag, manageable := xray.InboundTag(key.Profile.Protocol, key.Profile.ID)
-		if !manageable {
-			continue // Hysteria2 不在 xray-core，跳过
-		}
-		if err := perInbound(ctx, conn, tag, key.Profile); err != nil {
-			// 容忍：scp 已保证磁盘正确；单 inbound 失败最常见是「用户已存在/本就不在」，end-state 正确
-			zap.L().Warn("gRPC 单 inbound 操作失败（已容忍，磁盘配置已正确）",
-				zap.String("node", node.Name), zap.String("tag", tag), zap.Error(err))
+		if err != nil {
+			return fmt.Errorf("用户运行态尚未确认（inbound %s），需完整同步", change.Tag)
 		}
 	}
 
@@ -175,8 +180,11 @@ func (s *LiveSyncService) applyOnNode(node *entity.Node, perInbound inboundFn) e
 	// 若此前是 drifted/pending（仍有走 MarkAllDrifted 的待同步变更，如改协议/分组/UUID，
 	// 这些不是单纯加减用户、gRPC 无法即时对齐），保留原状态让 restart 同步路径补齐——
 	// 否则清掉 drift 会导致那些待同步变更运行时缺失且无人修复。本次用户增删的即时效果已生效。
-	if node.SyncStatus == entity.SyncStatusSynced {
-		if err := s.nodeRepo.UpdateLastSync(node.ID, entity.SyncStatusSynced, xray.ConfigHash(configContent)); err != nil {
+	if s.syncSvc.stillCurrent(state, xray.ConfigHash(configContent)) {
+		if err := s.syncSvc.recordApplied(state, configContent, state.ProcessID, nil); err != nil {
+			return err
+		}
+		if err := finishNodeStatus(state, xray.ConfigHash(configContent), true); err != nil {
 			zap.L().Warn("更新同步状态失败", zap.Uint("nodeID", node.ID), zap.Error(err))
 		}
 	}

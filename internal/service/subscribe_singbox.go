@@ -100,6 +100,7 @@ func (s *SubscribeService) GenerateSingbox(token string) (string, error) {
 	// 收集所有节点的 outbound 与 tag 列表
 	var proxyOutbounds []map[string]any
 	var proxyTags []string
+	excluded := 0
 	for _, node := range nodes {
 		node := node
 		profileKeys, err := s.profileRepo.FindActiveKeysForNode(node.ID)
@@ -108,6 +109,12 @@ func (s *SubscribeService) GenerateSingbox(token string) (string, error) {
 		}
 		for _, key := range profileKeys {
 			key := key
+			if incompatible, err := incompatibleVision(node.ID, user.ID, key.Profile); err != nil {
+				return "", err
+			} else if incompatible {
+				excluded++
+				continue
+			}
 			ob, tag := s.buildSingboxOutbound(user, &node, key.Profile, &key)
 			if ob == nil {
 				continue
@@ -118,6 +125,9 @@ func (s *SubscribeService) GenerateSingbox(token string) (string, error) {
 	}
 
 	cfg := buildSingboxBaseConfig()
+	if len(proxyOutbounds) == 0 && excluded > 0 {
+		return "", fmt.Errorf("sing-box 当前格式无法等价表达显式 UDP 443 策略，请改用 Xray URI 或恢复继承；已排除 %d 条 Reality 节点", excluded)
+	}
 	cfg.Outbounds = append(cfg.Outbounds, proxyOutbounds...)
 	cfg.Outbounds = append(cfg.Outbounds,
 		buildSingboxSelector(proxyTags),

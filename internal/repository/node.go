@@ -27,7 +27,12 @@ func NewNodeRepository() *NodeRepository {
 }
 
 func (r *NodeRepository) Create(node *entity.Node) error {
-	return DB.Create(node).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(node).Error; err != nil {
+			return err
+		}
+		return tx.Create(&entity.RoutingBinding{Scope: "node", TargetID: node.ID, Mode: "inherit", Overrides: "{}", UDP443Policy: "inherit", Version: 1}).Error
+	})
 }
 
 func (r *NodeRepository) FindByID(id uint) (*entity.Node, error) {
@@ -128,11 +133,39 @@ func (r *NodeRepository) FindAll() ([]entity.Node, error) {
 }
 
 func (r *NodeRepository) Update(node *entity.Node) error {
-	return DB.Save(node).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(node).Error; err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, []uint{node.ID})
+	})
 }
 
 func (r *NodeRepository) UpdateActive(id uint, active bool) error {
 	return DB.Model(&entity.Node{}).Where("id = ?", id).Update("active", active).Error
+}
+
+// ReplaceHost invalidates receipts from the old machine while preserving routing bindings.
+// The caller holds the configuration lease throughout replacement registration.
+func (r *NodeRepository) ReplaceHost(node *entity.Node) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(node).Error; err != nil {
+			return err
+		}
+		if err := InvalidateConfigs(tx, []uint{node.ID}); err != nil {
+			return err
+		}
+		if err := tx.Model(&entity.NodeConfigState{}).Where("node_id = ?", node.ID).Updates(map[string]any{
+			"desired_hash": "", "disk_hash": "", "runtime_hash": "", "disk_revision": 0, "runtime_revision": 0,
+			"verified_at": nil, "process_id": "", "verification": "", "last_error": "",
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&entity.ConfigDeployment{}).Where("node_id = ? AND status IN ?", node.ID, []string{"pending", "validating", "staged", "persisted", "applying", "verifying", "unknown"}).Updates(map[string]any{"status": "superseded", "error": "节点已更换服务器，请重新下发"}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&entity.Node{}).Where("id = ?", node.ID).Update("sync_status", entity.SyncStatusPending).Error
+	})
 }
 
 // Delete 删除节点并级联清理所有关联表
@@ -152,6 +185,15 @@ func (r *NodeRepository) Delete(id uint) error {
 			return err
 		}
 		if err := tx.Where("node_id = ?", id).Delete(&entity.NodeAlertState{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("scope = ? AND target_id = ?", "node", id).Delete(&entity.RoutingBinding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&entity.ConfigDeployment{}).Where("node_id = ? AND status IN ?", id, []string{"pending", "validating", "staged", "persisted", "applying", "verifying", "unknown"}).Updates(map[string]any{"status": "superseded", "error": "节点已删除"}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("node_id = ?", id).Delete(&entity.NodeConfigState{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&entity.Node{}, id).Error
@@ -286,7 +328,7 @@ func (r *NodeRepository) FindHealthyByGroupIDs(groupIDs []uint, lastCheckOKFilte
 	query := DB.Where(
 		"active = ? AND id IN (?)",
 		true,
-		DB.Table("group_nodes").Select("DISTINCT node_id").Where("group_id IN ?", groupIDs),
+		DB.Table("group_nodes").Select("DISTINCT node_id").Joins("JOIN groups g ON g.id = group_nodes.group_id AND g.active = ?", true).Where("group_id IN ?", groupIDs),
 	)
 	if lastCheckOKFilter {
 		query = query.Where("last_check_ok = ?", true)

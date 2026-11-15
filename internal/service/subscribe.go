@@ -144,6 +144,9 @@ func (s *SubscribeService) buildVlessRealityURI(user *entity.User, node *entity.
 	params.Set("security", "reality")
 	params.Set("type", "tcp")
 	params.Set("flow", "xtls-rprx-vision")
+	if NewRoutingService().UDP443Policy(node.ID, user.ID) == "allow" {
+		params.Set("flow", "xtls-rprx-vision-udp443")
+	}
 	params.Set("fp", fp)
 	params.Set("sni", sni)
 	if publicKey != "" {
@@ -464,6 +467,7 @@ func (s *SubscribeService) GenerateClash(token string) (string, error) {
 	sortNodesByName(nodes)
 
 	var proxies []string
+	excluded := 0
 	for _, node := range nodes {
 		node := node
 		profileKeys, err := s.profileRepo.FindActiveKeysForNode(node.ID)
@@ -473,6 +477,12 @@ func (s *SubscribeService) GenerateClash(token string) (string, error) {
 		for _, key := range profileKeys {
 			key := key
 			entry := s.buildClashProxy(user, &node, key.Profile, &key)
+			if incompatible, err := incompatibleVision(node.ID, user.ID, key.Profile); err != nil {
+				return "", err
+			} else if incompatible {
+				excluded++
+				continue
+			}
 			if entry != "" {
 				proxies = append(proxies, entry)
 			}
@@ -480,9 +490,12 @@ func (s *SubscribeService) GenerateClash(token string) (string, error) {
 	}
 
 	if len(proxies) == 0 {
+		if excluded > 0 {
+			return "", fmt.Errorf("Clash provider 无法等价表达显式 UDP 443 策略，请改用 Xray URI 或恢复继承；已排除 %d 条 Reality 节点", excluded)
+		}
 		return "proxies: []\n", nil
 	}
-	return "proxies:\n" + strings.Join(proxies, ""), nil
+	return fmt.Sprintf("# Explicit UDP443 policy: %d incompatible Reality entries excluded; see X-Xray-Pilot-Warnings.\n", excluded) + "proxies:\n" + strings.Join(proxies, ""), nil
 }
 
 func sortNodesByName(nodes []entity.Node) {

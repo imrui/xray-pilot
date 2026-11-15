@@ -133,6 +133,12 @@ func TestReplaceToken_UpdatesExistingNode(t *testing.T) {
 	}
 
 	// 更换模式：不传 name（沿用现有节点名），同名校验应跳过
+	if err := repository.EnsureConfigState(repository.DB, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ?", created.ID).Updates(map[string]any{"disk_hash": "old-machine", "runtime_hash": "old-machine", "process_id": "old-process", "verification": "protocol", "verified_at": time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
 	resp, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
 		ReplaceNodeID: &created.ID,
 		PanelURL:      "https://panel.example",
@@ -173,6 +179,13 @@ func TestReplaceToken_UpdatesExistingNode(t *testing.T) {
 	}
 	if node.SyncStatus != "pending" || node.ConfigHash != "" {
 		t.Fatalf("expected pending status + empty hash, got %s / %q", node.SyncStatus, node.ConfigHash)
+	}
+	var state entity.NodeConfigState
+	if err := repository.DB.First(&state, "node_id = ?", node.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if state.DiskHash != "" || state.RuntimeHash != "" || state.ProcessID != "" || state.VerifiedAt != nil || !state.RecoveryPending {
+		t.Fatalf("stale machine receipt: %+v", state)
 	}
 	var count int64
 	repository.DB.Table("nodes").Where("name = ?", "sg01").Count(&count)

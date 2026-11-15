@@ -1,6 +1,9 @@
 package repository
 
-import "github.com/imrui/xray-pilot/internal/entity"
+import (
+	"github.com/imrui/xray-pilot/internal/entity"
+	"gorm.io/gorm"
+)
 
 type InboundProfileRepository struct{}
 
@@ -36,11 +39,24 @@ func (r *InboundProfileRepository) FindAll() ([]entity.InboundProfile, error) {
 }
 
 func (r *InboundProfileRepository) Update(p *entity.InboundProfile) error {
-	return DB.Save(p).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(p).Error; err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, nil)
+	})
 }
 
 func (r *InboundProfileRepository) Delete(id uint) error {
-	return DB.Delete(&entity.InboundProfile{}, id).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("profile_id = ?", id).Delete(&entity.NodeProfileKey{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&entity.InboundProfile{}, id).Error; err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, nil)
+	})
 }
 
 // FindKeysForNode 查询节点关联的所有 NodeProfileKey（含 InboundProfile）
@@ -79,14 +95,24 @@ func (r *InboundProfileRepository) UpsertKey(key *entity.NodeProfileKey) error {
 	err := DB.Where("node_id = ? AND profile_id = ?", key.NodeID, key.ProfileID).First(&existing).Error
 	if err != nil {
 		// 不存在则创建
-		return DB.Create(key).Error
+		return DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(key).Error; err != nil {
+				return err
+			}
+			return InvalidateConfigs(tx, []uint{key.NodeID})
+		})
 	}
 	if existing.Locked {
 		return ErrNodeKeyLocked
 	}
 	existing.Settings = key.Settings
 	existing.Port = key.Port
-	return DB.Save(&existing).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&existing).Error; err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, []uint{key.NodeID})
+	})
 }
 
 // DeleteKey 删除节点密钥
@@ -98,8 +124,12 @@ func (r *InboundProfileRepository) DeleteKey(nodeID, profileID uint) error {
 	if existing.Locked {
 		return ErrNodeKeyLocked
 	}
-	return DB.Where("node_id = ? AND profile_id = ?", nodeID, profileID).
-		Delete(&entity.NodeProfileKey{}).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("node_id = ? AND profile_id = ?", nodeID, profileID).Delete(&entity.NodeProfileKey{}).Error; err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, []uint{nodeID})
+	})
 }
 
 // SetKeyLocked 更新节点协议锁定状态

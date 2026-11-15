@@ -23,6 +23,12 @@ type SSHParams struct {
 	User           string
 	KeyPath        string
 	KnownHostsPath string // TOFU known_hosts 文件路径
+	BaselineHash   string
+	AllowInitial   bool
+	BeforeApply    func() error
+	ProbeURL       string
+	ConfigPath     string
+	OnPhase        func(string)
 }
 
 // SyncResult 单次同步结果
@@ -31,17 +37,16 @@ type SyncResult struct {
 	ElapsedMs   int64
 	XrayVersion string
 	Error       string
+	ProcessID   string
 }
 
-// SyncWithFallback 同步 Xray 配置：优先 gRPC，失败则 SSH 推送配置文件
-// 当前版本仅实现 SSH 路径（gRPC 路径为 TODO）
+// SyncWithFallback 通过 SSH 事务应用完整配置；用户差异由 LiveSync 单独处理。
 func SyncWithFallback(params SSHParams, configContent string) *SyncResult {
 	start := time.Now()
-
-	// TODO: 尝试 gRPC 路径（通过 SSH 端口转发 10085，调用 HandlerService 动态更新用户）
-	// if ver, err := syncViaGRPC(params); err == nil {
-	//     return &SyncResult{Success: true, ElapsedMs: ..., XrayVersion: ver}
-	// }
+	configPath := params.ConfigPath
+	if configPath == "" {
+		configPath = xrayConfigPath
+	}
 
 	// SSH 路径：上传完整配置文件并重载 xray
 	client, err := xssh.Connect(xssh.Config{
@@ -60,7 +65,7 @@ func SyncWithFallback(params SSHParams, configContent string) *SyncResult {
 	}
 	defer client.Close()
 
-	if err := client.UploadContent(configContent, xrayConfigPath); err != nil {
+	if err := client.ApplyXrayConfig(configContent, configPath, true, false, xssh.TransactionOptions{BaselineHash: params.BaselineHash, AllowInitial: params.AllowInitial, BeforeApply: params.BeforeApply, ProbeURL: params.ProbeURL, OnPhase: params.OnPhase}); err != nil {
 		return &SyncResult{
 			Success:   false,
 			ElapsedMs: time.Since(start).Milliseconds(),
@@ -68,21 +73,15 @@ func SyncWithFallback(params SSHParams, configContent string) *SyncResult {
 		}
 	}
 
-	if err := client.ReloadXray(); err != nil {
-		return &SyncResult{
-			Success:   false,
-			ElapsedMs: time.Since(start).Milliseconds(),
-			Error:     fmt.Sprintf("重载 xray 失败: %v", err),
-		}
-	}
-
 	// 尝试获取 xray 版本
 	ver, _ := client.GetXrayVersion()
+	pid, _ := client.RunBounded("systemctl show xray -p MainPID -p ExecMainStartTimestampMonotonic --value", 10*time.Second)
 
 	return &SyncResult{
 		Success:     true,
 		ElapsedMs:   time.Since(start).Milliseconds(),
 		XrayVersion: ver,
+		ProcessID:   pid,
 	}
 }
 
@@ -99,6 +98,10 @@ func CheckNodeHealth(params SSHParams) (latencyMs int, ok bool, err error) {
 
 // ReadRemoteConfig 读取节点当前 Xray 配置（用于漂移检测）
 func ReadRemoteConfig(params SSHParams) (string, error) {
+	configPath := params.ConfigPath
+	if configPath == "" {
+		configPath = xrayConfigPath
+	}
 	client, err := xssh.Connect(xssh.Config{
 		Host:           params.Host,
 		Port:           params.Port,
@@ -111,7 +114,7 @@ func ReadRemoteConfig(params SSHParams) (string, error) {
 	}
 	defer client.Close()
 
-	content, err := client.ReadRemoteFile(xrayConfigPath)
+	content, err := client.ReadRemoteFile(configPath)
 	if err != nil {
 		return "", fmt.Errorf("读取远端配置失败: %w", err)
 	}

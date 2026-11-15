@@ -127,7 +127,7 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 		if err := s.userRepo.ReplaceGroupsTx(tx, user, req.GroupIDs); err != nil {
 			return fmt.Errorf("保存用户分组失败: %w", err)
 		}
-		return nil
+		return repository.InvalidateUserConfigs(tx, user.ID)
 	}); err != nil {
 		return nil, err
 	}
@@ -231,6 +231,9 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	}
 	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
 		if req.GroupIDs != nil {
+			if err := repository.InvalidateUserConfigs(tx, user.ID); err != nil {
+				return err
+			}
 			groupIDs, err := parseOptionalUintSlice(req.GroupIDs)
 			if err != nil {
 				return fmt.Errorf("解析分组失败: %w", err)
@@ -241,6 +244,9 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		}
 		if err := tx.Save(user).Error; err != nil {
 			return err
+		}
+		if shouldMarkSync {
+			return repository.InvalidateUserConfigs(tx, user.ID)
 		}
 		return nil
 	}); err != nil {

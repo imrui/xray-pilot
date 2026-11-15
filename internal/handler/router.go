@@ -40,6 +40,7 @@ func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
 
 	// 需要 JWT 鉴权的路由
 	api := r.Group("/api", JWTMiddleware())
+	registerRoutingRoutes(api)
 	{
 		// 用户管理
 		api.GET("/users", userH.List)

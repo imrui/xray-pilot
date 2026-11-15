@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -23,6 +24,8 @@ type SyncService struct {
 }
 
 var errNodeNoProtocols = errors.New("节点未绑定协议，无法生成可用配置")
+
+var pushConfig = xray.SyncWithFallback
 
 func NewSyncService() *SyncService {
 	return &SyncService{
@@ -50,6 +53,9 @@ const actorSchedulerDriftCheck = "system:scheduler:drift_check"
 
 // SyncNode 同步单个节点：生成多协议配置 → 推送 → 重载 xray → 更新状态。actor 为触发方（见 entity.SyncLog）
 func (s *SyncService) SyncNode(nodeID uint, actor string) *SyncResult {
+	return s.syncExpected(nodeID, actor, "")
+}
+func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncResult {
 	defer lockNode(nodeID)()
 
 	node, err := s.nodeRepo.FindByID(nodeID)
@@ -58,6 +64,12 @@ func (s *SyncService) SyncNode(nodeID uint, actor string) *SyncResult {
 	}
 
 	result := &SyncResult{NodeID: nodeID, Name: node.Name}
+	state, release, err := repository.AcquireConfigLease(nodeID)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	defer release()
 
 	configContent, warnings, err := s.buildConfig(node)
 	if err != nil {
@@ -66,22 +78,61 @@ func (s *SyncService) SyncNode(nodeID uint, actor string) *SyncResult {
 		return result
 	}
 	result.Warnings = warnings
+	snapshot, err := NewRoutingService().Effective(node.ID)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if expected != "" && xray.ConfigHash(configContent) != expected {
+		result.Error = "期望配置已更新，请重新下发"
+		return result
+	}
 	if len(warnings) > 0 {
 		zap.L().Warn("部分协议 inbound 生成失败", zap.String("node", node.Name), zap.Strings("warnings", warnings))
 	}
 
 	params := s.sshParams(node)
-	syncResult := xray.SyncWithFallback(params, configContent)
+	if err := rememberDesired(state, xray.ConfigHash(configContent)); err != nil {
+		result.Error = "无法保存期望版本"
+		return result
+	}
+	params.BaselineHash = state.DiskHash
+	if params.BaselineHash == "" {
+		params.BaselineHash = node.ConfigHash
+	}
+	params.AllowInitial = node.RegisteredAt != nil
+	params.OnPhase = deploymentPhaseRecorder(state)
+	params.BeforeApply = func() error {
+		if !s.stillCurrent(state, xray.ConfigHash(configContent)) {
+			return fmt.Errorf("期望配置已更新，请重新下发")
+		}
+		return nil
+	}
+	syncResult := pushConfig(params, configContent)
 
 	if !syncResult.Success {
 		result.Error = syncResult.Error
+		if strings.Contains(result.Error, "AUTHORIZATION_STOPPED") && state.LastHealthyPolicy != "" {
+			if err := s.recoverHealthyPolicy(node.ID, snapshot.Binding.Version, actor, xray.ConfigHash(configContent)); err != nil {
+				result.Error = "ROLLBACK_FAILED：" + err.Error()
+			} else {
+				result.Error = "ROLLED_BACK：已恢复最近健康策略，并保留当前用户与密钥"
+			}
+		}
 		s.failNode(node, actor, result.Error, syncResult.ElapsedMs)
 		return result
 	}
 
 	newHash := xray.ConfigHash(configContent)
-
-	if err := s.nodeRepo.UpdateLastSync(nodeID, entity.SyncStatusSynced, newHash); err != nil {
+	status := entity.SyncStatusDrifted
+	if s.stillCurrent(state, newHash) {
+		status = entity.SyncStatusSynced
+	}
+	if err := s.recordApplied(state, configContent, syncResult.ProcessID, snapshot); err != nil {
+		result.Error = "节点已应用，但回执未保存，需核对"
+		return result
+	}
+	if err := finishNodeStatus(state, newHash, status == entity.SyncStatusSynced); err != nil {
 		zap.L().Warn("更新同步状态失败", zap.Uint("nodeID", nodeID), zap.Error(err))
 	}
 
@@ -120,6 +171,10 @@ func (s *SyncService) SyncDrifted(actor string) []SyncResult {
 	results := make([]SyncResult, 0, len(nodes))
 	for _, node := range nodes {
 		node := node
+		var state entity.NodeConfigState
+		if strings.HasPrefix(actor, "system:") && repository.DB.First(&state, "node_id = ?", node.ID).Error == nil && (state.RecoveryAttempts >= 3 || state.NextRetryAt != nil && state.NextRetryAt.After(time.Now())) {
+			continue
+		}
 		results = append(results, *s.SyncNode(node.ID, actor))
 	}
 	return results
@@ -207,9 +262,7 @@ func (s *SyncService) CheckDrift(nodeID uint) (drifted bool, err error) {
 		}
 		return true, nil
 	}
-	if node.SyncStatus != entity.SyncStatusSynced || node.ConfigHash != expectedHash {
-		_ = s.nodeRepo.UpdateLastSync(nodeID, entity.SyncStatusSynced, expectedHash)
-	}
+	// Matching disk bytes do not prove runtime convergence after a failed restart/live apply.
 	return false, nil
 }
 
@@ -244,7 +297,9 @@ func (s *SyncService) buildConfig(node *entity.Node) (string, []string, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("查询节点协议配置失败: %w", err)
 	}
-	if len(profileKeys) == 0 {
+	// Previously managed nodes must be able to revoke their last protocol.
+	// Keep the API-only configuration so stale listeners are removed on sync.
+	if len(profileKeys) == 0 && node.ConfigHash == "" {
 		return "", nil, errNodeNoProtocols
 	}
 
@@ -264,7 +319,21 @@ func (s *SyncService) buildConfig(node *entity.Node) (string, []string, error) {
 		Error:  s.settingSvc.Get(KeyXrayLogError),
 		Level:  logLevel,
 	}
-	return xray.GenerateConfig(node, profileKeys, users, logCfg)
+	content, warnings, err := xray.GenerateConfig(node, profileKeys, users, logCfg)
+	if err != nil {
+		return "", warnings, err
+	}
+	if len(warnings) > 0 {
+		return "", warnings, fmt.Errorf("协议配置不完整，拒绝覆盖: %s", strings.Join(warnings, "; "))
+	}
+	effective, err := NewRoutingService().Effective(node.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	if effective.Policy != nil {
+		content, err = xray.ApplyRoutingPolicy(content, *effective.Policy)
+	}
+	return content, warnings, err
 }
 
 // PreviewConfig 生成节点期望配置（供调试用，private_key 脱敏）
@@ -278,11 +347,15 @@ func (s *SyncService) PreviewConfig(nodeID uint) (string, []string, error) {
 		return "", warnings, err
 	}
 	// 脱敏：将生成配置中的 privateKey 替换为占位符（避免通过 API 暴露）
-	masked := maskXrayConfig(content)
+	masked := redactConfig(content)
 	return masked, warnings, nil
 }
 
 func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
+	configPath := xray.RemoteConfigPath
+	if b, err := NewRoutingService().Binding("node", node.ID); err == nil && b.ConfigPath != "" {
+		configPath = b.ConfigPath
+	}
 	sshPort := node.SSHPort
 	if sshPort == 0 {
 		sshPort = s.settingSvc.GetInt(KeySSHDefaultPort)
@@ -303,6 +376,8 @@ func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 	}
 	return xray.SSHParams{
 		Host:           node.IP,
+		ConfigPath:     configPath,
+		ProbeURL:       s.settingSvc.Get(KeyXrayProbeURL),
 		Port:           sshPort,
 		User:           sshUser,
 		KeyPath:        keyPath,
@@ -334,6 +409,7 @@ func maskXrayConfig(configJSON string) string {
 }
 
 func (s *SyncService) failNode(node *entity.Node, actor string, errMsg string, elapsedMs int64) {
+	recordConfigFailure(node.ID, errMsg)
 	_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusFailed, "")
 	zap.L().Error("节点同步失败",
 		zap.String("node", node.Name),

@@ -64,6 +64,7 @@ const navGroups = [
     items: [
       { path: '/nodes', label: '节点管理', subtitle: '管理服务节点与配置同步', icon: Server },
       { path: '/profiles', label: '协议配置', subtitle: '维护协议模板与节点密钥', icon: Shield },
+      { path: '/routing', label: '路由与发布', subtitle: '路由模板、继承和配置任务', icon: Shield },
       { path: '/groups', label: '分组管理', subtitle: '管理节点分组和策略映射', icon: Layers },
     ],
   },

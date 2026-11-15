@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/dto"
+	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/service"
 	"github.com/imrui/xray-pilot/pkg/response"
@@ -184,6 +185,9 @@ func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format stri
 	}
 
 	// Subscription-Userinfo 是 v2ray 生态事实标准头，主流客户端据此显示用户用量
+	if warnings, err := h.svc.CompatibilityWarnings(token, format); err == nil && len(warnings) > 0 {
+		c.Header("X-Xray-Pilot-Warnings", strings.Join(warnings, "; "))
+	}
 	// total=0 表示无配额限制（与 v0.2.1 决定不做配额一致）
 	c.Header("Subscription-Userinfo", fmt.Sprintf("upload=%d; download=%d; total=0; expire=%d", up, down, expire))
 	c.Header("Profile-Update-Interval", "24")
@@ -313,6 +317,10 @@ func (h *SystemHandler) UpdateSettings(c *gin.Context) {
 	var kv map[string]string
 	if err := c.ShouldBindJSON(&kv); err != nil {
 		response.BadRequest(c, err.Error())
+		return
+	}
+	if v, ok := kv[service.KeyXrayProbeURL]; ok && v != h.settingSvc.Get(service.KeyXrayProbeURL) && c.GetString(ctxRole) != entity.RoleSuperAdmin {
+		response.Fail(c, 403, "健康探测目标仅超级管理员可修改")
 		return
 	}
 	if err := h.settingSvc.BatchUpdate(kv); err != nil {

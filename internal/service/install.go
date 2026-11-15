@@ -373,6 +373,12 @@ func (s *InstallService) registerCreate(t *entity.NodeInstallToken, ip string, n
 // registerReplace 更换模式：更新现有节点的 IP/SSH/版本信息，不新建记录。
 // Node ID 不变 → 分组关联、NodeProfileKey（Reality 私钥等）、端口/SNI 覆盖原样保留。
 func (s *InstallService) registerReplace(t *entity.NodeInstallToken, ip string, now time.Time, meta *nodeMeta, req *dto.RegisterNodeRequest) (*entity.Node, error) {
+	defer lockNode(*t.ReplaceNodeID)()
+	_, release, err := repository.AcquireConfigLease(*t.ReplaceNodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	node, err := s.nodeRepo.FindByID(*t.ReplaceNodeID)
 	if err != nil {
 		return nil, ErrReplaceNodeNotFound
@@ -407,7 +413,7 @@ func (s *InstallService) registerReplace(t *entity.NodeInstallToken, ip string, 
 	node.ConfigHash = ""
 	node.RegisteredAt = &now
 
-	if err := s.nodeRepo.Update(node); err != nil {
+	if err := s.nodeRepo.ReplaceHost(node); err != nil {
 		return nil, fmt.Errorf("更新节点失败: %w", err)
 	}
 	return node, nil
