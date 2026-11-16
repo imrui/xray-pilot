@@ -25,7 +25,7 @@ export type RoutingRevision = {
   actor: string
   created_at: string
 }
-export type RoutingScope = 'node' | 'group' | 'global' | 'user'
+export type RoutingScope = 'node' | 'group' | 'global'
 export const basicRoutingLabel = '基础路由（不使用模板）'
 export const basicRoutingDescription =
   '按面板基础规则生成配置，保留系统保护和协议规则，普通流量直连；不应用路由模板或节点路由覆盖。'
@@ -36,7 +36,6 @@ export type RoutingBinding = {
   template_id: number
   revision: number
   overrides: string
-  udp443_policy: string
   version: number
   config_path: string
 }
@@ -147,7 +146,7 @@ export function templateBinding(
   revision: number,
 ): RoutingBinding {
   if (!templateID || !revision) throw new Error('请选择已发布的模板版本。')
-  // Preserve this node's overrides, path, subscription policy and concurrency version.
+  // Preserve this node's overrides, path and concurrency version.
   return { ...binding, mode: 'template', template_id: templateID, revision }
 }
 export function bindingMode(binding: RoutingBinding, mode: RoutingBinding['mode']): RoutingBinding {
@@ -176,7 +175,7 @@ export function routingLabel(node: RoutingNode, templates: RoutingTemplate[]): s
 export const bindingPath = (scope: RoutingScope, id: number) =>
   scope === 'global'
     ? '/settings/routing-default'
-    : `/${{ node: 'nodes', group: 'groups', user: 'users' }[scope]}/${id}/routing`
+    : `/${{ node: 'nodes', group: 'groups' }[scope]}/${id}/routing`
 export const affectedIDs = (impact: BindingImpact) => [
   ...new Set([...impact.changed_nodes, ...Object.keys(impact.conflicts).map(Number)]),
 ]

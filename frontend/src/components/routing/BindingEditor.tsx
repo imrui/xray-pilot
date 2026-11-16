@@ -6,7 +6,7 @@ import { Btn } from '@/components/ui/Form'
 import { Drawer } from '@/components/ui/Drawer'
 import { useConfirm } from '@/lib/confirm-context'
 import { useAuthStore } from '@/store/auth'
-import { BindingFields, UDPPolicy } from './BindingFields'
+import { BindingFields } from './BindingFields'
 import {
   getBinding,
   invalidateRouting,
@@ -20,14 +20,12 @@ import type { BindingImpact, RoutingBinding, RoutingScope } from '@/lib/routing-
 export function BindingEditor({
   scope,
   id,
-  subscriptionOnly = false,
   onDirtyChange,
   onBusyChange,
   footerElement,
 }: {
   scope: RoutingScope
   id: number
-  subscriptionOnly?: boolean
   onDirtyChange?: (dirty: boolean) => void
   onBusyChange?: (busy: boolean) => void
   footerElement?: HTMLElement | null
@@ -45,7 +43,7 @@ export function BindingEditor({
   const [impact, setImpact] = useState<{ result: BindingImpact; saved: boolean } | null>(null)
   const value = draft ?? query.data
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(query.data)
-  const editable = superAdmin || scope === 'node' || scope === 'user'
+  const editable = superAdmin || scope === 'node'
   const change = (b: RoutingBinding) => {
     setDraft(b)
     setImpact(null)
@@ -112,45 +110,34 @@ export function BindingEditor({
           放弃本节修改
         </Btn>
       )}
-      {!subscriptionOnly && (
-        <Btn variant="secondary" loading={busy} onClick={() => void run(false)}>
-          查看影响范围
-        </Btn>
-      )}
+      <Btn variant="secondary" loading={busy} onClick={() => void run(false)}>
+        查看影响范围
+      </Btn>
       <Btn loading={busy} disabled={!dirty} onClick={() => void run(true)}>
-        {subscriptionOnly ? '保存订阅策略' : '保存路由'}
+        保存路由
       </Btn>
     </div>
   ) : null
   return (
     <div className="space-y-4">
-      {source && !subscriptionOnly && (
+      {source && (
         <div className="rounded-md bg-[var(--panel-muted)] p-3 text-sm">
           <div className="text-xs text-soft">已保存的路由来源</div>
           <p className="mt-1">{routingLabel(source, overview.data?.templates ?? [])}</p>
         </div>
       )}
       <fieldset disabled={busy || !editable} className="space-y-4 disabled:opacity-70">
-        {subscriptionOnly ? (
-          <UDPPolicy
-            value={value.udp443_policy}
-            onChange={(udp443_policy) => change({ ...value, udp443_policy })}
-          />
-        ) : (
-          <BindingFields
-            value={value}
-            templates={overview.data?.templates ?? []}
-            onChange={change}
-          />
-        )}
+        <BindingFields
+          value={value}
+          templates={overview.data?.templates ?? []}
+          onChange={change}
+        />
       </fieldset>
       {scope === 'group' && (
         <p className="text-xs text-soft">路由策略独立保存，影响范围以已保存的分组成员为准。</p>
       )}
       <p className="text-xs text-soft">
-        {subscriptionOnly
-          ? '保存后更新订阅生成策略，不触发节点路由同步。'
-          : overview.data?.auto_sync
+        {overview.data?.auto_sync
             ? '自动同步已开启：保存后，有效配置变化的节点将自动同步。'
             : '当前为手动同步：保存后请在节点列表同步配置。'}
       </p>
@@ -194,7 +181,7 @@ export function BindingEditor({
           <p>
             {impact.saved ? '已保存' : '预计影响'}：{impact.result.changed_nodes.length} 个节点
             {impact.saved ? (overview.data?.auto_sync ? '将自动同步' : '待同步') : '的有效配置变化'}
-            {subscriptionOnly ? '（订阅策略已单独处理）' : ''}。
+            。
           </p>
           {Object.entries(impact.result.conflicts).map(([nodeID, reason]) => (
             <p key={nodeID} className="text-[var(--danger)]">
@@ -213,7 +200,7 @@ export function BindingEditor({
                 {overview.data?.nodes.find((n) => n.id === nodeID)?.name ?? `节点 #${nodeID}`}
               </p>
             ))}
-          {!ids.length && !subscriptionOnly && (
+          {!ids.length && (
             <p className="text-soft">没有需要同步的有效配置变化。</p>
           )}
         </div>

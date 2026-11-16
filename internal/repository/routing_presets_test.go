@@ -79,7 +79,7 @@ func TestRoutingPresetUpgradeAdoptionAndNameCollision(t *testing.T) {
 			if err := DB.Create(&rev).Error; err != nil {
 				t.Fatal(err)
 			}
-			binding := entity.RoutingBinding{Scope: "global", Mode: "template", TemplateID: old.ID, Revision: 1, Version: 7, Overrides: "{}", UDP443Policy: "inherit"}
+			binding := entity.RoutingBinding{Scope: "global", Mode: "template", TemplateID: old.ID, Revision: 1, Version: 7, Overrides: "{}"}
 			if err := DB.Create(&binding).Error; err != nil {
 				t.Fatal(err)
 			}

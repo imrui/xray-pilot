@@ -185,22 +185,16 @@ export function BindingFields({
           )}
         </FieldGroup>
       )}
-      {value.scope === 'node' && (
+      {value.scope === 'node' && superAdmin && (
         <details>
           <summary className="cursor-pointer text-sm">高级设置</summary>
           <div className="mt-3 space-y-4">
-            <UDPPolicy
-              value={value.udp443_policy}
-              onChange={(udp443_policy) => onChange({ ...value, udp443_policy })}
+            <Field
+              label="Xray 配置路径（留空使用默认）"
+              value={value.config_path ?? ''}
+              placeholder="/usr/local/etc/xray/config.json"
+              onChange={(e) => onChange({ ...value, config_path: e.target.value })}
             />
-            {superAdmin && (
-              <Field
-                label="Xray 配置路径（留空使用默认）"
-                value={value.config_path ?? ''}
-                placeholder="/usr/local/etc/xray/config.json"
-                onChange={(e) => onChange({ ...value, config_path: e.target.value })}
-              />
-            )}
           </div>
         </details>
       )}
@@ -312,27 +306,6 @@ function RulesOverride({ value, onChange }: { value: unknown; onChange: (v: unkn
           {error}（请修正后再保存）
         </p>
       )}
-    </div>
-  )
-}
-export function UDPPolicy({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="space-y-2">
-      <SelectField
-        label="客户端 UDP 443 策略"
-        value={value}
-        onChange={onChange}
-        options={[
-          { value: 'inherit', label: '继承上级策略（未指定时阻止）' },
-          { value: 'block', label: '阻止 UDP 443' },
-          { value: 'allow', label: '允许 UDP 443' },
-        ]}
-      />
-      <p className="text-xs text-soft">
-        仅影响 Vision 客户端订阅，不是节点防火墙规则。优先级：用户 → 节点 → 全局；均未指定时阻止。
-        阻止使用 xtls-rprx-vision，允许使用 xtls-rprx-vision-udp443（更新订阅后生效）。
-        允许时，Clash / sing-box 订阅会排除无法等价表达此策略的 Vision 条目。
-      </p>
     </div>
   )
 }

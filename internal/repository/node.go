@@ -31,7 +31,7 @@ func (r *NodeRepository) Create(node *entity.Node) error {
 		if err := tx.Create(node).Error; err != nil {
 			return err
 		}
-		return tx.Create(&entity.RoutingBinding{Scope: "node", TargetID: node.ID, Mode: "inherit", Overrides: "{}", UDP443Policy: "inherit", Version: 1}).Error
+		return tx.Create(&entity.RoutingBinding{Scope: "node", TargetID: node.ID, Mode: "inherit", Overrides: "{}", Version: 1}).Error
 	})
 }
 

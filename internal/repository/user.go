@@ -156,9 +156,6 @@ func (r *UserRepository) Delete(id uint) error {
 		if err := InvalidateUserConfigs(tx, id); err != nil {
 			return err
 		}
-		if err := tx.Where("scope = ? AND target_id = ?", "user", id).Delete(&entity.RoutingBinding{}).Error; err != nil {
-			return err
-		}
 		if err := tx.Where("user_id = ?", id).Delete(&entity.UserGroup{}).Error; err != nil {
 			return err
 		}

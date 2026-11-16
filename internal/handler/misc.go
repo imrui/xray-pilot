@@ -185,9 +185,6 @@ func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format stri
 	}
 
 	// Subscription-Userinfo 是 v2ray 生态事实标准头，主流客户端据此显示用户用量
-	if warnings, err := h.svc.CompatibilityWarnings(token, format); err == nil && len(warnings) > 0 {
-		c.Header("X-Xray-Pilot-Warnings", strings.Join(warnings, "; "))
-	}
 	// total=0 表示无配额限制（与 v0.2.1 决定不做配额一致）
 	c.Header("Subscription-Userinfo", fmt.Sprintf("upload=%d; download=%d; total=0; expire=%d", up, down, expire))
 	c.Header("Profile-Update-Interval", "24")

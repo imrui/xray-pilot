@@ -102,7 +102,7 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 		reply(c, v, err)
 	})
 	api.DELETE("/routing-templates/:id", RequireSuperAdmin(), func(c *gin.Context) { reply(c, nil, s.DeleteTemplate(id(c))) })
-	for path, scope := range map[string]string{"/nodes/:id/routing": "node", "/groups/:id/routing": "group", "/users/:id/routing": "user", "/settings/routing-default": "global"} {
+	for path, scope := range map[string]string{"/nodes/:id/routing": "node", "/groups/:id/routing": "group", "/settings/routing-default": "global"} {
 		scope := scope
 		api.POST(path+"/preview", func(c *gin.Context) {
 			var b entity.RoutingBinding

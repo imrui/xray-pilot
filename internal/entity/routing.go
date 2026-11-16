@@ -24,16 +24,15 @@ type RoutingTemplateRevision struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 type RoutingBinding struct {
-	Scope        string    `gorm:"primaryKey;size:16" json:"scope"`
-	TargetID     uint      `gorm:"primaryKey;autoIncrement:false" json:"target_id"`
-	Mode         string    `json:"mode"`
-	TemplateID   uint      `json:"template_id"`
-	Revision     uint      `json:"revision"`
-	Overrides    string    `gorm:"type:text" json:"overrides"`
-	ConfigPath   string    `json:"config_path"`
-	UDP443Policy string    `json:"udp443_policy"`
-	Version      uint      `json:"version"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Scope      string    `gorm:"primaryKey;size:16" json:"scope"`
+	TargetID   uint      `gorm:"primaryKey;autoIncrement:false" json:"target_id"`
+	Mode       string    `json:"mode"`
+	TemplateID uint      `json:"template_id"`
+	Revision   uint      `json:"revision"`
+	Overrides  string    `gorm:"type:text" json:"overrides"`
+	ConfigPath string    `json:"config_path"`
+	Version    uint      `json:"version"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 type ConfigDeployment struct {
 	ID                uint      `gorm:"primaryKey" json:"id"`

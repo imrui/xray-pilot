@@ -29,7 +29,7 @@ func migrateRoutingDefaults(db *gorm.DB) error {
 			if err != nil {
 				return err
 			}
-			binding = entity.RoutingBinding{Scope: "global", Mode: "template", TemplateID: defaultTemplate.ID, Revision: rev.Revision, Version: 1, UDP443Policy: "inherit", Overrides: "{}"}
+			binding = entity.RoutingBinding{Scope: "global", Mode: "template", TemplateID: defaultTemplate.ID, Revision: rev.Revision, Version: 1, Overrides: "{}"}
 			if err := tx.Create(&binding).Error; err != nil {
 				return err
 			}
@@ -41,7 +41,7 @@ func migrateRoutingDefaults(db *gorm.DB) error {
 			return err
 		}
 		for _, id := range ids {
-			b := entity.RoutingBinding{Scope: "node", TargetID: id, Mode: "legacy", Version: 1, Overrides: "{}", UDP443Policy: "inherit"}
+			b := entity.RoutingBinding{Scope: "node", TargetID: id, Mode: "legacy", Version: 1, Overrides: "{}"}
 			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&b).Error; err != nil {
 				return err
 			}

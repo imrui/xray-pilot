@@ -36,7 +36,7 @@ type EffectiveRouting struct {
 }
 
 func routingBinding(db *gorm.DB, scope string, id uint) (entity.RoutingBinding, error) {
-	b := entity.RoutingBinding{Scope: scope, TargetID: id, Mode: "inherit", UDP443Policy: "inherit", Overrides: "{}"}
+	b := entity.RoutingBinding{Scope: scope, TargetID: id, Mode: "inherit", Overrides: "{}"}
 	if scope == "node" {
 		b.Mode = "legacy"
 	}
@@ -47,6 +47,9 @@ func routingBinding(db *gorm.DB, scope string, id uint) (entity.RoutingBinding, 
 	return b, err
 }
 func (s *RoutingService) Binding(scope string, id uint) (entity.RoutingBinding, error) {
+	if scope != "global" && scope != "group" && scope != "node" {
+		return entity.RoutingBinding{}, fmt.Errorf("无效配置范围")
+	}
 	return routingBinding(repository.DB, scope, id)
 }
 func resolveRouting(db *gorm.DB, nodeID uint) (*EffectiveRouting, error) {
@@ -153,7 +156,7 @@ func (s *RoutingService) PreviewTemplate(nodeID uint, mode string, templateID, r
 	}
 	return resolveRoutingBinding(repository.DB, nodeID, entity.RoutingBinding{
 		Scope: "node", TargetID: nodeID, Mode: mode, TemplateID: templateID,
-		Revision: revision, Overrides: "{}", UDP443Policy: "inherit",
+		Revision: revision, Overrides: "{}",
 	})
 }
 func (s *RoutingService) SaveTemplate(id, expected uint, name, description, draft, actor string) (*entity.RoutingTemplate, error) {
@@ -270,7 +273,7 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 		defer func() { *reports[0] = impact }()
 	}
 
-	if b.Scope != "global" && b.Scope != "group" && b.Scope != "node" && b.Scope != "user" {
+	if b.Scope != "global" && b.Scope != "group" && b.Scope != "node" {
 		return fmt.Errorf("无效配置范围")
 	}
 	if (b.Scope == "global" || b.Scope == "group") && !super {
@@ -279,20 +282,11 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 	if b.Scope == "global" && b.TargetID != 0 {
 		return fmt.Errorf("全局目标必须为 0")
 	}
-	if b.UDP443Policy == "" {
-		b.UDP443Policy = "inherit"
-	}
-	if b.UDP443Policy != "inherit" && b.UDP443Policy != "block" && b.UDP443Policy != "allow" {
-		return fmt.Errorf("UDP 443 策略无效")
-	}
 	if b.Mode != "legacy" && b.Mode != "inherit" && b.Mode != "template" {
 		return fmt.Errorf("路由来源无效")
 	}
 	if b.Scope != "node" && b.Mode == "legacy" {
 		return fmt.Errorf("基础路由（不使用模板）仅适用于节点")
-	}
-	if b.Scope == "user" && (b.TemplateID != 0 || b.Mode != "inherit") {
-		return fmt.Errorf("用户仅支持订阅策略")
 	}
 	if b.ConfigPath != "" && (b.Scope != "node" || !regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`).MatchString(b.ConfigPath) || path.Clean(b.ConfigPath) != b.ConfigPath || path.Ext(b.ConfigPath) != ".json") {
 		return fmt.Errorf("配置路径须为绝对 JSON 文件路径，不允许上级目录或特殊字符")
@@ -302,9 +296,6 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 	}
 	if b.Scope == "global" && b.Mode != "template" {
 		return fmt.Errorf("全局默认必须绑定已发布模板")
-	}
-	if b.Scope == "group" && b.UDP443Policy != "inherit" {
-		return fmt.Errorf("分组不提供订阅 UDP 443 策略")
 	}
 	if b.Overrides == "" {
 		b.Overrides = "{}"
@@ -322,7 +313,7 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 	}
 	err := repository.DB.Transaction(func(tx *gorm.DB) error {
 		if b.Scope != "global" {
-			table := map[string]string{"node": "nodes", "group": "groups", "user": "users"}[b.Scope]
+			table := map[string]string{"node": "nodes", "group": "groups"}[b.Scope]
 			var n int64
 			if err := tx.Table(table).Where("id = ?", b.TargetID).Count(&n).Error; err != nil {
 				return err
@@ -373,10 +364,8 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 		if b.Scope == "group" {
 			q = q.Joins("JOIN group_nodes ON group_nodes.node_id = nodes.id").Where("group_nodes.group_id = ?", b.TargetID)
 		}
-		if b.Scope != "user" {
-			if err := q.Find(&nodes).Error; err != nil {
-				return err
-			}
+		if err := q.Find(&nodes).Error; err != nil {
+			return err
 		}
 		for _, n := range nodes {
 			before[n.ID] = effectiveKey(resolveRouting(tx, n.ID))
@@ -428,16 +417,4 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 		return nil
 	}
 	return err
-}
-func (s *RoutingService) UDP443Policy(node, user uint) string {
-	for _, pair := range []struct {
-		scope string
-		id    uint
-	}{{"user", user}, {"node", node}, {"global", 0}} {
-		b, err := routingBinding(repository.DB, pair.scope, pair.id)
-		if err == nil && (b.UDP443Policy == "allow" || b.UDP443Policy == "block") {
-			return b.UDP443Policy
-		}
-	}
-	return "block"
 }

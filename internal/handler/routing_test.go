@@ -59,4 +59,21 @@ func TestRoutingRoutesAuthorizationAndVersionConflict(t *testing.T) {
 	if w.Code != http.StatusOK || response.Code != 0 {
 		t.Fatalf("admin cannot preview inherited template: %d %s", w.Code, response.Message)
 	}
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodPost} {
+		path := "/api/users/1/routing"
+		if method == http.MethodPost {
+			path += "/preview"
+		}
+		if w, _ := doJSON(t, r, method, path, root, map[string]any{"udp443_policy": "allow"}); w.Code != http.StatusNotFound {
+			t.Fatalf("retired user policy endpoint still active: %s %d", method, w.Code)
+		}
+	}
+	w, response = doJSON(t, r, http.MethodGet, "/api/nodes/1/routing", root, nil)
+	var data map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil || response.Code != 0 {
+		t.Fatalf("node binding unreadable: %v", err)
+	}
+	if _, exists := data["data"].(map[string]any)["udp443_policy"]; exists {
+		t.Fatal("binding still exposes retired policy")
+	}
 }

@@ -8,7 +8,6 @@ import { pushToast } from '@/lib/notify'
 import { SecretField, Section } from './shared'
 import { useSettingsForm } from './context'
 import AlertSettings from './AlertSettings'
-import { BindingEditor } from '@/components/routing/BindingEditor'
 
 // 订阅与通知：订阅链接前缀 / 备注模板 + 飞书机器人 + 节点告警
 export default function SubscriptionSection() {
@@ -149,7 +148,6 @@ export default function SubscriptionSection() {
         </div>
       </Section>
 
-      <Section title="全局客户端 UDP 443 策略" description="独立保存；用户和节点可以覆盖此默认值。"><BindingEditor scope="global" id={0} subscriptionOnly /></Section>
       <AlertSettings />
     </>
   )

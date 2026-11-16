@@ -4,10 +4,12 @@ import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route, Outlet } from 'react-router-dom'
 import { ConfirmProvider } from '../src/components/ui/ConfirmProvider'
 import Routing from '../src/pages/Routing'
 import Profiles from '../src/pages/Profiles'
+import Users from '../src/pages/Users'
+import SubscriptionSection from '../src/pages/settings/SubscriptionSection'
 import { Btn } from '../src/components/ui/Form'
 import { Drawer } from '../src/components/ui/Drawer'
 import { TemplateNodes, TemplateEditor } from '../src/components/routing/Templates'
@@ -46,7 +48,6 @@ const binding: RoutingBinding = {
   version: 7,
   overrides: '{"ipv4_force_domains":["domain:private.example"]}',
   config_path: '/etc/xray/custom.json',
-  udp443_policy: 'block',
 }
 const overview = {
   templates: [template],
@@ -270,6 +271,7 @@ test('节点域名覆盖区分继承、自定义和清空，继承展示真实�
   api((method, url) => method === 'get' && url.endsWith('/routing') ? { ...binding, overrides: '{}' } : undefined)
   mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
   const inherited = await screen.findByLabelText('IPv4 模板域名') as HTMLTextAreaElement
+  assert.equal(screen.queryByLabelText('客户端 UDP 443 策略'), null)
   assert.equal(inherited.value, 'domain:template.example')
   assert.equal(inherited.readOnly, true)
   assert.ok(screen.getByText('模板未配置强制 IPv6 域名，无需额外设置。'))
@@ -290,6 +292,47 @@ test('节点域名覆盖区分继承、自定义和清空，继承展示真实�
   assert.deepEqual(JSON.parse((calls.find((c) => c.method === 'put')!.data as RoutingBinding).overrides), { ipv4_force_domains: [] })
 })
 
+test('订阅设置不再读取全局路由策略，原订阅设置仍可编辑', async () => {
+  api((_method, url) => url === '/system/feishu-status' ? {} : undefined)
+  const changes: string[] = []
+  const context = {
+    form: {}, setForm: () => {}, set: () => {},
+    f: (key: string) => () => { changes.push(key) },
+  }
+  mount(
+    <Routes>
+      <Route element={<Outlet context={context} />}>
+        <Route index element={<SubscriptionSection />} />
+      </Route>
+    </Routes>,
+  )
+  fireEvent.change(screen.getByLabelText('节点备注格式'), { target: { value: '{node_name}' } })
+  assert.deepEqual(changes, ['subscription.remark_format'])
+  await waitFor(() => assert.ok(calls.some((c) => c.url === '/system/feishu-status')))
+  assert.equal(screen.queryByText('全局客户端 UDP 443 策略'), null)
+  assert.equal(screen.queryByRole('button', { name: '保存订阅策略' }), null)
+  assert.equal(calls.some((c) => c.url.includes('routing')), false)
+})
+
+test('用户编辑不再加载路由或订阅策略，直接保存用户修改', async () => {
+  const user = { id: 1, username: 'alice', real_name: '', active: true, group_ids: [], groups: [], remark: '', expires_at: null, uuid: 'test', token: 'test', feishu_enabled: false }
+  api((method, url) => {
+    if (method === 'get' && url === '/users') return { list: [user], total: 1 }
+    if (method === 'get' && url === '/groups') return { list: [], total: 0 }
+    if (method === 'put' && url === '/users/1') return user
+  })
+  mount(<Users />)
+  fireEvent.click((await screen.findAllByRole('button', { name: '编辑' }))[0])
+  fireEvent.change(screen.getByLabelText('用户名（客户端显示） *'), { target: { value: 'alice-updated' } })
+  assert.equal(screen.queryByText('客户端 UDP 443'), null)
+  const save = screen.getByRole('button', { name: '保存用户' }) as HTMLButtonElement
+  assert.equal(save.disabled, false)
+  fireEvent.click(save)
+  await waitFor(() => assert.ok(calls.some((c) => c.method === 'put' && c.url === '/users/1')))
+  assert.equal(calls.some((c) => c.url.includes('routing')), false)
+  assert.equal((calls.find((c) => c.method === 'put')!.data as { username: string }).username, 'alice-updated')
+})
+
 test('现有自定义及清空设置保留，恢复继承删除覆盖而非复制模板', async () => {
   api((method, url) => method === 'get' && url.endsWith('/routing') ? { ...binding, overrides: '{"ipv4_force_domains":["domain:private.example"],"ipv6_force_domains":[]}' } : undefined)
   mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
@@ -301,7 +344,6 @@ test('现有自定义及清空设置保留，恢复继承删除覆盖而非复�
   await screen.findByText(/已保存：1 个节点/)
   const saved = calls.find((c) => c.method === 'put')!.data as RoutingBinding
   assert.deepEqual(JSON.parse(saved.overrides), {})
-  assert.equal(saved.udp443_policy, binding.udp443_policy)
   assert.equal(saved.config_path, binding.config_path)
 })
 
@@ -368,7 +410,6 @@ test('模板侧批量绑定只更改选择的版本，保留每台节点自己�
   assert.equal(bodies[1].overrides, '{}')
   assert.equal(bodies[0].version, 7)
   assert.equal(bodies[0].config_path, binding.config_path)
-  assert.equal(bodies[0].udp443_policy, 'block')
   assert.equal(bodies[0].mode, 'template')
   assert.equal(bodies[0].revision, 2)
   assert.equal(calls.filter((c) => c.url.includes('config-deployments')).length, 0)

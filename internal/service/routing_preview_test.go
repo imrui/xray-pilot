@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -10,49 +9,6 @@ import (
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 )
-
-func TestVisionSubscriptionPolicyKeepsServerFlow(t *testing.T) {
-	n, u := routingFixture(t)
-	s := NewRoutingService()
-	sync := NewSyncService()
-	before, err := sync.DesiredConfigHash(n.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, policy := range []string{"block", "allow"} {
-		b, _ := s.Binding("node", n.ID)
-		b.UDP443Policy = policy
-		if err := s.SaveBinding(b, b.Version, "test", true); err != nil {
-			t.Fatal(err)
-		}
-		raw, err := NewSubscribeService().GenerateSubscription(u.Token)
-		if err != nil {
-			t.Fatal(err)
-		}
-		decoded, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		flow := "xtls-rprx-vision"
-		if policy == "allow" {
-			flow += "-udp443"
-		}
-		if !strings.Contains(string(decoded), "flow="+flow+"&") {
-			t.Fatalf("unexpected subscription flow for %s", policy)
-		}
-		config, _, err := sync.PreviewConfig(n.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(config, `"flow": "xtls-rprx-vision"`) || strings.Contains(config, "xtls-rprx-vision-udp443") {
-			t.Fatal("client flow suffix leaked into server configuration")
-		}
-		after, err := sync.DesiredConfigHash(n.ID)
-		if err != nil || before != after {
-			t.Fatalf("client policy changed server config hash: %v", err)
-		}
-	}
-}
 
 func TestTemplatePreviewUsesProposedSourceWithoutWrites(t *testing.T) {
 	n, _ := routingFixture(t)
