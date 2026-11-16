@@ -1,4 +1,5 @@
 import request from './axios'
+import type { TrafficAnalytics, TrafficAnalyticsQuery } from '@/types/traffic'
 import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuChat, FeishuPushResult, TrafficSummary, Admin, AdminRole, LoginResponse } from '@/types'
 
 // ---- 通用分页参数 ----
@@ -89,6 +90,7 @@ export interface NodeListParams extends PageParams {
   owner?: string
   /** 健康检测筛选：healthy / unhealthy / unchecked */
   health?: string
+  health_dashboard?: boolean
 }
 
 export const nodeApi = {
@@ -194,7 +196,7 @@ export const profileApi = {
 // ---- 日志 API ----
 export const logApi = {
   // actor 为前缀过滤：如 "admin:" 只看人工操作，"system:scheduler:" 只看调度器
-  list: (params?: PageParams & { actor?: string }) =>
+  list: (params?: PageParams & { actor?: string; important?: boolean }) =>
     request.get<ApiResponse<PageResult<SyncLog>>>('/logs', { params }),
 
   cleanup: (days: number) =>
@@ -269,6 +271,8 @@ export const adminApi = {
 
 // ---- 流量统计 ----
 export const trafficApi = {
+  analytics: (params: TrafficAnalyticsQuery, signal?: AbortSignal) =>
+    request.get<ApiResponse<TrafficAnalytics>>('/traffic/analytics', { params, signal }),
   summary: () =>
     request.get<ApiResponse<TrafficSummary>>('/traffic/summary'),
 }

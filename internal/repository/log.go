@@ -31,8 +31,11 @@ func (r *LogRepository) RecordWithActor(action, target, actor string, success bo
 }
 
 // List 分页查询；actor 非空时按前缀过滤（如 "admin:" 只看人工操作、"system:scheduler:" 只看调度器）
-func (r *LogRepository) List(page, pageSize int, actor string) ([]entity.SyncLog, int64, error) {
+func (r *LogRepository) List(page, pageSize int, actor string, importantOnly ...bool) ([]entity.SyncLog, int64, error) {
 	query := DB.Model(&entity.SyncLog{})
+	if len(importantOnly) > 0 && importantOnly[0] {
+		query = query.Where("actor LIKE ? OR success = ?", "admin:%", false)
+	}
 	if actor != "" {
 		query = query.Where("actor LIKE ? ESCAPE '\\'", escapeLike(actor)+"%")
 	}

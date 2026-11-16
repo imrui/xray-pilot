@@ -13,11 +13,19 @@ import "time"
 type TrafficSample struct {
 	ID        uint64    `gorm:"primaryKey"                                                json:"id"`
 	UserID    uint      `gorm:"not null;index:idx_traffic_user_period,priority:1"        json:"user_id"`
-	NodeID    uint      `gorm:"not null;index"                                            json:"node_id"`
-	PeriodEnd time.Time `gorm:"not null;index:idx_traffic_user_period,priority:2"        json:"period_end"`
+	NodeID    uint      `gorm:"not null;index;index:idx_traffic_node_period,priority:1" json:"node_id"`
+	PeriodEnd time.Time `gorm:"not null;index;index:idx_traffic_user_period,priority:2;index:idx_traffic_node_period,priority:2" json:"period_end"`
 	UpBytes   int64     `gorm:"not null;default:0"                                        json:"up_bytes"`
 	DownBytes int64     `gorm:"not null;default:0"                                        json:"down_bytes"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// TrafficPoll 保留零用量和失败的采集结果，不能从非零流量明细推断采集是否成功。
+type TrafficPoll struct {
+	ID        uint64    `gorm:"primaryKey"`
+	NodeID    uint      `gorm:"not null;index:idx_poll_node_period,priority:1"`
+	PeriodEnd time.Time `gorm:"not null;index;index:idx_poll_node_period,priority:2"`
+	Success   bool      `gorm:"not null"`
 }
 
 // UserTrafficTotal 用户累计流量（跨节点合并）

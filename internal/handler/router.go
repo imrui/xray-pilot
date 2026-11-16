@@ -100,6 +100,7 @@ func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
 
 		// 流量统计
 		api.GET("/traffic/summary", trafficH.Summary)
+		api.GET("/traffic/analytics", trafficH.Analytics)
 
 		// 数据库备份
 		api.GET("/system/backups", backupH.List)

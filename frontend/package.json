@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "tsx --tsconfig tsconfig.app.json --test tests/*.test.tsx",
+    "test": "tsx --tsconfig tsconfig.app.json --test tests/*.test.tsx tests/*.test.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

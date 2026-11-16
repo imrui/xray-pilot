@@ -148,3 +148,50 @@ func TestPurgeSamplesBefore(t *testing.T) {
 		t.Errorf("total mutated: %+v", totalsMap[1])
 	}
 }
+
+func TestTrafficPollOnlyAndRetentionAcrossTimezones(t *testing.T) {
+	setupTrafficTestDB(t)
+	r := NewTrafficRepository()
+	cutoff := time.Date(2026, 11, 12, 16, 0, 0, 0, time.UTC)
+	old := cutoff.Add(-time.Minute).In(time.FixedZone("CST", 8*3600))
+	fresh := cutoff.In(time.FixedZone("PST", -8*3600))
+	if err := r.WriteCycle(nil, nil,
+		entity.TrafficPoll{NodeID: 1, PeriodEnd: old, Success: true},
+		entity.TrafficPoll{NodeID: 1, PeriodEnd: fresh, Success: false}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteCycle([]entity.TrafficSample{{NodeID: 1, UserID: 1, PeriodEnd: old, UpBytes: 10}, {NodeID: 1, UserID: 1, PeriodEnd: fresh, UpBytes: 20}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := r.PurgeSamplesBefore(cutoff)
+	if err != nil || deleted != 1 {
+		t.Fatalf("purge = %d, %v", deleted, err)
+	}
+	var polls []entity.TrafficPoll
+	if err := DB.Find(&polls).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(polls) != 1 || !polls[0].PeriodEnd.Equal(fresh) || polls[0].Success {
+		t.Fatalf("remaining polls: %+v", polls)
+	}
+}
+
+func TestTrafficCycleRollsBackPollsOnSampleFailure(t *testing.T) {
+	setupTrafficTestDB(t)
+	r := NewTrafficRepository()
+	stamp := time.Now()
+	if err := DB.Create(&entity.TrafficSample{ID: 1, NodeID: 1, UserID: 1, PeriodEnd: stamp}).Error; err != nil {
+		t.Fatal(err)
+	}
+	err := r.WriteCycle([]entity.TrafficSample{{ID: 1, NodeID: 1, UserID: 1, PeriodEnd: stamp}}, nil, entity.TrafficPoll{NodeID: 1, PeriodEnd: stamp, Success: true})
+	if err == nil {
+		t.Fatal("duplicate sample should fail")
+	}
+	var count int64
+	if err := DB.Model(&entity.TrafficPoll{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("partial cycle persisted %d polls", count)
+	}
+}

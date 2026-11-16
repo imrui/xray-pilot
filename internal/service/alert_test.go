@@ -225,3 +225,21 @@ func TestFormatAlertDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestAlertCardUsesUTCPlusEightAcrossDateBoundary(t *testing.T) {
+	instant := time.Date(2026, 11, 15, 16, 20, 57, 0, time.UTC)
+	for _, zone := range []*time.Location{time.UTC, time.FixedZone("UTC-7", -7*60*60), time.FixedZone("UTC+8", 8*60*60)} {
+		t.Run(zone.String(), func(t *testing.T) {
+			since := instant.In(zone)
+			for _, notify := range []alertNotifyKind{alertNotifyFiring, alertNotifyRepeat} {
+				card := cardJSON(buildAlertCard([]alertItem{{
+					notify: notify,
+					state:  &entity.NodeAlertState{Kind: entity.AlertKindNodeUnreachable, Since: &since, FailCount: 3},
+				}}, "", instant.Add(4*time.Minute)))
+				if !strings.Contains(card, "11-16 00:20（北京时间 UTC+8）") {
+					t.Fatalf("card time depends on server/DB timezone: %s", card)
+				}
+			}
+		})
+	}
+}

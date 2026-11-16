@@ -18,13 +18,19 @@ func NewTrafficRepository() *TrafficRepository {
 // WriteCycle 单事务写入一次轮询的增量数据
 //   - samples：本周期所有 (user, node) 的明细行
 //   - totals：本周期所有用户累计（UPSERT，列加和更新 LastUpdatedAt）
+//   - polls：各节点采集结果，包括零流量与失败的周期
 //
 // 任一失败整体回滚，避免明细写入但累计未更新导致后续数据漂移
-func (r *TrafficRepository) WriteCycle(samples []entity.TrafficSample, totals []entity.UserTrafficTotal) error {
-	if len(samples) == 0 && len(totals) == 0 {
+func (r *TrafficRepository) WriteCycle(samples []entity.TrafficSample, totals []entity.UserTrafficTotal, polls ...entity.TrafficPoll) error {
+	if len(samples) == 0 && len(totals) == 0 && len(polls) == 0 {
 		return nil
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if len(polls) > 0 {
+			if err := tx.CreateInBatches(&polls, 200).Error; err != nil {
+				return err
+			}
+		}
 		if len(samples) > 0 {
 			if err := tx.CreateInBatches(&samples, 200).Error; err != nil {
 				return err
@@ -116,6 +122,20 @@ func (r *TrafficRepository) Summary() (*TrafficSummary, error) {
 // PurgeSamplesBefore 删除指定时间之前的明细，做 retention
 // 累计字段不受影响。返回删除条数
 func (r *TrafficRepository) PurgeSamplesBefore(cutoff time.Time) (int64, error) {
-	res := DB.Where("period_end < ?", cutoff).Delete(&entity.TrafficSample{})
-	return res.RowsAffected, res.Error
+	var deleted int64
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		before := func() *gorm.DB {
+			if tx.Dialector.Name() == "sqlite" {
+				return tx.Where(sqliteTrafficInstant+" < ?", cutoff.UnixNano())
+			}
+			return tx.Where("period_end < ?", cutoff)
+		}
+		res := before().Delete(&entity.TrafficSample{})
+		deleted = res.RowsAffected
+		if res.Error != nil {
+			return res.Error
+		}
+		return before().Delete(&entity.TrafficPoll{}).Error
+	})
+	return deleted, err
 }

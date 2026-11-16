@@ -35,7 +35,7 @@ func NewLogHandler() *LogHandler {
 func (h *LogHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	logs, total, err := h.logRepo.List(page, pageSize, strings.TrimSpace(c.Query("actor")))
+	logs, total, err := h.logRepo.List(page, pageSize, strings.TrimSpace(c.Query("actor")), c.Query("important") == "true")
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return
