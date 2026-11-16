@@ -24,6 +24,8 @@ import {
   useRoutingOverview,
 } from '@/lib/routing'
 import request from '@/lib/axios'
+import { PreviewConfigModal } from '@/components/nodes/ConfigPreview'
+import { NodeRoutingPreview } from './NodeRoutingPreview'
 
 const preset4 = [
   'anthropic.com',
@@ -36,7 +38,7 @@ const preset4 = [
   'aistudio.google.com',
 ].map((x) => 'domain:' + x)
 const preset6 = ['youtube.com', 'googlevideo.com', 'google.com', 'netflix.com'].map(
-  (x) => 'domain:' + x
+  (x) => 'domain:' + x,
 )
 
 export function TemplateEditor({
@@ -221,13 +223,13 @@ export function TemplateEditor({
                     onClick={() => {
                       setV4(
                         domainLines(
-                          [...(replace ? [] : domainLines(v4)), ...preset4].join('\n')
-                        ).join('\n')
+                          [...(replace ? [] : domainLines(v4)), ...preset4].join('\n'),
+                        ).join('\n'),
                       )
                       setV6(
                         domainLines(
-                          [...(replace ? [] : domainLines(v6)), ...preset6].join('\n')
-                        ).join('\n')
+                          [...(replace ? [] : domainLines(v6)), ...preset6].join('\n'),
+                        ).join('\n'),
                       )
                       setImportOpen(false)
                     }}
@@ -330,7 +332,7 @@ export function TemplateHistory({
                     })
                   ) {
                     const latest = await routingGet<RoutingTemplate>(
-                      `/routing-templates/${template.id}`
+                      `/routing-templates/${template.id}`,
                     )
                     onEdit({ ...template, ...latest, edit_payload: r.payload })
                   }
@@ -378,24 +380,51 @@ export function TemplateNodes({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const confirm = useConfirm()
   const overview = useRoutingOverview()
   const revisions = useQuery({
     queryKey: ['routing-revisions', template.id],
     queryFn: () => getRevisions(template.id),
   })
   const [selected, setSelected] = useState<number[]>([])
+  const [activeID, setActiveID] = useState<number | null>(null)
+  const [preview, setPreview] = useState(false)
   const [revision, setRevision] = useState(0)
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<{ id: number; error?: string; changed: number[] }[]>([])
   const rows = (overview.data?.nodes ?? []).filter((n) =>
-    `${n.name} ${n.ip}`.toLowerCase().includes(search.toLowerCase())
+    `${n.name} ${n.ip}`.toLowerCase().includes(search.toLowerCase()),
   )
+  const activeNode = overview.data?.nodes.find((n) => n.id === activeID)
+  const targets = selected.length ? selected : activeNode ? [activeNode.id] : []
+  const dirty = targets.length > 0 && revision > 0
+  const close = async () =>
+    !dirty ||
+    (await confirm({
+      title: '放弃未保存的路由绑定？',
+      description: '已保存的节点路由不会改变。',
+      confirmText: '放弃修改',
+      cancelText: '继续编辑',
+    }))
+  const viewNode = async (id: number) => {
+    if (activeID === id && selected.length === 0) return
+    if (!(await close())) return
+    setActiveID(id)
+    setSelected([])
+    setRevision(0)
+    setPreview(false)
+  }
+  const toggleNode = (id: number) => {
+    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]
+    setSelected(next)
+    if (next.length === 1) setActiveID(next[0])
+  }
   const save = async () => {
     setBusy(true)
     setResults([])
     const out: typeof results = []
-    for (const id of selected) {
+    for (const id of targets) {
       try {
         const binding =
           overview.data?.nodes.find((n) => n.id === id)?.routing?.binding ??
@@ -412,140 +441,191 @@ export function TemplateNodes({
       setResults([...out])
     }
     setSelected(out.filter((r) => r.error).map((r) => r.id))
+    if (out.every((r) => !r.error)) setRevision(0)
     await invalidateRouting(qc)
     setBusy(false)
   }
   const changed = [...new Set(results.flatMap((r) => r.changed))]
   return (
-    <Drawer
-      open
-      width="xl"
-      saving={busy}
-      onClose={onClose}
-      title={`配置节点 · ${template.name}`}
-      description="选中节点后，保存为节点指定模板。各节点原有覆盖、配置路径和订阅策略保持不变。"
-      footer={
-        <>
-          <Btn variant="secondary" disabled={busy} onClick={onClose}>
-            关闭
-          </Btn>
-          <Btn loading={busy} disabled={!selected.length || !revision} onClick={() => void save()}>
-            {selected.length > 1 ? `批量保存（${selected.length}）` : '保存绑定'}
-          </Btn>
-        </>
-      }
-    >
-      {(overview.error || revisions.error) && (
-        <div role="alert">
-          数据加载失败。
-          <Btn
-            variant="secondary"
-            onClick={() => {
-              void overview.refetch()
-              void revisions.refetch()
-            }}
-          >
-            重试
-          </Btn>
-        </div>
-      )}
-      <fieldset
-        disabled={busy || !!overview.error || !!revisions.error}
-        className="grid gap-5 md:grid-cols-[280px_minmax(0,1fr)]"
+    <>
+      <Drawer
+        open
+        width="xl"
+        saving={busy}
+        dirty={dirty}
+        onBeforeClose={close}
+        onClose={onClose}
+        title={`配置节点 · ${template.name}`}
+        description="点击节点查看并配置单个节点；勾选用于批量配置。每个节点只使用一份路由模板，保存会替换原选择，保留节点覆盖。"
+        footer={
+          <>
+            <Btn
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                void close().then((ok) => {
+                  if (ok) onClose()
+                })
+              }
+            >
+              关闭
+            </Btn>
+            <Btn
+              loading={busy}
+              disabled={!targets.length || !revision || !!overview.error || !!revisions.error}
+              onClick={() => void save()}
+            >
+              {selected.length > 1
+                ? `批量保存（${selected.length}）`
+                : selected.length
+                  ? '保存绑定'
+                  : '保存当前节点'}
+            </Btn>
+          </>
+        }
       >
-        <div className="space-y-3">
-          <Field label="搜索节点" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <button
-            className="text-xs text-[var(--accent)]"
-            onClick={() =>
-              setSelected(
-                rows.every((n) => selected.includes(n.id))
-                  ? selected.filter((id) => !rows.some((n) => n.id === id))
-                  : [...new Set([...selected, ...rows.map((n) => n.id)])]
-              )
-            }
-          >
-            全选 / 取消当前可见节点
-          </button>
-          <div className="max-h-[55vh] space-y-2 overflow-auto">
-            {rows.map((n) => (
-              <label
-                key={n.id}
-                className="flex cursor-pointer items-start gap-2 rounded border border-[var(--border)] p-3 text-sm"
-              >
-                <input
-                  className="mt-1"
-                  type="checkbox"
-                  checked={selected.includes(n.id)}
-                  onChange={(e) =>
-                    setSelected(
-                      e.target.checked ? [...selected, n.id] : selected.filter((id) => id !== n.id)
-                    )
-                  }
-                />
-                <span>
-                  {n.name}
-                  <span className="mt-1 block text-xs text-soft">{n.ip}</span>
-                  <span className="mt-1 block text-xs text-soft">
-                    {routingLabel(n, overview.data?.templates ?? [])}
-                  </span>
-                </span>
-              </label>
-            ))}
+        {(overview.error || revisions.error) && (
+          <div role="alert">
+            数据加载失败。
+            <Btn
+              variant="secondary"
+              onClick={() => {
+                void overview.refetch()
+                void revisions.refetch()
+              }}
+            >
+              重试
+            </Btn>
           </div>
-        </div>
-        <div className="space-y-4">
-          <SelectField
-            label="为所选节点指定固定版本"
-            value={revision}
-            onChange={(v) => setRevision(Number(v))}
-            options={[
-              { value: 0, label: '请选择已发布版本' },
-              ...(revisions.data ?? []).map((r) => ({
-                value: r.revision,
-                label: `v${r.revision}`,
-              })),
-            ]}
-          />
-          <p className="text-sm text-soft">
-            保存将把所选节点原来的继承或指定策略改为「{template.name}
-            {revision ? ` v${revision}` : ''}」。
-            {overview.data?.auto_sync
-              ? '自动同步已开启，变化节点将自动同步。'
-              : '保存后请回节点列表同步。'}
-          </p>
-          {selected.map((id) => {
-            const n = overview.data?.nodes.find((n) => n.id === id)
-            return (
-              <div key={id} className="rounded border border-[var(--border)] p-3 text-xs">
-                <strong>{n?.name}</strong>
-                <p className="mt-1 text-soft">
-                  {n && routingLabel(n, overview.data?.templates ?? [])} → {template.name}{' '}
-                  {revision ? `v${revision}` : '未选择版本'}
-                </p>
-              </div>
-            )
-          })}
-          {results.map((r) => (
-            <p
-              role="status"
-              key={r.id}
-              className={`text-sm ${r.error ? 'text-[var(--danger)]' : 'text-soft'}`}
+        )}
+        <fieldset
+          disabled={busy || !!overview.error || !!revisions.error}
+          className="grid gap-5 md:grid-cols-[280px_minmax(0,1fr)]"
+        >
+          <div className="space-y-3">
+            <Field label="搜索节点" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <button
+              className="text-xs text-[var(--accent)]"
+              onClick={() =>
+                setSelected(
+                  rows.every((n) => selected.includes(n.id))
+                    ? selected.filter((id) => !rows.some((n) => n.id === id))
+                    : [...new Set([...selected, ...rows.map((n) => n.id)])],
+                )
+              }
             >
-              {overview.data?.nodes.find((n) => n.id === r.id)?.name}：
-              {r.error ?? (r.changed.length ? '已保存，配置已变化' : '已保存，有效配置未变化')}
+              全选 / 取消当前可见节点
+            </button>
+            <div className="max-h-[55vh] space-y-2 overflow-auto">
+              {rows.map((n) => (
+                <div
+                  key={n.id}
+                  className={`flex items-start gap-2 rounded border p-3 text-sm ${activeID === n.id ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--border)]'}`}
+                >
+                  <input
+                    className="mt-1"
+                    type="checkbox"
+                    aria-label={`选择 ${n.name}`}
+                    checked={selected.includes(n.id)}
+                    onChange={() => toggleNode(n.id)}
+                  />
+                  <button
+                    type="button"
+                    aria-label={`查看 ${n.name} 的路由配置`}
+                    aria-pressed={activeID === n.id}
+                    onClick={() => void viewNode(n.id)}
+                    className="min-w-0 flex-1 cursor-pointer rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  >
+                    {n.name}
+                    <span className="mt-1 block text-xs text-soft">{n.ip}</span>
+                    <span className="mt-1 block text-xs text-soft">
+                      {routingLabel(n, overview.data?.templates ?? [])}
+                    </span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-4">
+            {activeNode ? (
+              <NodeRoutingPreview
+                key={activeNode.id}
+                node={activeNode}
+                templates={overview.data?.templates ?? []}
+                onPreview={() => setPreview(true)}
+              />
+            ) : (
+              <p className="rounded-md bg-[var(--panel-muted)] p-4 text-sm text-soft">
+                点击左侧节点查看已保存的路由配置；勾选多个节点可批量指定同一个模板版本。
+              </p>
+            )}
+            <h4 className="text-sm font-semibold">
+              {selected.length
+                ? `为勾选的 ${selected.length} 个节点配置路由`
+                : activeNode
+                  ? `设置 ${activeNode.name} 的路由`
+                  : '指定路由模板版本'}
+            </h4>
+            <SelectField
+              label="为所选节点指定固定版本"
+              value={revision}
+              onChange={(v) => setRevision(Number(v))}
+              options={[
+                { value: 0, label: '请选择已发布版本' },
+                ...(revisions.data ?? []).map((r) => ({
+                  value: r.revision,
+                  label: `v${r.revision}`,
+                })),
+              ]}
+            />
+            <p className="text-sm text-soft">
+              保存将把目标节点原来的继承或指定模板替换为「{template.name}
+              {revision ? ` v${revision}` : ''}」。
+              原模板规则不会叠加；各节点的覆盖项、配置路径和订阅策略保持不变。
+              {overview.data?.auto_sync
+                ? '自动同步已开启，变化节点将自动同步。'
+                : '保存后请回节点列表同步。'}
             </p>
-          ))}
-          {!!changed.length && (
-            <Link
-              to={nodesLink(changed)}
-              className="inline-block text-sm text-[var(--accent)] underline"
-            >
-              查看受影响的 {changed.length} 个节点
-            </Link>
-          )}
-        </div>
-      </fieldset>
-    </Drawer>
+            {targets.map((id) => {
+              const n = overview.data?.nodes.find((n) => n.id === id)
+              return (
+                <div key={id} className="rounded border border-[var(--border)] p-3 text-xs">
+                  <strong>{n?.name}</strong>
+                  <p className="mt-1 text-soft">
+                    {n && routingLabel(n, overview.data?.templates ?? [])} → {template.name}{' '}
+                    {revision ? `v${revision}` : '未选择版本'}
+                  </p>
+                </div>
+              )
+            })}
+            {results.map((r) => (
+              <p
+                role="status"
+                key={r.id}
+                className={`text-sm ${r.error ? 'text-[var(--danger)]' : 'text-soft'}`}
+              >
+                {overview.data?.nodes.find((n) => n.id === r.id)?.name}：
+                {r.error ?? (r.changed.length ? '已保存，配置已变化' : '已保存，有效配置未变化')}
+              </p>
+            ))}
+            {!!changed.length && (
+              <Link
+                to={nodesLink(changed)}
+                className="inline-block text-sm text-[var(--accent)] underline"
+              >
+                查看受影响的 {changed.length} 个节点
+              </Link>
+            )}
+          </div>
+        </fieldset>
+      </Drawer>
+      {preview && activeNode && (
+        <PreviewConfigModal
+          key={activeNode.id}
+          node={activeNode}
+          onClose={() => setPreview(false)}
+        />
+      )}
+    </>
   )
 }

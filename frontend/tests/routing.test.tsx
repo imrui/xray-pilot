@@ -2,7 +2,7 @@ import './dom-setup.mjs'
 import React from 'react'
 import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ConfirmProvider } from '../src/components/ui/ConfirmProvider'
@@ -70,6 +70,19 @@ const revisions = [
     actor: 'admin:test',
   },
 ]
+const previewConfig = (id: number) =>
+  JSON.stringify({
+    inbounds: [
+      { tag: 'vless-reality-1', protocol: 'vless', port: 24443 },
+      { tag: 'api-inbound', port: 10085 },
+    ],
+    outbounds: [
+      { tag: 'direct-v4', protocol: 'freedom', settings: { domainStrategy: 'ForceIPv4' } },
+    ],
+    routing: {
+      rules: [{ type: 'field', domain: [`domain:node-${id}.example`], outboundTag: 'direct-v4' }],
+    },
+  })
 let calls: { method: string; url: string; data: unknown }[] = []
 let clients: QueryClient[] = []
 function api(handler?: (method: string, url: string, body: Record<string, unknown>) => unknown) {
@@ -82,6 +95,16 @@ function api(handler?: (method: string, url: string, body: Record<string, unknow
     let data = handler?.(method, url, body)
     if (data === undefined) {
       if (url === '/routing-overview') data = overview
+      else if (url.endsWith('/preview-config'))
+        data = { config: previewConfig(Number(url.split('/')[2])), warnings: [] }
+      else if (url.endsWith('/effective-config'))
+        data = {
+          routing: overview.nodes[Number(url.split('/')[2]) - 1].routing,
+          desired_hash: 'hash',
+        }
+      else if (url.endsWith('/keys')) data = [{ profile_id: 1, settings: '{}', port: 24443 }]
+      else if (url === '/profiles')
+        data = { total: 1, list: [{ id: 1, name: 'Reality', active: true }] }
       else if (url.endsWith('/revisions')) data = revisions
       else if (url.match(/\/nodes\/\d+\/routing$/) && method === 'get')
         data = { ...binding, target_id: Number(url.split('/')[2]) }
@@ -106,7 +129,7 @@ function mount(element: React.ReactNode) {
       <MemoryRouter>
         <ConfirmProvider>{element}</ConfirmProvider>
       </MemoryRouter>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   )
 }
 afterEach(() => {
@@ -146,6 +169,74 @@ test('模板侧批量绑定只更改选择的版本，保留每台节点自己�
   await screen.findByRole('link', { name: '查看受影响的 2 个节点' })
 })
 
+test('路由节点行点击只查看，不勾选；显示已保存路由并复用完整配置预览', async () => {
+  api()
+  mount(<TemplateNodes template={template} onClose={() => {}} />)
+  fireEvent.click(await screen.findByRole('button', { name: '查看 lab-1 的路由配置' }))
+  const section = await screen.findByRole('region', { name: '已保存路由 · lab-1' })
+  await within(section).findByText(/domain:node-1.example/)
+  assert.equal(
+    (screen.getByRole('checkbox', { name: '选择 lab-1' }) as HTMLInputElement).checked,
+    false,
+  )
+  assert.equal(
+    (screen.getByRole('button', { name: '保存当前节点' }) as HTMLButtonElement).disabled,
+    true,
+  )
+  assert.equal(calls.filter((c) => c.method !== 'get').length, 0)
+  fireEvent.change(screen.getByLabelText('为所选节点指定固定版本'), { target: { value: '2' } })
+  assert.ok(within(section).getByText(/domain:node-1.example/))
+  fireEvent.click(screen.getByRole('button', { name: '查看完整配置' }))
+  const modal = await screen.findByRole('dialog', { name: '预览生成配置 · lab-1' })
+  assert.ok(await within(modal).findByText(/"inbounds"/))
+  assert.ok(within(modal).getByText(/"routing"/))
+  fireEvent.click(within(modal).getByRole('button', { name: '关闭' }))
+  await waitFor(() =>
+    assert.equal(screen.queryByRole('dialog', { name: '预览生成配置 · lab-1' }), null),
+  )
+  assert.equal((screen.getByLabelText('为所选节点指定固定版本') as HTMLSelectElement).value, '2')
+  fireEvent.click(screen.getByRole('button', { name: '保存当前节点' }))
+  await waitFor(() => assert.equal(calls.filter((c) => c.method === 'put').length, 1))
+  assert.equal(calls.find((c) => c.method === 'put')!.url, '/nodes/1/routing')
+  await screen.findByRole('link', { name: '查看受影响的 1 个节点' })
+  assert.equal(calls.filter((c) => c.url.includes('config-deployments')).length, 0)
+})
+
+test('路由批量勾选和单节点查看分开，切换预览不会串用另一台配置', async () => {
+  api()
+  mount(<TemplateNodes template={template} onClose={() => {}} />)
+  fireEvent.click(await screen.findByRole('checkbox', { name: '选择 lab-1' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: '选择 lab-2' }))
+  assert.ok(screen.getByRole('button', { name: '批量保存（2）' }))
+  fireEvent.click(screen.getByRole('button', { name: '查看 lab-2 的路由配置' }))
+  const second = await screen.findByRole('region', { name: '已保存路由 · lab-2' })
+  await within(second).findByText(/domain:node-2.example/)
+  assert.equal(within(second).queryByText(/domain:node-1.example/), null)
+  assert.ok(screen.getAllByRole('checkbox').every((c) => !(c as HTMLInputElement).checked))
+  fireEvent.change(screen.getByLabelText('为所选节点指定固定版本'), { target: { value: '2' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存当前节点' }))
+  await waitFor(() => assert.equal(calls.filter((c) => c.method === 'put').length, 1))
+  assert.equal(calls.find((c) => c.method === 'put')!.url, '/nodes/2/routing')
+  await screen.findByRole('link', { name: '查看受影响的 1 个节点' })
+})
+
+test('切换节点前保留未保存的路由选择，取消切换后不丢失输入', async () => {
+  api()
+  mount(<TemplateNodes template={template} onClose={() => {}} />)
+  fireEvent.click(await screen.findByRole('button', { name: '查看 lab-1 的路由配置' }))
+  await screen.findByRole('region', { name: '已保存路由 · lab-1' })
+  fireEvent.change(screen.getByLabelText('为所选节点指定固定版本'), { target: { value: '2' } })
+  fireEvent.click(screen.getByRole('button', { name: '查看 lab-2 的路由配置' }))
+  await screen.findByRole('dialog', { name: '放弃未保存的路由绑定？' })
+  fireEvent.click(screen.getByRole('button', { name: '继续编辑' }))
+  await waitFor(() =>
+    assert.equal(screen.queryByRole('dialog', { name: '放弃未保存的路由绑定？' }), null),
+  )
+  assert.ok(screen.getByRole('region', { name: '已保存路由 · lab-1' }))
+  assert.equal((screen.getByLabelText('为所选节点指定固定版本') as HTMLSelectElement).value, '2')
+  assert.equal(calls.filter((c) => c.method !== 'get').length, 0)
+})
+
 test('保存草稿成功而发布失败时，草稿与输入保留，不变更节点绑定', async () => {
   api((method, url, body) => {
     if (method === 'patch')
@@ -161,7 +252,7 @@ test('保存草稿成功而发布失败时，草稿与输入保留，不变更�
   assert.equal(calls.filter((c) => c.method === 'put').length, 0)
   assert.equal(
     (calls.find((c) => c.url.endsWith('/publish'))!.data as { version: number }).version,
-    5
+    5,
   )
 })
 
@@ -177,20 +268,20 @@ test('关闭有修改的路由抽屉需要选择，取消保留输入；预览�
         closed = true
       }}
       onPreview={() => {}}
-    />
+    />,
   )
   const mode = await screen.findByLabelText('配置方式')
   fireEvent.change(mode, { target: { value: 'template' } })
   assert.equal(
     (screen.getByRole('button', { name: '查看完整配置' }) as HTMLButtonElement).disabled,
-    true
+    true,
   )
   fireEvent.click(screen.getByRole('button', { name: '关闭' }))
   await screen.findByRole('dialog', { name: '放弃未保存的路由修改？' })
   fireEvent.click(screen.getByRole('button', { name: '继续编辑' }))
   assert.equal(closed, false)
   await waitFor(() =>
-    assert.equal(screen.queryByRole('dialog', { name: '放弃未保存的路由修改？' }), null)
+    assert.equal(screen.queryByRole('dialog', { name: '放弃未保存的路由修改？' }), null),
   )
   assert.equal((screen.getByLabelText('配置方式') as HTMLSelectElement).value, 'template')
 })
@@ -219,7 +310,7 @@ test('同步记录明确区分回退和未知结果，未知任务先核对', as
             },
           ],
         }
-      : undefined
+      : undefined,
   )
   mount(<SyncHistory onClose={() => {}} />)
   await screen.findByText('已回退，目标未同步')
@@ -248,7 +339,8 @@ test('HTTP 局域网面板没有 randomUUID 时仍能提交同步', () => {
   const original = crypto.randomUUID
   Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true })
   try {
-    const first = requestID(), second = requestID()
+    const first = requestID(),
+      second = requestID()
     assert.match(first, /^[0-9a-f]{32}$/)
     assert.notEqual(first, second)
   } finally {
@@ -308,7 +400,9 @@ test('协议配置勾选一个节点后可直接编辑，与节点协议的选�
   fireEvent.click(screen.getByRole('button', { name: '关闭' }))
   await screen.findByRole('dialog', { name: '放弃未保存的协议修改？' })
   fireEvent.click(screen.getByRole('button', { name: '继续编辑' }))
-  await waitFor(() => assert.equal(screen.queryByRole('dialog', { name: '放弃未保存的协议修改？' }), null))
+  await waitFor(() =>
+    assert.equal(screen.queryByRole('dialog', { name: '放弃未保存的协议修改？' }), null),
+  )
   fireEvent.click(screen.getByRole('button', { name: '保存密钥' }))
   await waitFor(() => assert.equal(calls.filter((c) => c.method === 'put').length, 1))
   await screen.findByText('已保存 1 个节点')
@@ -321,11 +415,11 @@ test('加载中的按钮不能被 disabled=false 重新启用，抽屉支持 Esc
   const button = render(
     <Btn loading disabled={false}>
       正在保存
-    </Btn>
+    </Btn>,
   )
   assert.equal(
     (screen.getByRole('button', { name: '正在保存' }) as HTMLButtonElement).disabled,
-    true
+    true,
   )
   button.unmount()
   function Example() {
