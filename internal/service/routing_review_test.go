@@ -80,6 +80,8 @@ func TestBindingImpactAndActualOverrideValidation(t *testing.T) {
 	s := NewRoutingService()
 	b, _ := s.Binding("node", n.ID)
 	b.Overrides = `{"custom_rules":[{"type":"field","port":"443","outboundTag":"direct-v6"}]}`
+	legacy := publishRouting(t, "legacy-disabled", `{"enable_ipv6_outbound":false,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[]}`)
+	b.Mode, b.TemplateID, b.Revision = "template", legacy.TemplateID, legacy.Revision
 	if err := s.SaveBinding(b, b.Version, "test", true); err == nil || !strings.Contains(err.Error(), "0") {
 		t.Fatalf("IPv6-disabled override accepted: %v", err)
 	}

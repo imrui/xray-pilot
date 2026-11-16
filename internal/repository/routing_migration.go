@@ -12,11 +12,11 @@ func migrateRoutingDefaults(db *gorm.DB) error {
 		var binding entity.RoutingBinding
 		err := tx.Where("scope = ? AND target_id = ?", "global", 0).First(&binding).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			template := entity.RoutingTemplate{Name: "系统保守默认", Description: "IPv4 默认出口；IPv6 关闭；不自动启用预置域名。", Draft: entity.DefaultRoutingPolicy, Version: 1}
+			template := entity.RoutingTemplate{Name: "系统默认路由", Description: "默认正常直连；仅指定域名强制 IPv4 或 IPv6，不自动启用预置域名。", Draft: entity.DefaultRoutingPolicy, Version: 1}
 			if err := tx.Create(&template).Error; err != nil {
 				return err
 			}
-			rev := entity.RoutingTemplateRevision{TemplateID: template.ID, Revision: 1, SchemaVersion: 1, Payload: entity.DefaultRoutingPolicy, Actor: "system:migration"}
+			rev := entity.RoutingTemplateRevision{TemplateID: template.ID, Revision: 1, SchemaVersion: 2, Payload: entity.DefaultRoutingPolicy, Actor: "system:migration"}
 			if err := tx.Create(&rev).Error; err != nil {
 				return err
 			}

@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { Field, FieldGroup, SelectField } from '@/components/ui/Form'
+import { Btn, Field, FieldGroup, SelectField } from '@/components/ui/Form'
 import { useAuthStore } from '@/store/auth'
 import { getRevisions } from '@/lib/routing'
-import { bindingMode } from '@/lib/routing-model'
+import { bindingMode, readPolicy } from '@/lib/routing-model'
 import type { RoutingBinding, RoutingTemplate } from '@/lib/routing-model'
 
 export const routingControl =
@@ -70,7 +70,7 @@ export function BindingFields({
               { value: 0, label: revisions.isLoading ? '加载版本…' : '请选择版本' },
               ...(revisions.data ?? []).map((r) => ({
                 value: r.revision,
-                label: `v${r.revision}`,
+                label: `v${r.revision}${readPolicy(r.payload).schema_version === 2 ? ' · 默认直连' : ' · 旧版 IPv4 兜底'}`,
               })),
             ]}
           />
@@ -91,26 +91,25 @@ export function BindingFields({
           title="本节点覆盖"
           description="未覆盖的字段继续继承模板。清空列表和恢复继承是不同操作。"
         >
-          <SelectField
-            label="IPv6 出站"
-            value={
-              overrides.enable_ipv6_outbound == null
-                ? 'inherit'
-                : String(overrides.enable_ipv6_outbound)
-            }
-            onChange={(v) =>
-              override('enable_ipv6_outbound', v === 'inherit' ? undefined : v === 'true')
-            }
-            options={[
-              { value: 'inherit', label: '继承模板' },
-              { value: 'false', label: '关闭：域名使用 IPv4' },
-              { value: 'true', label: '开启：严格 IPv6，不自动回退' },
-            ]}
-          />
+          <p className="text-xs text-soft">
+            新版策略中，未命中规则使用默认直连；强制 IPv6 需要节点有 IPv6
+            出口且不会回退。两组域名重叠时 IPv4 优先。
+          </p>
+          {overrides.enable_ipv6_outbound != null && (
+            <div className="space-y-2 rounded border border-[var(--warning-border)] p-3 text-xs">
+              <p>
+                此节点仍有旧版 IPv6
+                开关覆盖。使用新版模板前，请移除该覆盖，并用下面两组域名列表明确选择出口。
+              </p>
+              <Btn variant="secondary" onClick={() => override('enable_ipv6_outbound', undefined)}>
+                移除旧版开关覆盖
+              </Btn>
+            </div>
+          )}
           {(['ipv4_force_domains', 'ipv6_force_domains'] as const).map((key, index) => (
             <div key={key} className="space-y-2">
               <SelectField
-                label={`${index ? 'IPv6' : 'IPv4'} 域名`}
+                label={`强制 ${index ? 'IPv6' : 'IPv4'} 域名`}
                 value={overrides[key] == null ? 'inherit' : 'override'}
                 onChange={(v) => override(key, v === 'inherit' ? undefined : [])}
                 options={[

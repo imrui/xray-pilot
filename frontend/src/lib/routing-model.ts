@@ -1,5 +1,6 @@
 export type RoutingPolicy = {
-  enable_ipv6_outbound: boolean
+  schema_version?: number
+  enable_ipv6_outbound?: boolean // Historical schema 1 only.
   ipv4_force_domains: string[]
   ipv6_force_domains: string[]
   ipv6_failure_policy: string
@@ -69,7 +70,7 @@ export type RoutingOverview = {
 }
 export type BindingImpact = { changed_nodes: number[]; conflicts: Record<string, string> }
 export const emptyPolicy: RoutingPolicy = {
-  enable_ipv6_outbound: false,
+  schema_version: 2,
   ipv4_force_domains: [],
   ipv6_force_domains: [],
   ipv6_failure_policy: 'strict',
@@ -79,14 +80,34 @@ export function readPolicy(raw: string): RoutingPolicy {
   const p = JSON.parse(raw) as RoutingPolicy
   return {
     ...p,
+    schema_version: p.schema_version || 1,
     ipv4_force_domains: p.ipv4_force_domains ?? [],
     ipv6_force_domains: p.ipv6_force_domains ?? [],
     custom_rules: p.custom_rules ?? [],
   }
 }
+export function upgradeRoutingPolicy(raw: string): RoutingPolicy {
+  const p = readPolicy(raw)
+  const moveToV4 = p.schema_version !== 2 && !p.enable_ipv6_outbound
+  return {
+    schema_version: 2,
+    ipv4_force_domains: [
+      ...new Set([...p.ipv4_force_domains, ...(moveToV4 ? p.ipv6_force_domains : [])]),
+    ],
+    ipv6_force_domains: moveToV4 ? [] : p.ipv6_force_domains,
+    ipv6_failure_policy: 'strict',
+    custom_rules: p.custom_rules,
+  }
+}
+export function requiresIPv6(policy: RoutingPolicy): boolean {
+  return policy.schema_version === 2
+    ? policy.ipv6_force_domains.length > 0 ||
+        policy.custom_rules.some((r) => (r as { outboundTag?: string }).outboundTag === 'direct-v6')
+    : !!policy.enable_ipv6_outbound
+}
 export function configConfirmed(
   state: { verified_at?: string; verification: string; runtime_hash: string; disk_hash: string },
-  desired: string
+  desired: string,
 ): boolean {
   return (
     !!desired &&
@@ -101,7 +122,7 @@ export const domainLines = (text: string) => [
     text
       .split(/\r?\n/)
       .map((x) => x.trim())
-      .filter(Boolean)
+      .filter(Boolean),
   ),
 ]
 export function parseRules(raw: string): unknown[] {
@@ -118,7 +139,7 @@ export function parseRules(raw: string): unknown[] {
 export function templateBinding(
   binding: RoutingBinding,
   templateID: number,
-  revision: number
+  revision: number,
 ): RoutingBinding {
   if (!templateID || !revision) throw new Error('请选择已发布的模板版本。')
   // Preserve this node's overrides, path, subscription policy and concurrency version.

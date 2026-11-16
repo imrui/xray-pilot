@@ -38,10 +38,13 @@ export function NodeRoutingPreview({
       {policy && (
         <div className="space-y-1 text-xs text-soft">
           <p>
-            IPv6 出站：{policy.enable_ipv6_outbound ? '开启（严格 IPv6）' : '关闭，域名使用 IPv4'}
+            {policy.schema_version === 2
+              ? '未命中规则：默认直连，不强制地址族'
+              : '旧版策略：未命中仍走 IPv4，升级模板版本后改为默认直连'}
           </p>
           <p>
-            IPv4 域名 {(policy.ipv4_force_domains ?? []).length} 条 · IPv6 域名{' '}
+            强制 IPv4 {(policy.ipv4_force_domains ?? []).length} 条 ·{' '}
+            {policy.schema_version === 2 ? '强制 IPv6' : '旧版 IPv6 列表'}{' '}
             {(policy.ipv6_force_domains ?? []).length} 条 · 自定义规则{' '}
             {(policy.custom_rules ?? []).length} 条
           </p>

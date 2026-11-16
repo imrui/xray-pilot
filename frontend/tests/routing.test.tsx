@@ -17,7 +17,13 @@ import { submitNodeSync } from '../src/lib/node-sync'
 import { requestID } from '../src/lib/request-id'
 import { useAuthStore } from '../src/store/auth'
 import request from '../src/lib/axios'
-import { emptyPolicy, configConfirmed, normalizeBinding } from '../src/lib/routing-model'
+import {
+  emptyPolicy,
+  configConfirmed,
+  normalizeBinding,
+  upgradeRoutingPolicy,
+  requiresIPv6,
+} from '../src/lib/routing-model'
 import type { RoutingBinding, RoutingTemplate } from '../src/lib/routing-model'
 
 const template: RoutingTemplate = {
@@ -146,6 +152,76 @@ test('路由页采用列表和抽屉，不提供节点同步入口', async () =>
   fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[0])
   assert.ok(screen.getByRole('dialog', { name: '编辑路由模板 · IPv4 标准' }))
   assert.ok(screen.getByLabelText('模板名称 *'))
+})
+
+test('新路由直接配置两组强制域名，不再使用 IPv6 开关', async () => {
+  api((_method, _url, body) =>
+    body.draft ? { ...template, draft: JSON.stringify(body.draft), version: 5 } : undefined,
+  )
+  mount(<TemplateEditor template={template} onClose={() => {}} onConfigure={() => {}} />)
+  assert.equal(screen.queryByLabelText('IPv6 出站'), null)
+  fireEvent.change(screen.getByLabelText(/强制 IPv4 域名/), {
+    target: { value: 'domain:v4.example' },
+  })
+  fireEvent.change(screen.getByLabelText(/强制 IPv6 域名/), {
+    target: { value: 'domain:v6.example' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText('草稿已保存。')
+  const payload = (
+    calls.find((c) => c.method === 'patch')!.data as { draft: Record<string, unknown> }
+  ).draft
+  assert.equal(payload.schema_version, 2)
+  assert.equal('enable_ipv6_outbound' in payload, false)
+  assert.deepEqual(payload.ipv4_force_domains, ['domain:v4.example'])
+  assert.deepEqual(payload.ipv6_force_domains, ['domain:v6.example'])
+})
+
+test('旧版 IPv6 关闭的草稿转换时保留原出口，新版空列表不要求 IPv6', async () => {
+  const old = JSON.stringify({
+    ...emptyPolicy,
+    schema_version: 1,
+    enable_ipv6_outbound: false,
+    ipv4_force_domains: ['domain:a.example'],
+    ipv6_force_domains: ['domain:b.example'],
+  })
+  api()
+  mount(
+    <TemplateEditor
+      template={{ ...template, draft: old }}
+      onClose={() => {}}
+      onConfigure={() => {}}
+    />,
+  )
+  assert.match(
+    (screen.getByLabelText(/强制 IPv4 域名/) as HTMLTextAreaElement).value,
+    /domain:b.example/,
+  )
+  assert.equal((screen.getByLabelText(/强制 IPv6 域名/) as HTMLTextAreaElement).value, '')
+  assert.ok(screen.getByText(/正在转换旧版草稿/))
+  const converted = upgradeRoutingPolicy(old)
+  assert.equal(converted.schema_version, 2)
+  const unversioned = upgradeRoutingPolicy(
+    JSON.stringify({ ipv6_force_domains: ['domain:old.example'], ipv6_failure_policy: 'strict' }),
+  )
+  assert.deepEqual(unversioned.ipv4_force_domains, ['domain:old.example'])
+  assert.deepEqual(unversioned.ipv6_force_domains, [])
+  assert.equal(requiresIPv6(converted), false)
+  assert.equal(requiresIPv6({ ...emptyPolicy, ipv6_force_domains: ['domain:v6.example'] }), true)
+  assert.equal(requiresIPv6({ ...emptyPolicy, custom_rules: [{ outboundTag: 'direct-v6' }] }), true)
+})
+
+test('旧版节点开关覆盖必须显式移除，保存时不遗留隐藏字段', async () => {
+  api((method, url) =>
+    method === 'get' && url === '/nodes/1/routing'
+      ? { ...binding, overrides: '{"enable_ipv6_outbound":false}' }
+      : undefined,
+  )
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  fireEvent.click(await screen.findByRole('button', { name: '移除旧版开关覆盖' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await screen.findByText(/已保存：1 个节点/)
+  assert.equal((calls.find((c) => c.method === 'put')!.data as RoutingBinding).overrides, '{}')
 })
 
 test('模板侧批量绑定只更改选择的版本，保留每台节点自己的覆盖与并发版本', async () => {

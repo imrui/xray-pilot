@@ -66,8 +66,8 @@ func TestRoutingSelectionReplacesPolicyAndPreservesProtocols(t *testing.T) {
 	if len(baseline["inbounds"].([]any)) != 3 || !strings.Contains(initial, `"port": 28889`) || strings.Contains(initial, "direct-v6") || !strings.Contains(initial, "geoip:private") {
 		t.Fatal("default lost a protocol, its port override or base routing protections")
 	}
-	a := publishRouting(t, "Route A", `{"enable_ipv6_outbound":false,"ipv4_force_domains":["domain:a.example"],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[]}`)
-	b := publishRouting(t, "Route B", `{"enable_ipv6_outbound":false,"ipv4_force_domains":["domain:b.example"],"ipv6_force_domains":["domain:v6.example"],"ipv6_failure_policy":"strict","custom_rules":[{"type":"field","ip":["203.0.113.0/24"],"outboundTag":"block"}]}`)
+	a := publishRouting(t, "Route A", `{"schema_version":2,"ipv4_force_domains":["domain:a.example"],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[]}`)
+	b := publishRouting(t, "Route B", `{"schema_version":2,"ipv4_force_domains":["domain:b.example"],"ipv6_force_domains":["domain:v6.example"],"ipv6_failure_policy":"strict","custom_rules":[{"type":"field","ip":["203.0.113.0/24"],"outboundTag":"block"}]}`)
 	bind := func(template, revision uint, mode string) {
 		t.Helper()
 		value, err := routing.Binding("node", node.ID)
@@ -83,8 +83,8 @@ func TestRoutingSelectionReplacesPolicyAndPreservesProtocols(t *testing.T) {
 	rawA, cfgA := build("route-a")
 	bind(b.TemplateID, b.Revision, "template")
 	rawB, cfgB := build("route-b")
-	if !strings.Contains(rawA, "domain:a.example") || strings.Contains(rawB, "domain:a.example") || !strings.Contains(rawB, "domain:b.example") || !strings.Contains(rawB, "203.0.113.0/24") || strings.Contains(rawB, "direct-v6") {
-		t.Fatal("template selection stacked old rules or produced an IPv6 outlet while IPv6 was disabled")
+	if !strings.Contains(rawA, "domain:a.example") || strings.Contains(rawB, "domain:a.example") || !strings.Contains(rawB, "domain:b.example") || !strings.Contains(rawB, "203.0.113.0/24") || !strings.Contains(rawB, "direct-v6") {
+		t.Fatal("template selection stacked old rules or omitted a required IPv6 outlet")
 	}
 	for name, cfg := range map[string]map[string]any{"a": cfgA, "b": cfgB} {
 		if !reflect.DeepEqual(cfg["inbounds"], baseline["inbounds"]) {
@@ -92,7 +92,7 @@ func TestRoutingSelectionReplacesPolicyAndPreservesProtocols(t *testing.T) {
 		}
 		baseRules := baseline["routing"].(map[string]any)["rules"].([]any)
 		rules := cfg["routing"].(map[string]any)["rules"].([]any)
-		if !reflect.DeepEqual(baseRules[:len(baseRules)-1], rules[:len(baseRules)-1]) {
+		if !reflect.DeepEqual(baseRules, rules[:len(baseRules)]) {
 			t.Fatalf("route %s changed protected API/private-IP/proxy allowlist rules", name)
 		}
 	}

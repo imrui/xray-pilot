@@ -12,7 +12,8 @@ import (
 )
 
 type RoutingPolicy struct {
-	EnableIPv6        bool          `json:"enable_ipv6_outbound"`
+	SchemaVersion     uint          `json:"schema_version"`
+	EnableIPv6        bool          `json:"enable_ipv6_outbound,omitempty"` // Schema 1 only; retained for historical versions and rollback.
 	IPv4Domains       []string      `json:"ipv4_force_domains"`
 	IPv6Domains       []string      `json:"ipv6_force_domains"`
 	IPv6FailurePolicy string        `json:"ipv6_failure_policy"`
@@ -32,6 +33,19 @@ func DecodeRoutingPolicy(raw string) (RoutingPolicy, error) {
 	if d.Decode(new(any)) != io.EOF {
 		return p, fmt.Errorf("只允许一个 JSON 对象")
 	}
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal([]byte(raw), &fields)
+	if fields == nil {
+		return p, fmt.Errorf("路由策略必须是 JSON 对象")
+	}
+	if p.SchemaVersion == 0 {
+		// Old API callers could omit the boolean switch. Unversioned drafts,
+		// revisions and snapshots must all keep their original interpretation.
+		p.SchemaVersion = 1
+	}
+	if p.SchemaVersion == 2 && fields["enable_ipv6_outbound"] != nil {
+		return p, fmt.Errorf("新版策略不再使用 IPv6 开关，请分别填写强制 IPv4、IPv6 域名")
+	}
 	p.IPv4Domains = normalizeDomains(p.IPv4Domains)
 	p.IPv6Domains = normalizeDomains(p.IPv6Domains)
 	return p, p.Validate()
@@ -49,6 +63,9 @@ func normalizeDomains(in []string) []string {
 	return out
 }
 func (p RoutingPolicy) Validate() error {
+	if p.SchemaVersion > 2 {
+		return fmt.Errorf("不支持的路由策略版本")
+	}
 	if p.IPv6FailurePolicy != "strict" {
 		return fmt.Errorf("当前仅支持 strict；prefer_ipv6 尚未通过目标版本兼容验证")
 	}
@@ -73,7 +90,7 @@ func (p RoutingPolicy) Validate() error {
 		if len(r.InboundTag) > 0 || len(r.Source) > 0 {
 			return fail("不允许修改系统入站或来源保护规则")
 		}
-		if r.OutboundTag != "direct-v4" && r.OutboundTag != "block" && !(r.OutboundTag == "direct-v6" && p.EnableIPv6) {
+		if r.OutboundTag != "direct-v4" && r.OutboundTag != "block" && !(r.OutboundTag == "direct-v6" && (p.SchemaVersion == 2 || p.EnableIPv6)) {
 			return fail("引用了未知或未启用的出站")
 		}
 		if len(r.Domain) == 0 && len(r.IP) == 0 && r.Port == "" && len(r.Protocol) == 0 {
@@ -174,11 +191,30 @@ func MergeRoutingPolicy(base, overrides string) (RoutingPolicy, error) {
 			return RoutingPolicy{}, fmt.Errorf("未知覆盖字段 %s", k)
 		}
 		if !bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			if k == "enable_ipv6_outbound" && string(b["schema_version"]) == "2" {
+				return RoutingPolicy{}, fmt.Errorf("新版策略不接受旧版 IPv6 开关覆盖，请移除该覆盖并配置强制域名列表")
+			}
 			b[k] = v
 		}
 	}
 	raw, _ := json.Marshal(b)
 	return DecodeRoutingPolicy(string(raw))
+}
+
+// RequiresIPv6 reflects an actual IPv6 route, not a server-wide capability switch.
+func (p RoutingPolicy) RequiresIPv6() bool {
+	if p.SchemaVersion < 2 {
+		return p.EnableIPv6
+	}
+	if len(p.IPv6Domains) > 0 {
+		return true
+	}
+	for _, rule := range p.CustomRules {
+		if rule.OutboundTag == "direct-v6" {
+			return true
+		}
+	}
+	return false
 }
 func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 	if err := p.Validate(); err != nil {
@@ -199,14 +235,31 @@ func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 	}
 	if len(p.IPv6Domains) > 0 {
 		tag := "direct-v4"
-		if p.EnableIPv6 {
+		if p.SchemaVersion == 2 || p.EnableIPv6 {
 			tag = "direct-v6"
 		}
 		cfg.Routing.Rules = append(cfg.Routing.Rules, RoutingRule{Type: "field", Domain: p.IPv6Domains, OutboundTag: tag})
 	}
-	cfg.Routing.Rules = append(cfg.Routing.Rules, RoutingRule{Type: "field", Network: "tcp,udp", OutboundTag: "direct-v4"})
-	cfg.Outbounds = []Outbound{{Protocol: "freedom", Tag: "direct", Settings: map[string]string{"domainStrategy": "AsIs"}}, {Protocol: "freedom", Tag: "direct-v4", Settings: map[string]string{"domainStrategy": "ForceIPv4"}}, {Protocol: "blackhole", Tag: "block"}}
-	if p.EnableIPv6 {
+	if p.SchemaVersion < 2 {
+		cfg.Routing.Rules = append(cfg.Routing.Rules, RoutingRule{Type: "field", Network: "tcp,udp", OutboundTag: "direct-v4"})
+	}
+	// No catch-all in schema 2: unmatched traffic uses the first (normal direct)
+	// outbound. Keeping IPIfNonMatch intact also preserves system IP checks.
+	cfg.Outbounds = []Outbound{{Protocol: "freedom", Tag: "direct"}, {Protocol: "blackhole", Tag: "block"}}
+	useV4 := p.SchemaVersion < 2 || len(p.IPv4Domains) > 0
+	for _, rule := range p.CustomRules {
+		if rule.OutboundTag == "direct-v4" {
+			useV4 = true
+		}
+	}
+	if useV4 {
+		cfg.Outbounds = append(cfg.Outbounds, Outbound{Protocol: "freedom", Tag: "direct-v4", Settings: map[string]string{"domainStrategy": "ForceIPv4"}})
+	}
+	if p.SchemaVersion < 2 {
+		// Historical snapshots must retain their exact rendering and hashes.
+		cfg.Outbounds = []Outbound{{Protocol: "freedom", Tag: "direct", Settings: map[string]string{"domainStrategy": "AsIs"}}, {Protocol: "freedom", Tag: "direct-v4", Settings: map[string]string{"domainStrategy": "ForceIPv4"}}, {Protocol: "blackhole", Tag: "block"}}
+	}
+	if p.RequiresIPv6() {
 		cfg.Outbounds = append(cfg.Outbounds, Outbound{Protocol: "freedom", Tag: "direct-v6", Settings: map[string]string{"domainStrategy": "ForceIPv6"}})
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")

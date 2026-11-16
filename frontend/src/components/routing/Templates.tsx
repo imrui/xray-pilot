@@ -11,6 +11,7 @@ import {
   nodesLink,
   parseRules,
   readPolicy,
+  upgradeRoutingPolicy,
   routingLabel,
   templateBinding,
 } from '@/lib/routing-model'
@@ -56,8 +57,7 @@ export function TemplateEditor({
   const [base, setBase] = useState(template)
   const [name, setName] = useState(template.name)
   const [description, setDescription] = useState(template.description)
-  const initial = readPolicy(template.edit_payload ?? template.draft)
-  const [ipv6, setIPv6] = useState(initial.enable_ipv6_outbound)
+  const initial = upgradeRoutingPolicy(template.edit_payload ?? template.draft)
   const [v4, setV4] = useState(initial.ipv4_force_domains.join('\n'))
   const [v6, setV6] = useState(initial.ipv6_force_domains.join('\n'))
   const [rules, setRules] = useState(JSON.stringify(initial.custom_rules, null, 2))
@@ -65,11 +65,12 @@ export function TemplateEditor({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const original = readPolicy(base.draft)
+  const original = upgradeRoutingPolicy(base.draft)
+  const legacy = readPolicy(base.draft).schema_version !== 2
   const dirty =
     name !== base.name ||
     description !== base.description ||
-    ipv6 !== original.enable_ipv6_outbound ||
+    legacy ||
     v4 !== original.ipv4_force_domains.join('\n') ||
     v6 !== original.ipv6_force_domains.join('\n') ||
     rules !== JSON.stringify(original.custom_rules, null, 2)
@@ -89,7 +90,7 @@ export function TemplateEditor({
     try {
       if (!name.trim()) throw new Error('请填写模板名称。')
       const policy: RoutingPolicy = {
-        enable_ipv6_outbound: ipv6,
+        schema_version: 2,
         ipv4_force_domains: domainLines(v4),
         ipv6_force_domains: domainLines(v6),
         ipv6_failure_policy: 'strict',
@@ -174,24 +175,19 @@ export function TemplateEditor({
         </FieldGroup>
         <FieldGroup
           title="域名路由"
-          description="每行一条规则，例如 domain:example.com；自定义规则优先于域名列表。"
+          description="未命中规则保持默认直连。每行一条，例如 domain:example.com；自定义规则优先于域名列表，两组域名重叠时 IPv4 优先。"
         >
-          <SelectField
-            label="IPv6 出站"
-            value={String(ipv6)}
-            onChange={(v) => setIPv6(v === 'true')}
-            options={[
-              { value: 'false', label: '关闭：IPv6 列表中的域名也使用 IPv4' },
-              { value: 'true', label: '开启：严格 IPv6，故障不回退' },
-            ]}
-          />
-          {ipv6 && (
+          <p className="text-xs text-soft">
+            默认出站：正常直连，不强制 IPv4 或 IPv6。两组列表留空时保持默认行为。
+          </p>
+          {legacy && (
             <p className="text-xs text-[var(--warning)]">
-              无可用 IPv6 出口的节点会在同步预检时被拦截。
+              正在转换旧版草稿：原先实际走 IPv4 的域名已归入 IPv4
+              列表。保存并发布新版本、重新绑定后生效，旧版本不变。
             </p>
           )}
           <label className="block space-y-2 text-sm">
-            <span>IPv4 域名 · {domainLines(v4).length} 条</span>
+            <span>强制 IPv4 域名 · {domainLines(v4).length} 条</span>
             <textarea
               rows={5}
               className={routingControl}
@@ -200,7 +196,7 @@ export function TemplateEditor({
             />
           </label>
           <label className="block space-y-2 text-sm">
-            <span>IPv6 域名 · {domainLines(v6).length} 条</span>
+            <span>强制 IPv6 域名 · {domainLines(v6).length} 条</span>
             <textarea
               rows={5}
               className={routingControl}
@@ -208,6 +204,10 @@ export function TemplateEditor({
               onChange={(e) => setV6(e.target.value)}
             />
           </label>
+          <p className="text-xs text-soft">
+            强制 IPv6 需要节点有 IPv6 出口，失败不回退
+            IPv4；无出口的节点会在同步前被拦截。策略与客户端使用 IPv4 或 IPv6 连接节点无关。
+          </p>
           <Btn variant="secondary" onClick={() => setImportOpen(!importOpen)}>
             导入参考域名
           </Btn>
@@ -314,7 +314,9 @@ export function TemplateHistory({
         {query.data?.map((r) => (
           <details key={r.revision} className="rounded-md border border-[var(--border)] p-3">
             <summary className="cursor-pointer text-sm">
-              v{r.revision} · {new Date(r.created_at).toLocaleString()} · {r.actor}
+              v{r.revision} ·{' '}
+              {readPolicy(r.payload).schema_version === 2 ? '默认直连' : '旧版 IPv4 兜底'} ·{' '}
+              {new Date(r.created_at).toLocaleString()} · {r.actor}
             </summary>
             <pre className="my-3 max-h-72 overflow-auto text-xs">
               {JSON.stringify(JSON.parse(r.payload), null, 2)}
@@ -574,7 +576,7 @@ export function TemplateNodes({
                 { value: 0, label: '请选择已发布版本' },
                 ...(revisions.data ?? []).map((r) => ({
                   value: r.revision,
-                  label: `v${r.revision}`,
+                  label: `v${r.revision}${readPolicy(r.payload).schema_version === 2 ? ' · 默认直连' : ' · 旧版 IPv4 兜底'}`,
                 })),
               ]}
             />

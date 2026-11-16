@@ -32,7 +32,7 @@ export default function Routing() {
   const rows = (query.data?.templates ?? []).filter(
     (t) =>
       (t.name + t.description).toLowerCase().includes(search.toLowerCase()) &&
-      (filter === 'all' || (filter === 'draft' ? t.draft_changed : t.latest_revision > 0))
+      (filter === 'all' || (filter === 'draft' ? t.draft_changed : t.latest_revision > 0)),
   )
   const remove = async (t: RoutingTemplate) => {
     if (
@@ -153,11 +153,12 @@ export default function Routing() {
                 return (
                   <div className="space-y-1 text-xs">
                     <p>
-                      IPv4 域名 {p.ipv4_force_domains.length} · IPv6 域名{' '}
+                      强制 IPv4 {p.ipv4_force_domains.length} ·{' '}
+                      {p.schema_version === 2 ? '强制 IPv6' : '旧版 IPv6 列表'}{' '}
                       {p.ipv6_force_domains.length}
                     </p>
                     <p>
-                      IPv6 {p.enable_ipv6_outbound ? '开启（严格）' : '关闭'} · 自定义规则{' '}
+                      {p.schema_version === 2 ? '默认直连' : '旧版：默认 IPv4'} · 自定义规则{' '}
                       {p.custom_rules.length}
                     </p>
                   </div>

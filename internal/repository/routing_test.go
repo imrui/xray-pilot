@@ -31,7 +31,7 @@ func TestRoutingMigrationPreservesLegacyAndIsRepeatable(t *testing.T) {
 		t.Fatal("migration changed applied state")
 	}
 	var count int64
-	DB.Model(&entity.RoutingTemplate{}).Where("name = ?", "系统保守默认").Count(&count)
+	DB.Model(&entity.RoutingTemplate{}).Where("name = ?", "系统默认路由").Count(&count)
 	if count != 1 {
 		t.Fatalf("duplicate defaults %d", count)
 	}

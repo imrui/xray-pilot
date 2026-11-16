@@ -2,7 +2,7 @@ package entity
 
 import "time"
 
-const DefaultRoutingPolicy = `{"enable_ipv6_outbound":false,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[]}`
+const DefaultRoutingPolicy = `{"schema_version":2,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[]}`
 
 type RoutingTemplate struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`

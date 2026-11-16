@@ -138,20 +138,22 @@ export function PreviewConfigModal({
                       overview.data.templates,
                     )}
                 </p>
-                {Object.entries(source.data.routing.sources).map(([key, value]) => (
-                  <p key={key}>
-                    {(
-                      {
-                        enable_ipv6_outbound: 'IPv6 出站',
-                        ipv4_force_domains: 'IPv4 域名',
-                        ipv6_force_domains: 'IPv6 域名',
-                        custom_rules: '自定义规则',
-                        ipv6_failure_policy: 'IPv6 故障策略',
-                      } as Record<string, string>
-                    )[key] ?? key}
-                    ：{value}
-                  </p>
-                ))}
+                {Object.entries(source.data.routing.sources)
+                  .filter(([key]) => key !== 'schema_version')
+                  .map(([key, value]) => (
+                    <p key={key}>
+                      {(
+                        {
+                          enable_ipv6_outbound: '旧版 IPv6 开关',
+                          ipv4_force_domains: '强制 IPv4 域名',
+                          ipv6_force_domains: 'IPv6 域名列表',
+                          custom_rules: '自定义规则',
+                          ipv6_failure_policy: 'IPv6 故障策略',
+                        } as Record<string, string>
+                      )[key] ?? key}
+                      ：{value}
+                    </p>
+                  ))}
               </>
             ) : (
               <p>加载来源…</p>

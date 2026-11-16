@@ -105,7 +105,10 @@ func resolveRouting(db *gorm.DB, nodeID uint) (*EffectiveRouting, error) {
 	}
 	out.Policy = &p
 	out.TemplateID, out.Revision = base.TemplateID, base.Revision
-	out.Warnings = []string{"地址族策略只约束域名解析，不能转换 IP 字面量；IPv6 preference 未开放。", "自定义规则优先于域名列表；domain:google.com 包含其子域名。"}
+	out.Warnings = []string{"强制策略只约束目标域名解析，不转换 IP 字面量，也不取决于客户端连接节点的地址族。", "系统规则、自定义规则、强制 IPv4 域名、强制 IPv6 域名按顺序匹配；两组域名重叠时 IPv4 优先。"}
+	if p.SchemaVersion < 2 {
+		out.Warnings = append(out.Warnings, "旧版策略仍以 IPv4 兜底；编辑并发布新版后，选择新版本才能改为默认直连。")
+	}
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal([]byte(raw), &fields)
 	var overrides map[string]json.RawMessage
@@ -164,7 +167,8 @@ func (s *RoutingService) Publish(id, expected uint, actor string) (*entity.Routi
 		if t.Version != expected {
 			return ErrRoutingConflict
 		}
-		if _, err := xray.DecodeRoutingPolicy(t.Draft); err != nil {
+		policy, err := xray.DecodeRoutingPolicy(t.Draft)
+		if err != nil {
 			return err
 		}
 		r := tx.Model(&entity.RoutingTemplate{}).Where("id = ? AND version = ?", id, expected).Update("version", expected+1)
@@ -178,7 +182,7 @@ func (s *RoutingService) Publish(id, expected uint, actor string) (*entity.Routi
 		if err := tx.Model(&entity.RoutingTemplateRevision{}).Where("template_id = ?", id).Select("COALESCE(MAX(revision),0)").Scan(&max).Error; err != nil {
 			return err
 		}
-		rev = entity.RoutingTemplateRevision{TemplateID: id, Revision: max + 1, SchemaVersion: 1, Payload: t.Draft, Actor: actor}
+		rev = entity.RoutingTemplateRevision{TemplateID: id, Revision: max + 1, SchemaVersion: policy.SchemaVersion, Payload: t.Draft, Actor: actor}
 		return tx.Create(&rev).Error
 	})
 	if err == nil {
@@ -278,7 +282,7 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 		b.Overrides = "{}"
 	}
 	// Validate shape independently with IPv6 allowed; the resolved base is validated below.
-	validationBase := strings.Replace(DefaultRoutingPolicy, "false", "true", 1)
+	validationBase := `{"schema_version":1,"enable_ipv6_outbound":true,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[]}`
 	if _, err := xray.MergeRoutingPolicy(validationBase, b.Overrides); err != nil {
 		return err
 	}

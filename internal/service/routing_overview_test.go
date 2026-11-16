@@ -97,8 +97,14 @@ func TestRoutingPreviewEnforcesPermissionsAndOverrides(t *testing.T) {
 	}
 	b, _ := s.Binding("node", n.ID)
 	b.Overrides = `{"custom_rules":[{"type":"field","ip":["203.0.113.0/24"],"outboundTag":"direct-v6"}]}`
+	legacy := publishRouting(t, "legacy-disabled", `{"enable_ipv6_outbound":false,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[]}`)
+	b.Mode, b.TemplateID, b.Revision = "template", legacy.TemplateID, legacy.Revision
 	if _, err := s.PreviewBinding(b, true); err == nil {
 		t.Fatal("IPv6-disabled target accepted v6 rule")
+	}
+	b.Mode, b.TemplateID, b.Revision = "inherit", 0, 0
+	if _, err := s.PreviewBinding(b, true); err != nil {
+		t.Fatalf("new domain policy rejected explicit IPv6 rule: %v", err)
 	}
 }
 

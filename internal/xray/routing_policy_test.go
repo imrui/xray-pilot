@@ -42,7 +42,7 @@ func TestRoutingPreservesSystemAndCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"test-id", "test-user", "test-key", "abc", "geoip:private", "ForceIPv4"} {
+	for _, value := range []string{"test-id", "test-user", "test-key", "abc", "geoip:private"} {
 		if !strings.Contains(out, value) {
 			t.Fatalf("lost %s", value)
 		}
