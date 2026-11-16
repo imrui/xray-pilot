@@ -61,7 +61,7 @@ type Hysteria2Settings struct {
 
 // Reality 默认参数：节点密钥与协议模板都未提供时的兜底值
 const (
-	DefaultRealitySNI         = "www.microsoft.com"
+	DefaultRealitySNI         = "www.apple.com"
 	DefaultRealityFingerprint = "chrome"
 )
 

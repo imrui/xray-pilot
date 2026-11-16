@@ -22,7 +22,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const protocolOptions = PROTOCOL_OPTIONS
 
 const defaultSettings: Record<Protocol, string> = {
-  'vless-reality': JSON.stringify({ sni: 'www.microsoft.com', fingerprint: 'chrome', private_key: '', public_key: '', short_ids: [] }, null, 2),
+  'vless-reality': JSON.stringify({ sni: 'www.apple.com', fingerprint: 'chrome', private_key: '', public_key: '', short_ids: [] }, null, 2),
   'vless-ws-tls': JSON.stringify({ host: 'cdn.example.com', path: '/ws' }, null, 2),
   trojan: JSON.stringify({ sni: 'example.com' }, null, 2),
   hysteria2: JSON.stringify({ sni: 'example.com', up_mbps: 100, down_mbps: 100 }, null, 2),
@@ -471,7 +471,7 @@ export default function Profiles() {
       if (!keys) throw new Error('密钥生成失败')
       return JSON.stringify(
         {
-          sni: 'www.microsoft.com',
+          sni: 'www.apple.com',
           fingerprint: 'chrome',
           private_key: keys.private_key,
           public_key: keys.public_key,
