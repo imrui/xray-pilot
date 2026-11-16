@@ -28,20 +28,6 @@ import request from '@/lib/axios'
 import { PreviewConfigModal } from '@/components/nodes/ConfigPreview'
 import { NodeRoutingPreview } from './NodeRoutingPreview'
 
-const preset4 = [
-  'anthropic.com',
-  'claude.ai',
-  'openai.com',
-  'chatgpt.com',
-  'x.ai',
-  'grok.com',
-  'gemini.google.com',
-  'aistudio.google.com',
-].map((x) => 'domain:' + x)
-const preset6 = ['youtube.com', 'googlevideo.com', 'google.com', 'netflix.com'].map(
-  (x) => 'domain:' + x,
-)
-
 export function TemplateEditor({
   template,
   onClose,
@@ -53,6 +39,11 @@ export function TemplateEditor({
 }) {
   const qc = useQueryClient()
   const confirm = useConfirm()
+  const overview = useRoutingOverview()
+  const reference = overview.data?.presets?.find((p) => p.key === 'ai-media')
+  const referencePolicy = reference ? readPolicy(reference.payload) : null
+  const preset4 = referencePolicy?.ipv4_force_domains ?? []
+  const preset6 = referencePolicy?.ipv6_force_domains ?? []
   const writable = useAuthStore((s) => s.role) === 'super_admin'
   const [base, setBase] = useState(template)
   const [name, setName] = useState(template.name)
@@ -208,11 +199,16 @@ export function TemplateEditor({
             强制 IPv6 需要节点有 IPv6 出口，失败不回退
             IPv4；无出口的节点会在同步前被拦截。策略与客户端使用 IPv4 或 IPv6 连接节点无关。
           </p>
-          <Btn variant="secondary" onClick={() => setImportOpen(!importOpen)}>
+          <Btn
+            variant="secondary"
+            disabled={!referencePolicy}
+            onClick={() => setImportOpen(!importOpen)}
+          >
             导入参考域名
           </Btn>
           {importOpen && (
             <div className="space-y-3 rounded border border-[var(--border)] p-3 text-xs">
+              <p>起始列表不代表完整服务域名库。google.com 覆盖范围较广，默认不包含，可按需添加。</p>
               <p>IPv4：{preset4.join('、')}</p>
               <p>IPv6：{preset6.join('、')}</p>
               <div className="flex gap-2">

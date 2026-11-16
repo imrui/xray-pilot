@@ -11,7 +11,7 @@ import { ActionMenu } from '@/components/ui/ActionMenu'
 import { useConfirm } from '@/lib/confirm-context'
 import { RoutingBindingDrawer } from '@/components/routing/BindingEditor'
 import { TemplateEditor, TemplateHistory, TemplateNodes } from '@/components/routing/Templates'
-import { emptyPolicy, readPolicy } from '@/lib/routing-model'
+import { emptyPolicy, readPolicy, requiresIPv6 } from '@/lib/routing-model'
 import type { RoutingTemplate } from '@/lib/routing-model'
 import { invalidateRouting, useRoutingOverview } from '@/lib/routing'
 import request from '@/lib/axios'
@@ -111,6 +111,7 @@ export default function Routing() {
       />
       <p className="text-sm text-soft">
         模板定义路由规则；配置节点后，在节点列表预览和同步完整配置。
+        预设不会自动应用；全局默认仅供继承节点使用，节点指定优先于分组，分组优先于全局。
       </p>
       {(error || query.error) && (
         <div role="alert" className="text-sm text-[var(--danger)]">
@@ -139,6 +140,7 @@ export default function Routing() {
                   <button className="font-semibold text-[var(--accent)]" onClick={() => setEdit(t)}>
                     {t.name}
                   </button>
+                  {t.preset_key && <span className="ml-2 text-xs text-soft">预设起始模板</span>}
                   <p className="mt-1 max-w-xs whitespace-normal text-xs text-soft">
                     {t.description || '未填写说明'}
                   </p>
@@ -161,6 +163,7 @@ export default function Routing() {
                       {p.schema_version === 2 ? '默认直连' : '旧版：默认 IPv4'} · 自定义规则{' '}
                       {p.custom_rules.length}
                     </p>
+                    {requiresIPv6(p) && <p className="text-[var(--warning)]">需要可用 IPv6 出口</p>}
                   </div>
                 )
               },
@@ -212,6 +215,25 @@ export default function Routing() {
                   <ActionMenu
                     items={[
                       { label: '版本历史与引用', onSelect: () => setHistory(t) },
+                      ...(superAdmin
+                        ? [
+                            {
+                              label: '复制草稿为新模板',
+                              onSelect: () =>
+                                setEdit({
+                                  id: 0,
+                                  name: `${t.name} - 副本`,
+                                  description: t.description,
+                                  draft: t.draft,
+                                  version: 0,
+                                  latest_revision: 0,
+                                  draft_changed: true,
+                                  binding_count: 0,
+                                  node_count: 0,
+                                }),
+                            },
+                          ]
+                        : []),
                       ...(superAdmin && !t.latest_revision
                         ? [
                             {

@@ -6,6 +6,7 @@ const DefaultRoutingPolicy = `{"schema_version":2,"ipv4_force_domains":[],"ipv6_
 
 type RoutingTemplate struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
+	PresetKey   *string   `gorm:"size:64;uniqueIndex" json:"preset_key,omitempty"`
 	Name        string    `gorm:"uniqueIndex;not null" json:"name"`
 	Description string    `json:"description"`
 	Draft       string    `gorm:"type:text" json:"draft"`

@@ -26,6 +26,7 @@ type NodeRoutingSummary struct {
 	JobStatus  string            `json:"job_status,omitempty"`
 }
 type RoutingOverview struct {
+	Presets    []entity.RoutingPreset   `json:"presets"`
 	Templates  []RoutingTemplateSummary `json:"templates"`
 	Nodes      []NodeRoutingSummary     `json:"nodes"`
 	References []RoutingReference       `json:"references"`
@@ -40,7 +41,7 @@ type RoutingReference struct {
 }
 
 func (s *RoutingService) Overview() (*RoutingOverview, error) {
-	out := &RoutingOverview{Templates: []RoutingTemplateSummary{}, Nodes: []NodeRoutingSummary{}, References: []RoutingReference{}}
+	out := &RoutingOverview{Presets: entity.RoutingPresets(), Templates: []RoutingTemplateSummary{}, Nodes: []NodeRoutingSummary{}, References: []RoutingReference{}}
 	var templates []entity.RoutingTemplate
 	var revisions []entity.RoutingTemplateRevision
 	var bindings []entity.RoutingBinding

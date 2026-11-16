@@ -150,7 +150,7 @@ func (s *RoutingService) SaveTemplate(id, expected uint, name, description, draf
 			return ErrRoutingConflict
 		}
 		t.Version = expected + 1
-		return nil
+		return tx.First(&t, id).Error
 	})
 	if err == nil {
 		repository.NewLogRepository().RecordWithActor("routing_template_save", fmt.Sprint(t.ID), actor, true, "保存模板草稿", 0)

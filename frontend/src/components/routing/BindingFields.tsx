@@ -49,6 +49,13 @@ export function BindingFields({
           ...(value.scope === 'node' ? [{ value: 'legacy', label: '保留原有路由' }] : []),
         ]}
       />
+      <p className="text-xs text-soft">
+        {value.scope === 'global'
+          ? '全局默认只影响最终继承到全局的节点；节点指定或分组指定的模板优先。保存后仍需节点同步生效。'
+          : value.scope === 'group'
+            ? '分组模板仅作用于继承该分组的节点；节点单独指定的模板优先。'
+            : '恢复继承会采用分组或全局策略。想停用域名分流，可指定「系统默认路由」的空规则版本，并将本节点路由覆盖恢复继承；切换模板不会自动清除覆盖。'}
+      </p>
       {value.mode === 'template' && (
         <div className="grid gap-4 sm:grid-cols-2">
           <SelectField

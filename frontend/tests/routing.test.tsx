@@ -50,6 +50,18 @@ const binding: RoutingBinding = {
 }
 const overview = {
   templates: [template],
+  presets: [
+    {
+      key: 'ai-media',
+      name: 'AI 工具 / 流媒体分流',
+      description: '参考策略',
+      payload: JSON.stringify({
+        ...emptyPolicy,
+        ipv4_force_domains: ['domain:example-ai.test'],
+        ipv6_force_domains: ['domain:example-video.test'],
+      }),
+    },
+  ],
   auto_sync: false,
   nodes: [1, 2].map((id) => ({
     id,
@@ -152,6 +164,47 @@ test('路由页采用列表和抽屉，不提供节点同步入口', async () =>
   fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[0])
   assert.ok(screen.getByRole('dialog', { name: '编辑路由模板 · IPv4 标准' }))
   assert.ok(screen.getByLabelText('模板名称 *'))
+})
+
+test('参考域名使用后端预设目录，只填入草稿，不自动应用节点', async () => {
+  api()
+  mount(<TemplateEditor template={template} onClose={() => {}} onConfigure={() => {}} />)
+  const importButton = screen.getByRole('button', { name: '导入参考域名' })
+  await waitFor(() => assert.equal((importButton as HTMLButtonElement).disabled, false))
+  fireEvent.click(importButton)
+  assert.ok(screen.getByText(/google.com 覆盖范围较广/))
+  fireEvent.click(screen.getByRole('button', { name: '替换现有列表' }))
+  assert.equal(
+    (screen.getByLabelText(/强制 IPv4 域名/) as HTMLTextAreaElement).value,
+    'domain:example-ai.test',
+  )
+  assert.equal(
+    (screen.getByLabelText(/强制 IPv6 域名/) as HTMLTextAreaElement).value,
+    'domain:example-video.test',
+  )
+  assert.equal(calls.filter((c) => c.method !== 'get').length, 0)
+})
+
+test('预设可复制成独立草稿，不改写源模板或节点绑定', async () => {
+  api((method, url, body) => {
+    if (method === 'get' && url === '/routing-overview')
+      return { ...overview, templates: [{ ...template, preset_key: 'ai-media' }] }
+    if (method === 'post' && url === '/routing-templates')
+      return { id: 44, version: 1, name: body.name, draft: JSON.stringify(body.draft) }
+  })
+  mount(<Routing />)
+  await screen.findAllByText('IPv4 标准')
+  fireEvent.keyDown(screen.getAllByRole('button', { name: '更多操作' })[0], { key: 'ArrowDown' })
+  fireEvent.click(await screen.findByRole('menuitem', { name: '复制草稿为新模板' }))
+  assert.ok(screen.getByRole('dialog', { name: '新增路由模板' }))
+  assert.equal((screen.getByLabelText('模板名称 *') as HTMLInputElement).value, 'IPv4 标准 - 副本')
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText('草稿已保存。')
+  const writes = calls.filter((c) => c.method !== 'get')
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].url, '/routing-templates')
+  assert.equal(writes[0].method, 'post')
+  assert.equal((writes[0].data as Record<string, unknown>).preset_key, undefined)
 })
 
 test('新路由直接配置两组强制域名，不再使用 IPv6 开关', async () => {

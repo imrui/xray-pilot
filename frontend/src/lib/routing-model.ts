@@ -8,6 +8,7 @@ export type RoutingPolicy = {
 }
 export type RoutingTemplate = {
   id: number
+  preset_key?: string
   name: string
   description: string
   draft: string
@@ -57,6 +58,7 @@ export type RoutingNode = {
   error?: string
 }
 export type RoutingOverview = {
+  presets?: { key: string; name: string; description: string; payload: string }[]
   templates: RoutingTemplate[]
   nodes: RoutingNode[]
   references?: {
