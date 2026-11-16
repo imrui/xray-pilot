@@ -184,8 +184,12 @@ export function normalizeBinding(binding: RoutingBinding): RoutingBinding {
   const overrides = JSON.parse(binding.overrides || '{}') as Record<string, unknown>
   if (overrides.custom_rules != null) parseRules(JSON.stringify(overrides.custom_rules))
   for (const key of ['ipv4_force_domains', 'ipv6_force_domains']) {
-    if (Array.isArray(overrides[key]))
-      overrides[key] = domainLines((overrides[key] as string[]).join('\n'))
+    if (Array.isArray(overrides[key])) {
+      const domains = domainLines((overrides[key] as string[]).join('\n'))
+      if (overrides[key].length > 0 && domains.length === 0)
+        throw new Error(`${key === 'ipv4_force_domains' ? 'IPv4' : 'IPv6'} 自定义列表不能为空；如需移除该组域名规则，请选择“清空规则”。`)
+      overrides[key] = domains
+    }
   }
   return { ...binding, overrides: JSON.stringify(overrides) }
 }

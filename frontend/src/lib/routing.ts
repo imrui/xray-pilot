@@ -4,6 +4,7 @@ import request from './axios'
 import { bindingPath } from './routing-model'
 import type {
   BindingImpact,
+  EffectiveRouting,
   RoutingBinding,
   RoutingOverview,
   RoutingRevision,
@@ -23,6 +24,14 @@ export const getBinding = (scope: RoutingScope, id: number) =>
   routingGet<RoutingBinding>(bindingPath(scope, id))
 export const getRevisions = (id: number) =>
   routingGet<RoutingRevision[]>(`/routing-templates/${id}/revisions`).then((x) => x ?? [])
+export async function previewTemplate(binding: RoutingBinding) {
+  return (
+    await request.post<{ data: EffectiveRouting }>(
+      bindingPath('node', binding.target_id) + '/template-preview',
+      { mode: binding.mode, template_id: binding.template_id, revision: binding.revision },
+    )
+  ).data.data
+}
 export async function saveBinding(binding: RoutingBinding) {
   return (
     await request.put<{ data: BindingImpact }>(
@@ -44,6 +53,7 @@ export async function invalidateRouting(qc: QueryClient) {
     [
       'routing-overview',
       'routing-binding',
+      'routing-template-preview',
       'routing-revisions',
       'nodes',
       'sync-summary',

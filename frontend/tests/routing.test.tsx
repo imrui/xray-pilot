@@ -110,9 +110,11 @@ function api(handler?: (method: string, url: string, body: Record<string, unknow
       url = config.url ?? '',
       body = config.data ? JSON.parse(config.data) : {}
     calls.push({ method, url, data: body })
-    let data = handler?.(method, url, body)
+    let data = await handler?.(method, url, body)
     if (data === undefined) {
       if (url === '/routing-overview') data = overview
+      else if (url.endsWith('/routing/template-preview'))
+        data = { ...overview.nodes[0].routing, policy: { ...emptyPolicy, ipv4_force_domains: ['domain:template.example'] } }
       else if (url.endsWith('/preview-config'))
         data = { config: previewConfig(Number(url.split('/')[2])), warnings: [] }
       else if (url.endsWith('/effective-config'))
@@ -264,6 +266,65 @@ test('旧版 IPv6 关闭的草稿转换时保留原出口，新版空列表不�
   assert.equal(requiresIPv6({ ...emptyPolicy, custom_rules: [{ outboundTag: 'direct-v6' }] }), true)
 })
 
+test('节点域名覆盖区分继承、自定义和清空，继承展示真实模板列表', async () => {
+  api((method, url) => method === 'get' && url.endsWith('/routing') ? { ...binding, overrides: '{}' } : undefined)
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  const inherited = await screen.findByLabelText('IPv4 模板域名') as HTMLTextAreaElement
+  assert.equal(inherited.value, 'domain:template.example')
+  assert.equal(inherited.readOnly, true)
+  assert.ok(screen.getByText('模板未配置强制 IPv6 域名，无需额外设置。'))
+  const choice = screen.getByLabelText('强制 IPv4 域名') as HTMLSelectElement
+  assert.equal(choice.value, 'inherit')
+  assert.equal(calls.filter((c) => c.method === 'put').length, 0)
+  fireEvent.change(choice, { target: { value: 'custom' } })
+  const input = screen.getByLabelText('IPv4 覆盖域名') as HTMLTextAreaElement
+  assert.equal(input.value, 'domain:template.example')
+  fireEvent.change(input, { target: { value: '  \n' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await screen.findByText(/IPv4 自定义列表不能为空/)
+  assert.equal(calls.filter((c) => c.method === 'put').length, 0)
+  fireEvent.change(choice, { target: { value: 'clear' } })
+  assert.equal(screen.queryByLabelText('IPv4 覆盖域名'), null)
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await screen.findByText(/已保存：1 个节点/)
+  assert.deepEqual(JSON.parse((calls.find((c) => c.method === 'put')!.data as RoutingBinding).overrides), { ipv4_force_domains: [] })
+})
+
+test('现有自定义及清空设置保留，恢复继承删除覆盖而非复制模板', async () => {
+  api((method, url) => method === 'get' && url.endsWith('/routing') ? { ...binding, overrides: '{"ipv4_force_domains":["domain:private.example"],"ipv6_force_domains":[]}' } : undefined)
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  assert.equal((await screen.findByLabelText('IPv4 覆盖域名') as HTMLTextAreaElement).value, 'domain:private.example')
+  assert.equal((screen.getByLabelText('强制 IPv6 域名') as HTMLSelectElement).value, 'clear')
+  for (const family of ['IPv4', 'IPv6']) fireEvent.change(screen.getByLabelText(`强制 ${family} 域名`), { target: { value: 'inherit' } })
+  assert.equal((await screen.findByLabelText('IPv4 模板域名') as HTMLTextAreaElement).value, 'domain:template.example')
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await screen.findByText(/已保存：1 个节点/)
+  const saved = calls.find((c) => c.method === 'put')!.data as RoutingBinding
+  assert.deepEqual(JSON.parse(saved.overrides), {})
+  assert.equal(saved.udp443_policy, binding.udp443_policy)
+  assert.equal(saved.config_path, binding.config_path)
+})
+
+test('更换固定版本实时读取模板，迟到的继承请求不会覆盖当前选择', async () => {
+  let resolveOld!: (value: unknown) => void
+  api((method, url, body) => {
+    if (method === 'get' && url.endsWith('/routing')) return { ...binding, overrides: '{}' }
+    if (url.endsWith('/template-preview')) {
+      if (body.mode === 'inherit') return new Promise((resolve) => { resolveOld = resolve })
+      return { ...overview.nodes[0].routing, template_id: 1, revision: 2, policy: { ...emptyPolicy, ipv4_force_domains: ['domain:version-two.example'] } }
+    }
+  })
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  fireEvent.change(await screen.findByLabelText('路由来源'), { target: { value: 'template' } })
+  fireEvent.change(screen.getByLabelText('路由模板'), { target: { value: '1' } })
+  await screen.findByRole('option', { name: 'v2 · 默认直连' })
+  fireEvent.change(screen.getByLabelText('固定版本'), { target: { value: '2' } })
+  assert.equal((await screen.findByLabelText('IPv4 模板域名') as HTMLTextAreaElement).value, 'domain:version-two.example')
+  resolveOld({ ...overview.nodes[0].routing, policy: { ...emptyPolicy, ipv4_force_domains: ['domain:old.example'] } })
+  await waitFor(() => assert.equal((screen.getByLabelText('IPv4 模板域名') as HTMLTextAreaElement).value, 'domain:version-two.example'))
+  assert.equal(calls.filter((c) => c.method === 'put').length, 0)
+})
+
 test('旧版节点开关覆盖必须显式移除，保存时不遗留隐藏字段', async () => {
   api((method, url) =>
     method === 'get' && url === '/nodes/1/routing'
@@ -275,6 +336,22 @@ test('旧版节点开关覆盖必须显式移除，保存时不遗留隐藏字�
   fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
   await screen.findByText(/已保存：1 个节点/)
   assert.equal((calls.find((c) => c.method === 'put')!.data as RoutingBinding).overrides, '{}')
+})
+
+test('模板读取失败不会显示成空列表，重试后恢复只读域名', async () => {
+  let fail = true
+  api((method, url) => {
+    if (method === 'get' && url.endsWith('/routing')) return { ...binding, overrides: '{}' }
+    if (url.endsWith('/template-preview') && fail) throw new Error('分组来源加载失败')
+  })
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  await screen.findByText('模板内容加载失败：分组来源加载失败')
+  assert.equal(screen.queryByText(/模板未配置强制 IPv4/), null)
+  assert.equal(screen.queryByLabelText('IPv4 模板域名'), null)
+  fail = false
+  fireEvent.click(screen.getByRole('button', { name: '重试加载模板' }))
+  assert.equal((await screen.findByLabelText('IPv4 模板域名') as HTMLTextAreaElement).value, 'domain:template.example')
+  assert.equal(calls.filter((c) => c.method === 'put').length, 0)
 })
 
 test('模板侧批量绑定只更改选择的版本，保留每台节点自己的覆盖与并发版本', async () => {

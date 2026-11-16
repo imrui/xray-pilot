@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { Btn, Field, FieldGroup, SelectField } from '@/components/ui/Form'
 import { useAuthStore } from '@/store/auth'
-import { getRevisions } from '@/lib/routing'
+import { getRevisions, previewTemplate } from '@/lib/routing'
 import {
   basicRoutingDescription,
   basicRoutingLabel,
   bindingMode,
+  domainLines,
   readPolicy,
 } from '@/lib/routing-model'
 import type { RoutingBinding, RoutingTemplate } from '@/lib/routing-model'
@@ -28,6 +29,20 @@ export function BindingFields({
     queryFn: () => getRevisions(value.template_id),
     enabled: value.mode === 'template' && value.template_id > 0,
   })
+  const canPreview =
+    value.scope === 'node' &&
+    (value.mode === 'inherit' ||
+      (value.mode === 'template' && value.template_id > 0 && value.revision > 0))
+  const templatePreview = useQuery({
+    queryKey: [
+      'routing-template-preview', value.target_id, value.mode, value.template_id, value.revision,
+    ],
+    queryFn: () => previewTemplate(value),
+    enabled: canPreview,
+  })
+  const base = canPreview ? templatePreview.data : undefined
+  const templateName =
+    base && (templates.find((t) => t.id === base.template_id)?.name ?? `模板 #${base.template_id}`)
   const overrides = JSON.parse(value.overrides || '{}') as Record<string, unknown>
   const override = (key: string, field: unknown) => {
     const next = { ...overrides }
@@ -105,8 +120,36 @@ export function BindingFields({
       {value.scope === 'node' && value.mode !== 'legacy' && (
         <FieldGroup
           title="本节点覆盖"
-          description="未覆盖的字段继续继承模板。清空列表和恢复继承是不同操作。"
+          description="默认继承模板，仅需特殊设置时才自定义。自定义会替换整组列表；清空规则仅移除本节点的该组域名规则，不修改模板。已有覆盖会保留。"
         >
+          <div
+            className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-xs"
+            aria-live="polite"
+          >
+            {!canPreview ? (
+              '请选择模板及固定版本，查看可继承的域名。'
+            ) : templatePreview.error ? (
+              <div role="alert" className="space-y-2 text-[var(--danger)]">
+                <p>模板内容加载失败：{(templatePreview.error as Error).message}</p>
+                <Btn variant="secondary" onClick={() => void templatePreview.refetch()}>
+                  重试加载模板
+                </Btn>
+              </div>
+            ) : base ? (
+              <p>
+                当前模板：{templateName} v{base.revision} ·{' '}
+                {value.mode === 'template' ? '节点指定' : base.groups.length
+                  ? `继承分组：${base.groups.map((g) => g.split(' [')[0]).join('、')}`
+                  : '继承全局默认'}
+              </p>
+            ) : '正在读取模板域名…'}
+          </div>
+          {base?.policy && base.policy.schema_version !== 2 && (
+            <p className="text-xs text-soft">
+              当前继承旧版策略，未命中仍使用 IPv4 兜底。
+              {base.policy.enable_ipv6_outbound ? '' : '旧版 IPv6 开关已关闭，IPv6 列表中的域名实际使用 IPv4。'}
+            </p>
+          )}
           <p className="text-xs text-soft">
             新版策略中，未命中规则使用默认直连；强制 IPv6 需要节点有 IPv6
             出口且不会回退。两组域名重叠时 IPv4 优先。
@@ -123,26 +166,13 @@ export function BindingFields({
             </div>
           )}
           {(['ipv4_force_domains', 'ipv6_force_domains'] as const).map((key, index) => (
-            <div key={key} className="space-y-2">
-              <SelectField
-                label={`强制 ${index ? 'IPv6' : 'IPv4'} 域名`}
-                value={overrides[key] == null ? 'inherit' : 'override'}
-                onChange={(v) => override(key, v === 'inherit' ? undefined : [])}
-                options={[
-                  { value: 'inherit', label: '继承模板列表' },
-                  { value: 'override', label: '本节点自定义（留空表示清空）' },
-                ]}
-              />
-              {overrides[key] != null && (
-                <textarea
-                  aria-label={`${index ? 'IPv6' : 'IPv4'} 覆盖域名`}
-                  rows={4}
-                  className={routingControl}
-                  value={(overrides[key] as string[]).join('\n')}
-                  onChange={(e) => override(key, e.target.value.split('\n'))}
-                />
-              )}
-            </div>
+            <DomainOverride
+              key={key}
+              family={index ? 'IPv6' : 'IPv4'}
+              value={overrides[key] as string[] | null | undefined}
+              inherited={templatePreview.error ? undefined : base?.policy?.[key]}
+              onChange={(v) => override(key, v)}
+            />
           ))}
           {superAdmin && (
             <details>
@@ -180,6 +210,67 @@ export function BindingFields({
 
 import { useState } from 'react'
 import { parseRules } from '@/lib/routing-model'
+function DomainOverride({ family, value, inherited, onChange }: {
+  family: string
+  value: string[] | null | undefined
+  inherited: string[] | undefined
+  onChange: (value: string[] | undefined) => void
+}) {
+  const mode = value == null ? 'inherit' : value.length === 0 ? 'clear' : 'custom'
+  const emptyCustom = mode === 'custom' && domainLines(value!.join('\n')).length === 0
+  return (
+    <div className="space-y-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3">
+      <SelectField
+        label={`强制 ${family} 域名`}
+        value={mode}
+        onChange={(v) => onChange(
+          v === 'inherit' ? undefined : v === 'clear' ? [] : inherited?.length ? [...inherited] : [''],
+        )}
+        options={[
+          { value: 'inherit', label: '继承模板' },
+          { value: 'custom', label: '自定义列表' },
+          { value: 'clear', label: '清空规则' },
+        ]}
+      />
+      {mode === 'inherit' && (inherited ? inherited.length ? (
+        <>
+          <p className="text-xs text-soft">
+            继承模板中的 {inherited.length} 条域名（只读）。需要调整时选择“自定义列表”。
+          </p>
+          <textarea
+            aria-label={`${family} 模板域名`} readOnly rows={Math.min(6, inherited.length)}
+            className={routingControl + ' bg-[var(--panel-muted)]'} value={inherited.join('\n')}
+          />
+        </>
+      ) : (
+        <p className="text-xs text-soft">模板未配置强制 {family} 域名，无需额外设置。</p>
+      ) : (
+        <p className="text-xs text-soft">模板域名尚未加载，请先确认上方的路由来源。</p>
+      ))}
+      {mode === 'custom' && (
+        <>
+          <p className="text-xs text-soft">仅用于本节点，替换模板中的整组列表；每行一条域名规则。</p>
+          <textarea
+            aria-label={`${family} 覆盖域名`} aria-invalid={emptyCustom}
+            rows={4} className={routingControl} value={value!.join('\n')}
+            onChange={(e) => onChange(e.target.value.split('\n'))}
+          />
+          {emptyCustom && (
+            <p role="alert" className="text-xs text-[var(--danger)]">
+              请填写域名；如需移除该组域名规则，请选择“清空规则”。
+            </p>
+          )}
+        </>
+      )}
+      {mode === 'clear' && (
+        <p className="text-xs text-soft">
+          本节点不使用强制 {family} 域名列表，包括模板中的该组域名。
+          其他路由规则仍有效；恢复使用请选择“继承模板”。
+        </p>
+      )}
+    </div>
+  )
+}
 function RulesOverride({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
   const [raw, setRaw] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -232,13 +323,15 @@ export function UDPPolicy({ value, onChange }: { value: string; onChange: (v: st
         value={value}
         onChange={onChange}
         options={[
-          { value: 'inherit', label: '继承（全局默认为阻止）' },
+          { value: 'inherit', label: '继承上级策略（未指定时阻止）' },
           { value: 'block', label: '阻止 UDP 443' },
           { value: 'allow', label: '允许 UDP 443' },
         ]}
       />
       <p className="text-xs text-soft">
-        订阅策略优先级：用户 → 节点 → 全局。允许时，Clash / sing-box 会排除不兼容的 Vision 条目。
+        仅影响 Vision 客户端订阅，不是节点防火墙规则。优先级：用户 → 节点 → 全局；均未指定时阻止。
+        阻止使用 xtls-rprx-vision，允许使用 xtls-rprx-vision-udp443（更新订阅后生效）。
+        允许时，Clash / sing-box 订阅会排除无法等价表达此策略的 Vision 条目。
       </p>
     </div>
   )

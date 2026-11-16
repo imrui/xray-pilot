@@ -51,4 +51,12 @@ func TestRoutingRoutesAuthorizationAndVersionConflict(t *testing.T) {
 	if response.Code != 400 {
 		t.Fatalf("invalid id accepted: %d", w.Code)
 	}
+	preview := map[string]any{"mode": "inherit", "template_id": 0, "revision": 0}
+	if w, _ := doJSON(t, r, http.MethodPost, "/api/nodes/1/routing/template-preview", "", preview); w.Code != http.StatusUnauthorized {
+		t.Fatalf("preview requires auth: %d", w.Code)
+	}
+	w, response = doJSON(t, r, http.MethodPost, "/api/nodes/1/routing/template-preview", ops, preview)
+	if w.Code != http.StatusOK || response.Code != 0 {
+		t.Fatalf("admin cannot preview inherited template: %d %s", w.Code, response.Message)
+	}
 }

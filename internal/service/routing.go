@@ -54,6 +54,10 @@ func resolveRouting(db *gorm.DB, nodeID uint) (*EffectiveRouting, error) {
 	if err != nil {
 		return nil, err
 	}
+	return resolveRoutingBinding(db, nodeID, b)
+}
+
+func resolveRoutingBinding(db *gorm.DB, nodeID uint, b entity.RoutingBinding) (*EffectiveRouting, error) {
 	out := &EffectiveRouting{Mode: b.Mode, Binding: b, Sources: map[string]string{}, Groups: []string{}}
 	if b.Mode == "legacy" {
 		return out, nil
@@ -83,6 +87,7 @@ func resolveRouting(db *gorm.DB, nodeID uint) (*EffectiveRouting, error) {
 			source = "分组模板"
 		}
 		if base.TemplateID == 0 {
+			var err error
 			base, err = routingBinding(db, "global", 0)
 			if err != nil {
 				return nil, err
@@ -127,6 +132,29 @@ func (s *RoutingService) Effective(nodeID uint) (*EffectiveRouting, error) {
 		return nil, err
 	}
 	return resolveRouting(repository.DB, nodeID)
+}
+
+// PreviewTemplate resolves a proposed node source without node overrides or any
+// writes. The editor must show the immutable revision, not the template draft or
+// the node's currently overridden policy.
+func (s *RoutingService) PreviewTemplate(nodeID uint, mode string, templateID, revision uint) (*EffectiveRouting, error) {
+	if mode != "inherit" && mode != "template" {
+		return nil, fmt.Errorf("请选择继承或指定模板")
+	}
+	if mode == "inherit" && (templateID != 0 || revision != 0) {
+		return nil, fmt.Errorf("继承来源不能同时指定模板版本")
+	}
+	if mode == "template" && (templateID == 0 || revision == 0) {
+		return nil, fmt.Errorf("请选择已发布模板及版本")
+	}
+	var node entity.Node
+	if err := repository.DB.Select("id").First(&node, nodeID).Error; err != nil {
+		return nil, err
+	}
+	return resolveRoutingBinding(repository.DB, nodeID, entity.RoutingBinding{
+		Scope: "node", TargetID: nodeID, Mode: mode, TemplateID: templateID,
+		Revision: revision, Overrides: "{}", UDP443Policy: "inherit",
+	})
 }
 func (s *RoutingService) SaveTemplate(id, expected uint, name, description, draft, actor string) (*entity.RoutingTemplate, error) {
 	p, err := xray.DecodeRoutingPolicy(draft)

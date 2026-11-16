@@ -41,6 +41,19 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 	}
 	id := func(c *gin.Context) uint { n, _ := strconv.ParseUint(c.Param("id"), 10, 32); return uint(n) }
 	api.GET("/routing-overview", func(c *gin.Context) { v, err := s.Overview(); reply(c, v, err) })
+	api.POST("/nodes/:id/routing/template-preview", func(c *gin.Context) {
+		var req struct {
+			Mode       string `json:"mode"`
+			TemplateID uint   `json:"template_id"`
+			Revision   uint   `json:"revision"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			reply(c, nil, err)
+			return
+		}
+		v, err := s.PreviewTemplate(id(c), req.Mode, req.TemplateID, req.Revision)
+		reply(c, v, err)
+	})
 	api.GET("/routing-templates", func(c *gin.Context) {
 		var rows []entity.RoutingTemplate
 		err := repository.DB.Order("id").Find(&rows).Error
