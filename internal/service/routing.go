@@ -258,10 +258,10 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 		return fmt.Errorf("UDP 443 策略无效")
 	}
 	if b.Mode != "legacy" && b.Mode != "inherit" && b.Mode != "template" {
-		return fmt.Errorf("路由模式无效")
+		return fmt.Errorf("路由来源无效")
 	}
 	if b.Scope != "node" && b.Mode == "legacy" {
-		return fmt.Errorf("legacy 仅适用于节点")
+		return fmt.Errorf("基础路由（不使用模板）仅适用于节点")
 	}
 	if b.Scope == "user" && (b.TemplateID != 0 || b.Mode != "inherit") {
 		return fmt.Errorf("用户仅支持订阅策略")
@@ -270,7 +270,7 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 		return fmt.Errorf("配置路径须为绝对 JSON 文件路径，不允许上级目录或特殊字符")
 	}
 	if b.Mode != "template" && (b.TemplateID != 0 || b.Revision != 0) {
-		return fmt.Errorf("继承或 legacy 模式不能同时指定模板修订")
+		return fmt.Errorf("继承或基础路由不能同时指定模板版本")
 	}
 	if b.Scope == "global" && b.Mode != "template" {
 		return fmt.Errorf("全局默认必须绑定已发布模板")
@@ -287,7 +287,7 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 		return err
 	}
 	if b.Mode == "legacy" && b.Overrides != "{}" {
-		return fmt.Errorf("legacy 模式不接受字段覆盖；请先选择继承或模板")
+		return fmt.Errorf("基础路由不接受节点路由覆盖；请先选择继承或指定模板")
 	}
 	if b.Scope != "node" && b.Overrides != "{}" {
 		return fmt.Errorf("只有节点允许字段覆盖")

@@ -2,7 +2,12 @@ import { useQuery } from '@tanstack/react-query'
 import { Btn, Field, FieldGroup, SelectField } from '@/components/ui/Form'
 import { useAuthStore } from '@/store/auth'
 import { getRevisions } from '@/lib/routing'
-import { bindingMode, readPolicy } from '@/lib/routing-model'
+import {
+  basicRoutingDescription,
+  basicRoutingLabel,
+  bindingMode,
+  readPolicy,
+} from '@/lib/routing-model'
 import type { RoutingBinding, RoutingTemplate } from '@/lib/routing-model'
 
 export const routingControl =
@@ -33,7 +38,7 @@ export function BindingFields({
   return (
     <div className="space-y-4">
       <SelectField
-        label="配置方式"
+        label="路由来源"
         value={value.mode}
         onChange={(mode) => onChange(bindingMode(value, mode as RoutingBinding['mode']))}
         options={[
@@ -46,7 +51,7 @@ export function BindingFields({
               ]
             : []),
           { value: 'template', label: '指定模板及版本' },
-          ...(value.scope === 'node' ? [{ value: 'legacy', label: '保留原有路由' }] : []),
+          ...(value.scope === 'node' ? [{ value: 'legacy', label: basicRoutingLabel }] : []),
         ]}
       />
       <p className="text-xs text-soft">
@@ -54,7 +59,11 @@ export function BindingFields({
           ? '全局默认只影响最终继承到全局的节点；节点指定或分组指定的模板优先。保存后仍需节点同步生效。'
           : value.scope === 'group'
             ? '分组模板仅作用于继承该分组的节点；节点单独指定的模板优先。'
-            : '恢复继承会采用分组或全局策略。想停用域名分流，可指定「系统默认路由」的空规则版本，并将本节点路由覆盖恢复继承；切换模板不会自动清除覆盖。'}
+            : value.mode === 'legacy'
+              ? `${basicRoutingDescription} 保存此来源会清除模板绑定和节点路由覆盖，节点同步后生效。`
+              : value.mode === 'template'
+                ? '为本节点指定模板及固定版本，不继承分组或全局模板。本节点覆盖仍有效，更换模板不会自动清除覆盖；节点同步后生效。'
+                : '优先继承分组指定的模板，分组未指定时采用全局默认；本节点覆盖仍有效。恢复继承仍可能应用分流规则，节点同步后生效。'}
       </p>
       {value.mode === 'template' && (
         <div className="grid gap-4 sm:grid-cols-2">

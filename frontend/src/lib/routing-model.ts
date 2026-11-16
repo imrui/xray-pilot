@@ -26,6 +26,9 @@ export type RoutingRevision = {
   created_at: string
 }
 export type RoutingScope = 'node' | 'group' | 'global' | 'user'
+export const basicRoutingLabel = '基础路由（不使用模板）'
+export const basicRoutingDescription =
+  '按面板基础规则生成配置，保留系统保护和协议规则，普通流量直连；不应用路由模板或节点路由覆盖。'
 export type RoutingBinding = {
   scope: RoutingScope
   target_id: number
@@ -159,7 +162,7 @@ export function routingLabel(node: RoutingNode, templates: RoutingTemplate[]): s
   if (node.error) return node.error
   const routing = node.routing
   if (!routing) return '来源未加载'
-  if (routing.mode === 'legacy') return '保留原有路由'
+  if (routing.mode === 'legacy') return basicRoutingLabel
   const name =
     templates.find((t) => t.id === routing.template_id)?.name ?? `模板 #${routing.template_id}`
   const source =

@@ -399,7 +399,7 @@ test('关闭有修改的路由抽屉需要选择，取消保留输入；预览�
       onPreview={() => {}}
     />,
   )
-  const mode = await screen.findByLabelText('配置方式')
+  const mode = await screen.findByLabelText('路由来源')
   fireEvent.change(mode, { target: { value: 'template' } })
   assert.equal(
     (screen.getByRole('button', { name: '查看完整配置' }) as HTMLButtonElement).disabled,
@@ -412,7 +412,7 @@ test('关闭有修改的路由抽屉需要选择，取消保留输入；预览�
   await waitFor(() =>
     assert.equal(screen.queryByRole('dialog', { name: '放弃未保存的路由修改？' }), null),
   )
-  assert.equal((screen.getByLabelText('配置方式') as HTMLSelectElement).value, 'template')
+  assert.equal((screen.getByLabelText('路由来源') as HTMLSelectElement).value, 'template')
 })
 
 test('同步记录明确区分回退和未知结果，未知任务先核对', async () => {

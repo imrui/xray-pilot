@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Btn } from '@/components/ui/Form'
 import { nodeApi } from '@/lib/api'
-import { routingLabel } from '@/lib/routing-model'
+import { basicRoutingDescription, routingLabel } from '@/lib/routing-model'
 import type { RoutingNode, RoutingTemplate } from '@/lib/routing-model'
 
 export function NodeRoutingPreview({
@@ -32,6 +32,9 @@ export function NodeRoutingPreview({
         </Btn>
       </div>
       <p className="text-sm">{routingLabel(node, templates)}</p>
+      {node.routing?.mode === 'legacy' && (
+        <p className="text-xs text-soft">{basicRoutingDescription}</p>
+      )}
       <p className="text-xs text-soft">
         已保存的期望配置，尚未保存的版本选择不包含在此预览中；实际生效状态以节点同步结果为准。
       </p>

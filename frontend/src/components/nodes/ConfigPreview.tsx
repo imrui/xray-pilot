@@ -5,7 +5,7 @@ import { nodeApi, profileApi } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { pushToast } from '@/lib/notify'
 import { routingGet, useRoutingOverview } from '@/lib/routing'
-import { routingLabel, configConfirmed } from '@/lib/routing-model'
+import { basicRoutingDescription, routingLabel, configConfirmed } from '@/lib/routing-model'
 import type { EffectiveRouting } from '@/lib/routing-model'
 import type { Node, NodeKey, InboundProfile } from '@/types'
 import { Modal } from '@/components/ui/Modal'
@@ -138,6 +138,9 @@ export function PreviewConfigModal({
                       overview.data.templates,
                     )}
                 </p>
+                {source.data.routing.mode === 'legacy' && (
+                  <p className="text-xs text-soft">{basicRoutingDescription}</p>
+                )}
                 {Object.entries(source.data.routing.sources)
                   .filter(([key]) => key !== 'schema_version')
                   .map(([key, value]) => (
