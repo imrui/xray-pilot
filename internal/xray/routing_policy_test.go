@@ -74,12 +74,13 @@ func TestUserDeltaUsesCurrentSnapshotAndKeepsTransportFlow(t *testing.T) {
 func TestActualXrayRoutingFixtures(t *testing.T) {
 	binary := os.Getenv("XRAY_TEST_BINARY")
 	if binary == "" {
-		t.Skip("set XRAY_TEST_BINARY to the 26.3.27 binary")
+		t.Skip("set XRAY_TEST_BINARY to the Xray binary under test")
 	}
 	v, err := exec.Command(binary, "version").CombinedOutput()
-	if err != nil || !strings.Contains(string(v), "26.3.27") {
-		t.Fatalf("baseline binary: %s %v", v, err)
+	if err != nil || !strings.HasPrefix(string(v), "Xray ") {
+		t.Fatalf("test binary: %s %v", v, err)
 	}
+	t.Log(strings.SplitN(string(v), "\n", 2)[0])
 	n := &entity.Node{ID: 1, Name: "fixture", IP: "127.0.0.1"}
 	reality := &entity.InboundProfile{ID: 1, Name: "Reality", Protocol: types.ProtocolVlessReality, Port: 24443, Active: true, Settings: `{"sni":"www.microsoft.com","private_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE","short_ids":["abcd"],"fingerprint":"chrome"}`}
 	keys := []entity.NodeProfileKey{{ProfileID: 1, Profile: reality, Settings: "{}"}}
@@ -91,6 +92,29 @@ func TestActualXrayRoutingFixtures(t *testing.T) {
 	if strings.Contains(base, "fingerprint") {
 		t.Fatal("client fingerprint leaked into server")
 	}
+	check := func(t *testing.T, data string) {
+		t.Helper()
+		// Match the JSON staging files used for remote transactions.
+		path := filepath.Join(t.TempDir(), ".pilot-config.fixture.json")
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(binary, "run", "-test", "-format", "json", "-config", path)
+		cmd.Env = append(os.Environ(), "XRAY_LOCATION_ASSET="+filepath.Dir(binary))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("actual Xray preflight: %s %v", out, err)
+		}
+	}
+	t.Run("basic-reality", func(t *testing.T) { check(t, base) })
+	t.Run("basic-reality-socks", func(t *testing.T) {
+		proxy := &entity.InboundProfile{ID: 2, Name: "SOCKS", Protocol: types.ProtocolSocks, Port: 11080, Active: true, Settings: `{"allowed_ips":["127.0.0.1/32"]}`}
+		both := append(append([]entity.NodeProfileKey{}, keys...), entity.NodeProfileKey{ProfileID: 2, Profile: proxy, Settings: "{}"})
+		raw, warnings, err := GenerateConfig(n, both, users, LogConfig{Level: "none", Access: "none"})
+		if err != nil || len(warnings) != 0 {
+			t.Fatalf("%v %v", err, warnings)
+		}
+		check(t, raw)
+	})
 	for _, tc := range []struct {
 		name string
 		ipv6 bool
@@ -105,16 +129,8 @@ func TestActualXrayRoutingFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Match the extensionless staging files used for remote transactions.
-			path := filepath.Join(t.TempDir(), ".pilot-config."+tc.name)
-			os.WriteFile(path, []byte(data), 0600)
-			cmd := exec.Command(binary, "run", "-test", "-format", "json", "-config", path)
-			cmd.Env = append(os.Environ(), "XRAY_LOCATION_ASSET="+filepath.Dir(binary))
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("actual Xray preflight: %s %v", out, err)
-			}
-			t.Logf("Xray 26.3.27 %s passed", tc.name)
+			check(t, data)
+			t.Logf("Xray %s passed", tc.name)
 		})
 	}
 }

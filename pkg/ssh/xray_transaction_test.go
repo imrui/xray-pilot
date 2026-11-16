@@ -68,9 +68,16 @@ func TestTransactionStopsBeforeReplace(t *testing.T) {
 			}
 			write("xray", `#!/bin/sh
 if [ "$1" = version ]; then echo 'Xray 26.3.27'; exit 0; fi
-# Real Xray cannot infer JSON from the extensionless staging/rollback paths.
+# Newer Xray requires a supported suffix in addition to an explicit format.
 if [ "$1" = run ]; then
  case " $* " in *" -format json "*) ;; *) exit 1 ;; esac
+ while [ "$#" -gt 0 ]; do
+  if [ "$1" = -config ]; then
+   shift
+   case "$1" in *.json) ;; *) echo 'unsupported config file extension'; exit 1 ;; esac
+  fi
+  shift
+ done
 fi
 [ "$PILOT_FAIL" != 1 ]
 `)

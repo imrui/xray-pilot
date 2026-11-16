@@ -217,8 +217,9 @@ test "$actual" = __HASH__ || { echo DRIFT_CONFLICT; exit 20; }
 __CHECK_PATH__
 pid=$(systemctl show xray -p MainPID --value)
 if test "$pid" != 0 && test -e "/proc/$pid/exe"; then binary=$(readlink -f "/proc/$pid/exe"); else binary=$(command -v xray); fi
-tmp=$(mktemp "$dir/.pilot-config.XXXXXX")
-trap 'rm -f "$tmp" "$tmp.probes" "$tmp.rollback"' EXIT
+# Xray 26.11.9 checks the file extension even when -format json is explicit.
+tmp=$(mktemp --suffix=.json "$dir/.pilot-config.XXXXXX")
+trap 'rm -f "$tmp" "$tmp.probes" "$tmp.rollback.json"' EXIT
 IFS= read -r envelope
 printf '%s' "$envelope" > "$tmp"
 unset envelope
@@ -228,7 +229,7 @@ import json,sys,os
 p=sys.argv[1]
 data=json.load(open(p))
 with open(p,"w") as f: json.dump(data.pop("config"),f,ensure_ascii=False,indent=2)
-with open(p+".rollback","x") as f: f.write(data.pop("rollback", ""))
+with open(p+".rollback.json","x") as f: f.write(data.pop("rollback", ""))
 with open(p+".probes","x") as f: json.dump(data,f)
 import socket,ipaddress,urllib.parse
 host=urllib.parse.urlparse(data["probe_url"]).hostname
@@ -242,8 +243,8 @@ test -n "$service_user" || service_user=root
 test -n "$service_group" || service_group=$(id -gn "$service_user")
 chown "$service_user:$service_group" "$tmp"
 chmod 600 "$tmp"
-chown "$service_user:$service_group" "$tmp.rollback"
-chmod 600 "$tmp.rollback"
+chown "$service_user:$service_group" "$tmp.rollback.json"
+chmod 600 "$tmp.rollback.json"
 # Strict policy is enabled only on the baseline whose configuration was verified.
 if grep -q 'ForceIPv' "$tmp"; then
  "$binary" version | head -1 | grep -Eq 'Xray 26\.3\.27([[:space:]]|$)' || { echo VERSION_UNSUPPORTED; exit 22; }
@@ -286,7 +287,7 @@ __RESTART__
 	rollbackPreflight := ""
 	if restart {
 		rollbackPreflight = `command -v curl >/dev/null || { echo PREFLIGHT_FAILED; exit 24; }
- timeout 30 "$binary" run -test -format json -config "$tmp.rollback" >/dev/null 2>&1 || { echo PREFLIGHT_FAILED; exit 24; }`
+ timeout 30 "$binary" run -test -format json -config "$tmp.rollback.json" >/dev/null 2>&1 || { echo PREFLIGHT_FAILED; exit 24; }`
 	}
 	s = strings.ReplaceAll(s, "__ROLLBACK_PREFLIGHT__", rollbackPreflight)
 	apply := "echo PERSISTED"
@@ -331,8 +332,8 @@ __ROLLBACK__
 		rollback := `echo PILOT:ROLLBACK_READY
 IFS= read -r decision || decision=ABORT
 if test "$decision" = COMMIT; then
- rollback_hash=$(sha256sum "$tmp.rollback" | cut -d ' ' -f1)
- mv -f "$tmp.rollback" "$path"
+ rollback_hash=$(sha256sum "$tmp.rollback.json" | cut -d ' ' -f1)
+ mv -f "$tmp.rollback.json" "$path"
  sync -f "$dir"
  if test "$(sha256sum "$path" | cut -d ' ' -f1)" = "$rollback_hash" && systemctl restart xray && systemctl is-active --quiet xray; then
   process=$(systemctl show xray -p MainPID -p ExecMainStartTimestampMonotonic --value)
