@@ -55,6 +55,8 @@ export default function SyncSection() {
       </Section>
 
       <Section title="Xray 运行参数" description="日志输出与用户变更的生效方式，对所有节点生效；节点可单独覆盖日志级别。">
+        <Field label="健康探测 URL" value={form['xray.health_probe_url'] ?? ''} onChange={f('xray.health_probe_url')} placeholder="https://www.gstatic.com/generate_204" />
+        <p className="text-xs text-soft">同步后通过节点代理访问此公开 HTTPS 地址，验证实际连接是否可用。</p>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="访问日志路径（none 表示关闭）" value={form['xray.log_access'] ?? ''} onChange={f('xray.log_access')} placeholder="none" />
           <Field label="错误日志路径（留空使用 stderr）" value={form['xray.log_error'] ?? ''} onChange={f('xray.log_error')} placeholder="/var/log/xray/error.log" />

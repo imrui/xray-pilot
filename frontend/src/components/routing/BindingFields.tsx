@@ -1,0 +1,230 @@
+import { useQuery } from '@tanstack/react-query'
+import { Field, FieldGroup, SelectField } from '@/components/ui/Form'
+import { useAuthStore } from '@/store/auth'
+import { getRevisions } from '@/lib/routing'
+import { bindingMode } from '@/lib/routing-model'
+import type { RoutingBinding, RoutingTemplate } from '@/lib/routing-model'
+
+export const routingControl =
+  'w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]'
+
+export function BindingFields({
+  value,
+  onChange,
+  templates,
+}: {
+  value: RoutingBinding
+  onChange: (b: RoutingBinding) => void
+  templates: RoutingTemplate[]
+}) {
+  const superAdmin = useAuthStore((s) => s.role) === 'super_admin'
+  const revisions = useQuery({
+    queryKey: ['routing-revisions', value.template_id],
+    queryFn: () => getRevisions(value.template_id),
+    enabled: value.mode === 'template' && value.template_id > 0,
+  })
+  const overrides = JSON.parse(value.overrides || '{}') as Record<string, unknown>
+  const override = (key: string, field: unknown) => {
+    const next = { ...overrides }
+    if (field === undefined) delete next[key]
+    else next[key] = field
+    onChange({ ...value, overrides: JSON.stringify(next) })
+  }
+  return (
+    <div className="space-y-4">
+      <SelectField
+        label="配置方式"
+        value={value.mode}
+        onChange={(mode) => onChange(bindingMode(value, mode as RoutingBinding['mode']))}
+        options={[
+          ...(value.scope !== 'global'
+            ? [
+                {
+                  value: 'inherit',
+                  label: value.scope === 'group' ? '继承全局默认' : '继承分组 / 全局默认',
+                },
+              ]
+            : []),
+          { value: 'template', label: '指定模板及版本' },
+          ...(value.scope === 'node' ? [{ value: 'legacy', label: '保留原有路由' }] : []),
+        ]}
+      />
+      {value.mode === 'template' && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SelectField
+            label="路由模板"
+            value={value.template_id}
+            onChange={(id) => onChange({ ...value, template_id: Number(id), revision: 0 })}
+            options={[
+              { value: 0, label: '请选择模板' },
+              ...templates
+                .filter((t) => t.latest_revision > 0)
+                .map((t) => ({ value: t.id, label: t.name })),
+            ]}
+          />
+          <SelectField
+            label="固定版本"
+            value={value.revision}
+            onChange={(revision) => onChange({ ...value, revision: Number(revision) })}
+            options={[
+              { value: 0, label: revisions.isLoading ? '加载版本…' : '请选择版本' },
+              ...(revisions.data ?? []).map((r) => ({
+                value: r.revision,
+                label: `v${r.revision}`,
+              })),
+            ]}
+          />
+          {revisions.error && (
+            <p role="alert" className="text-sm text-[var(--danger)]">
+              版本加载失败。<button onClick={() => void revisions.refetch()}>重试</button>
+            </p>
+          )}
+          {!!value.revision && (revisions.data?.[0]?.revision ?? 0) > value.revision && (
+            <p className="text-xs text-soft">
+              有 v{revisions.data![0].revision} 可用，当前仍使用 v{value.revision}。
+            </p>
+          )}
+        </div>
+      )}
+      {value.scope === 'node' && value.mode !== 'legacy' && (
+        <FieldGroup
+          title="本节点覆盖"
+          description="未覆盖的字段继续继承模板。清空列表和恢复继承是不同操作。"
+        >
+          <SelectField
+            label="IPv6 出站"
+            value={
+              overrides.enable_ipv6_outbound == null
+                ? 'inherit'
+                : String(overrides.enable_ipv6_outbound)
+            }
+            onChange={(v) =>
+              override('enable_ipv6_outbound', v === 'inherit' ? undefined : v === 'true')
+            }
+            options={[
+              { value: 'inherit', label: '继承模板' },
+              { value: 'false', label: '关闭：域名使用 IPv4' },
+              { value: 'true', label: '开启：严格 IPv6，不自动回退' },
+            ]}
+          />
+          {(['ipv4_force_domains', 'ipv6_force_domains'] as const).map((key, index) => (
+            <div key={key} className="space-y-2">
+              <SelectField
+                label={`${index ? 'IPv6' : 'IPv4'} 域名`}
+                value={overrides[key] == null ? 'inherit' : 'override'}
+                onChange={(v) => override(key, v === 'inherit' ? undefined : [])}
+                options={[
+                  { value: 'inherit', label: '继承模板列表' },
+                  { value: 'override', label: '本节点自定义（留空表示清空）' },
+                ]}
+              />
+              {overrides[key] != null && (
+                <textarea
+                  aria-label={`${index ? 'IPv6' : 'IPv4'} 覆盖域名`}
+                  rows={4}
+                  className={routingControl}
+                  value={(overrides[key] as string[]).join('\n')}
+                  onChange={(e) => override(key, e.target.value.split('\n'))}
+                />
+              )}
+            </div>
+          ))}
+          {superAdmin && (
+            <details>
+              <summary className="cursor-pointer text-sm">高级自定义规则</summary>
+              <RulesOverride
+                value={overrides.custom_rules}
+                onChange={(v) => override('custom_rules', v)}
+              />
+            </details>
+          )}
+        </FieldGroup>
+      )}
+      {value.scope === 'node' && (
+        <details>
+          <summary className="cursor-pointer text-sm">高级设置</summary>
+          <div className="mt-3 space-y-4">
+            <UDPPolicy
+              value={value.udp443_policy}
+              onChange={(udp443_policy) => onChange({ ...value, udp443_policy })}
+            />
+            {superAdmin && (
+              <Field
+                label="Xray 配置路径（留空使用默认）"
+                value={value.config_path ?? ''}
+                placeholder="/usr/local/etc/xray/config.json"
+                onChange={(e) => onChange({ ...value, config_path: e.target.value })}
+              />
+            )}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+import { useState } from 'react'
+import { parseRules } from '@/lib/routing-model'
+function RulesOverride({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+  const [raw, setRaw] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  return (
+    <div className="mt-3 space-y-2">
+      <SelectField
+        label="自定义规则"
+        value={value == null ? 'inherit' : 'override'}
+        onChange={(v) => {
+          setRaw(null)
+          setError('')
+          onChange(v === 'inherit' ? undefined : [])
+        }}
+        options={[
+          { value: 'inherit', label: '继承模板' },
+          { value: 'override', label: '本节点覆盖' },
+        ]}
+      />
+      {value != null && (
+        <textarea
+          aria-label="自定义规则 JSON"
+          rows={6}
+          className={routingControl + ' font-mono'}
+          value={raw ?? JSON.stringify(value, null, 2)}
+          onChange={(e) => {
+            setRaw(e.target.value)
+            try {
+              onChange(parseRules(e.target.value))
+              setError('')
+            } catch (error) {
+              onChange(e.target.value)
+              setError((error as Error).message)
+            }
+          }}
+        />
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-[var(--danger)]">
+          {error}（请修正后再保存）
+        </p>
+      )}
+    </div>
+  )
+}
+export function UDPPolicy({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <SelectField
+        label="客户端 UDP 443 策略"
+        value={value}
+        onChange={onChange}
+        options={[
+          { value: 'inherit', label: '继承（全局默认为阻止）' },
+          { value: 'block', label: '阻止 UDP 443' },
+          { value: 'allow', label: '允许 UDP 443' },
+        ]}
+      />
+      <p className="text-xs text-soft">
+        订阅策略优先级：用户 → 节点 → 全局。允许时，Clash / sing-box 会排除不兼容的 Vision 条目。
+      </p>
+    </div>
+  )
+}

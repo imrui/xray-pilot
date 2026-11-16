@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, Lock, PencilLine, Plus, Sparkles } from 'lucide-react'
 import { nodeApi, profileApi } from '@/lib/api'
@@ -12,7 +12,9 @@ import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
-import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { useConfirm } from '@/lib/confirm-context'
+import { useRoutingOverview, invalidateRouting } from '@/lib/routing'
+import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -73,6 +75,8 @@ const emptyForm = (): FormState => ({
 
 
 function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose: () => void }) {
+  const routing = useRoutingOverview()
+  const confirm = useConfirm()
   const [activeNodeId, setActiveNodeId] = useState<number | null>(null)
   const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([])
   const [loadedByNode, setLoadedByNode] = useState<Record<number, { settings: string; port: number }>>({})
@@ -110,24 +114,18 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     enabled: (nodes?.length ?? 0) > 0,
   })
 
-  // 切换激活节点时，自动加载草稿/已存值
-  useEffect(() => {
-    if (!activeNodeId || !keysByNode) return
-    if (loadedByNode[activeNodeId] !== undefined) return
-    const k = keysByNode[activeNodeId]
-    const next = {
-      settings: k ? stringifySettings(k.settings) : '',
-      port: k?.port ?? 0,
-    }
-    setLoadedByNode((prev) => ({ ...prev, [activeNodeId]: next }))
-  }, [activeNodeId, keysByNode, loadedByNode])
+  const loadedForNode = (id: number) => {
+    if (loadedByNode[id]) return loadedByNode[id]
+    const key = keysByNode?.[id]
+    return { settings: key ? stringifySettings(key.settings) : '', port: key?.port ?? 0 }
+  }
 
-  const activeDraft = activeNodeId !== null ? (draftByNode[activeNodeId] ?? loadedByNode[activeNodeId]) : undefined
+  const activeDraft = activeNodeId !== null ? (draftByNode[activeNodeId] ?? loadedForNode(activeNodeId)) : undefined
   const activeKey = activeNodeId !== null && keysByNode ? keysByNode[activeNodeId] : null
   const activeLocked = activeKey?.locked ?? false
 
   const updateDraft = (nodeId: number, patch: Partial<{ settings: string; port: number }>) => {
-    const base = draftByNode[nodeId] ?? loadedByNode[nodeId] ?? { settings: '', port: 0 }
+    const base = draftByNode[nodeId] ?? loadedForNode(nodeId) ?? { settings: '', port: 0 }
     setDraftByNode((prev) => ({ ...prev, [nodeId]: { ...base, ...patch } }))
   }
 
@@ -135,12 +133,14 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     .map(Number)
     .filter((id) => {
       const d = draftByNode[id]
-      const l = loadedByNode[id]
+      const l = loadedForNode(id)
       return !l || d.settings !== l.settings || d.port !== l.port
     })
 
   const toggleNodeSelect = (id: number) => {
-    setSelectedNodeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+    const next = selectedNodeIds.includes(id) ? selectedNodeIds.filter(x => x !== id) : [...selectedNodeIds, id]
+    setSelectedNodeIds(next)
+    if (next.length === 1) setActiveNodeId(next[0])
   }
 
   // 批量保存：对选中节点逐个 upsert，逐个反馈成功/失败
@@ -150,7 +150,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
       if (targets.length === 0) throw new Error('请先选择目标节点')
       const results: Array<{ id: number; ok: boolean; msg: string }> = []
       for (const id of targets) {
-        const draft = draftByNode[id] ?? loadedByNode[id]
+        const draft = draftByNode[id] ?? loadedForNode(id)
         if (!draft || !draft.settings) {
           results.push({ id, ok: false, msg: '密钥参数为空' })
           continue
@@ -169,7 +169,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
       const failed = results.length - ok
       // 成功节点：把草稿落地为 loaded，清掉草稿
       results.filter((r) => r.ok).forEach((r) => {
-        const d = draftByNode[r.id] ?? loadedByNode[r.id]
+        const d = draftByNode[r.id] ?? loadedForNode(r.id)
         if (d) {
           setLoadedByNode((prev) => ({ ...prev, [r.id]: d }))
           setDraftByNode((prev) => {
@@ -183,6 +183,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
       setMsgType(failed === 0 ? 'ok' : 'err')
       qc.invalidateQueries({ queryKey: ['nodes'] })
       qc.invalidateQueries({ queryKey: ['node-keys-overview'] })
+      void invalidateRouting(qc)
     },
     onError: (e: Error) => {
       setMsg(`保存失败: ${e.message}`)
@@ -212,7 +213,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
     onSuccess: (generated) => {
       Object.entries(generated).forEach(([idStr, settings]) => {
         const id = Number(idStr)
-        const cur = draftByNode[id] ?? loadedByNode[id] ?? { settings: '', port: 0 }
+        const cur = draftByNode[id] ?? loadedForNode(id) ?? { settings: '', port: 0 }
         setDraftByNode((prev) => ({ ...prev, [id]: { ...cur, settings } }))
       })
       setMsg(`已为 ${Object.keys(generated).length} 个节点生成密钥草稿，记得保存`)
@@ -255,20 +256,25 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
 
   const targetsCount = selectedNodeIds.length > 0 ? selectedNodeIds : activeNodeId !== null ? [activeNodeId] : []
   const saveLabel = selectedNodeIds.length > 1 ? `批量保存 (${selectedNodeIds.length})` : '保存密钥'
+  const busy = batchSave.isPending || batchKeygen.isPending || lockToggle.isPending
+  const canClose = async () => dirtyNodeIds.length === 0 || await confirm({ title: '放弃未保存的协议修改？', description: '密钥和端口草稿尚未保存。', confirmText: '放弃修改', cancelText: '继续编辑', tone: 'danger' })
 
   return (
     <Drawer
       open
       onClose={onClose}
       title={`配置节点密钥 · ${profile.name}`}
-      description="左侧选择/多选目标节点；右侧编辑参数与端口。支持批量生成与批量保存。"
+      dirty={dirtyNodeIds.length > 0}
+      saving={busy}
+      onBeforeClose={canClose}
+      description={<>左侧选择节点，右侧编辑参数与端口。{routing.data?.auto_sync ? '保存后变化节点将自动同步。' : '保存后请回节点列表预览和同步。'}</>}
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>关闭</Btn>
+          <Btn variant="secondary" disabled={busy} onClick={() => void canClose().then(ok => { if (ok) onClose() })}>关闭</Btn>
           <Btn
             loading={batchSave.isPending}
             onClick={() => batchSave.mutate()}
-            disabled={targetsCount.length === 0 || (selectedNodeIds.length === 0 && activeLocked)}
+            disabled={targetsCount.length === 0 || (selectedNodeIds.length <= 1 && activeLocked)}
           >
             {saveLabel}
           </Btn>
@@ -320,7 +326,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                     className="h-4 w-4 shrink-0 rounded border-[var(--border-strong)]"
                     aria-label={`选择 ${n.name}`}
                   />
-                  <button type="button" onClick={() => setActiveNodeId(n.id)} className="flex min-w-0 flex-1 flex-col text-left">
+                  <button type="button" onClick={() => { setActiveNodeId(n.id); setSelectedNodeIds([]) }} className="flex min-w-0 flex-1 flex-col text-left">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate font-medium">{n.name}</span>
                       {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" title="未保存" />}
@@ -363,14 +369,14 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                       variant="secondary"
                       loading={batchKeygen.isPending}
                       onClick={() => batchKeygen.mutate()}
-                      disabled={targetsCount.length === 0 || (selectedNodeIds.length === 0 && activeLocked)}
+                      disabled={targetsCount.length === 0 || (selectedNodeIds.length <= 1 && activeLocked)}
                     >
                       <Sparkles className="h-4 w-4" />
                       {selectedNodeIds.length > 1 ? `批量生成 (${selectedNodeIds.length})` : '一键生成'}
                     </Btn>
                   )}
-                  <Btn variant="secondary" onClick={fillTemplate} disabled={targetsCount.length === 0 || (selectedNodeIds.length === 0 && activeLocked)}>填充模板</Btn>
-                  {selectedNodeIds.length === 0 && activeKey && (
+                  <Btn variant="secondary" onClick={fillTemplate} disabled={targetsCount.length === 0 || (selectedNodeIds.length <= 1 && activeLocked)}>填充模板</Btn>
+                  {selectedNodeIds.length <= 1 && activeKey && (
                     <Btn
                       variant="secondary"
                       loading={lockToggle.isPending}
@@ -382,7 +388,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                 </div>
               </FieldGroup>
 
-              {selectedNodeIds.length === 0 && activeDraft && (
+              {selectedNodeIds.length <= 1 && activeDraft && (
                 <FieldGroup title="参数与端口" description="保存空对象 `{}` 表示继承协议默认参数；端口填 0 表示继承协议模板端口。">
                   <Field
                     label={`监听端口（留空继承模板 ${profile.port}）`}
@@ -408,7 +414,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
                   <div className="space-y-2">
                     {selectedNodeIds.map((id) => {
                       const node = sortedNodes.find((n) => n.id === id)
-                      const draft = draftByNode[id] ?? loadedByNode[id]
+                      const draft = draftByNode[id] ?? loadedForNode(id)
                       const hasDraft = !!draftByNode[id]
                       return (
                         <div key={id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-xs">
@@ -444,6 +450,7 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
 }
 
 export default function Profiles() {
+  const routing = useRoutingOverview()
   const confirm = useConfirm()
   const qc = useQueryClient()
   const [page, setPage] = useState(1)
@@ -510,6 +517,8 @@ export default function Profiles() {
     },
     onSuccess: () => {
       invalidate()
+      void invalidateRouting(qc)
+      pushToast({ title: '协议配置已保存', description: routing.data?.auto_sync ? '相关节点将按系统设置自动同步，可在节点列表查看结果。' : '请在节点列表预览完整配置并同步。', variant: 'success' })
       closeDrawer()
     },
     onError: (e: Error) => setErr(e.message),

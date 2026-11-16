@@ -10,11 +10,14 @@ import { Field, Btn, FieldGroup, Switch } from '@/components/ui/Form'
 import { QRModal } from '@/components/ui/QRModal'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
+import { BindingEditor } from '@/components/routing/BindingEditor'
 import { ActionMenu } from '@/components/ui/ActionMenu'
-import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { useConfirm } from '@/lib/confirm-context'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { pushToast } from '@/lib/notify'
 import { copyText } from '@/lib/clipboard'
+
+const isExpired = (u: User) => (u.expires_at ? new Date(u.expires_at) < new Date() : false)
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -314,10 +317,6 @@ function ExpiryDateTimeField({
   const dateInputRef = useRef<HTMLInputElement | null>(null)
   const timeInputRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => {
-    if (!open) setDraftValue(value)
-  }, [open, value])
-
   const originalValue = value
   const currentDisplay = formatDateTimeLocalDisplay(value)
   const currentExpired = isLocalDateTimeExpired(value)
@@ -336,7 +335,7 @@ function ExpiryDateTimeField({
     <div className="flex flex-col space-y-1.5">
       <label className="text-[12px] font-medium text-soft">{label}</label>
 
-      <DropdownMenu.Root modal={false} open={open} onOpenChange={setOpen}>
+      <DropdownMenu.Root modal={false} open={open} onOpenChange={next => { if (next) setDraftValue(value); setOpen(next) }}>
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
@@ -477,6 +476,8 @@ export default function Users() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [drawer, setDrawer] = useState<{ open: boolean; user?: User }>({ open: false })
+  const [routingDirty, setRoutingDirty] = useState(false)
+  const [routingBusy, setRoutingBusy] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm())
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm())
   const [err, setErr] = useState('')
@@ -590,6 +591,7 @@ export default function Users() {
   })
 
   const openCreate = () => {
+    setRoutingDirty(false)
     const next = emptyForm()
     setForm(next)
     setInitialForm(next)
@@ -599,6 +601,7 @@ export default function Users() {
   }
 
   const openEdit = (u: User) => {
+    setRoutingDirty(false)
     const next = {
       username: u.username,
       real_name: u.real_name,
@@ -620,7 +623,7 @@ export default function Users() {
 
   const closeDrawer = () => setDrawer({ open: false })
   const confirmCloseDrawer = async () => {
-    if (!dirty) return true
+    if (!dirty && !routingDirty) return true
     return confirm({
       title: '放弃未保存的用户修改？',
       description: '你在当前抽屉里还有未保存内容，关闭后这些修改会丢失。',
@@ -632,8 +635,6 @@ export default function Users() {
 
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [k]: e.target.value }))
-
-  const isExpired = (u: User) => (u.expires_at ? new Date(u.expires_at) < new Date() : false)
 
   const filteredUsers = useMemo(() => {
     return (data?.list ?? []).filter((u) => {
@@ -1053,13 +1054,13 @@ export default function Users() {
         onClose={closeDrawer}
         title={drawer.user ? `编辑用户 · ${drawer.user.username}` : '新增用户'}
         description={drawer.user ? '调整分组、有效期和订阅信息。' : '快速创建新的订阅用户。'}
-        dirty={dirty}
-        saving={save.isPending}
+        dirty={dirty || routingDirty}
+        saving={save.isPending || routingBusy}
         onBeforeClose={confirmCloseDrawer}
         footer={
           <>
-            <Btn variant="secondary" onClick={closeDrawer}>取消</Btn>
-            <Btn loading={save.isPending} onClick={() => save.mutate()}>保存</Btn>
+            <Btn variant="secondary" disabled={routingBusy} onClick={() => void confirmCloseDrawer().then(ok => { if (ok) closeDrawer() })}>取消</Btn>
+            <Btn loading={save.isPending} disabled={routingDirty || routingBusy} title={routingDirty ? '请先保存或放弃订阅策略修改' : undefined} onClick={() => save.mutate()}>保存用户</Btn>
           </>
         }
       >
@@ -1086,6 +1087,8 @@ export default function Users() {
             />
             <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="可选备注" />
           </FieldGroup>
+
+          {drawer.user && <FieldGroup title="客户端 UDP 443" description="此策略独立保存，不修改节点的路由模板。"><BindingEditor key={drawer.user.id} scope="user" id={drawer.user.id} subscriptionOnly onDirtyChange={setRoutingDirty} onBusyChange={setRoutingBusy} /></FieldGroup>}
 
           <FieldGroup title="飞书消息" description="可选能力。关闭后不发送飞书消息，但绑定信息会保留。">
             <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2.5">

@@ -434,13 +434,3 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
     </Modal>
   )
 }
-
-// PrecheckHook 由父组件调用以在打开对话框前确认 panel 已配 SSH 密钥。
-// 调用 install create 时后端会再校验一次；这里只做提前提示，避免管理员填完表单才发现。
-export function notifyPanelSSHMissing(message: string) {
-  pushToast({
-    title: '一键接入不可用',
-    description: message,
-    variant: 'warning',
-  })
-}

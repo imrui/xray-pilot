@@ -1,22 +1,12 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, useRef, type ReactNode } from 'react'
 import { AlertTriangle, ShieldAlert } from 'lucide-react'
 import { Btn } from '@/components/ui/Form'
+import * as Dialog from '@radix-ui/react-dialog'
 
-type ConfirmTone = 'default' | 'danger'
-
-interface ConfirmOptions {
-  title: string
-  description?: string
-  confirmText?: string
-  cancelText?: string
-  tone?: ConfirmTone
-}
-
-type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>
-
-const ConfirmContext = createContext<ConfirmFn | null>(null)
+import { ConfirmContext, type ConfirmOptions, type ConfirmFn } from '@/lib/confirm-context'
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const returnFocus = useRef<HTMLElement | null>(null)
   const [state, setState] = useState<(ConfirmOptions & { open: boolean }) | null>(null)
   const [resolver, setResolver] = useState<((value: boolean) => void) | null>(null)
 
@@ -39,17 +29,17 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     <ConfirmContext.Provider value={value}>
       {children}
       {state?.open && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-[var(--overlay)] backdrop-blur-sm" onClick={() => close(false)} />
-          <div className="panel-strong relative w-full max-w-md overflow-hidden rounded-[28px]">
+        <Dialog.Root open onOpenChange={open => { if (!open) close(false) }}><Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-[70] bg-[var(--overlay)] backdrop-blur-sm" />
+          <Dialog.Content {...(!state.description ? { 'aria-describedby': undefined } : {})} onOpenAutoFocus={() => { returnFocus.current = document.activeElement as HTMLElement }} onCloseAutoFocus={event => { event.preventDefault(); returnFocus.current?.focus() }} className="panel-strong fixed left-1/2 top-1/2 z-[70] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[28px] outline-none">
             <div className="border-b border-[var(--border)] px-6 py-5">
               <div className="flex items-start gap-4">
                 <div className={`mt-0.5 flex h-11 w-11 items-center justify-center rounded-2xl ${state.tone === 'danger' ? 'bg-[var(--danger-soft)] text-[var(--danger)]' : 'bg-[var(--warning-soft)] text-[var(--warning)]'}`}>
                   {state.tone === 'danger' ? <ShieldAlert className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold tracking-[-0.03em]">{state.title}</h3>
-                  {state.description && <p className="mt-1.5 text-sm leading-6 text-soft">{state.description}</p>}
+                  <Dialog.Title className="text-lg font-semibold tracking-[-0.03em]">{state.title}</Dialog.Title>
+                  {state.description && <Dialog.Description className="mt-1.5 text-sm leading-6 text-soft">{state.description}</Dialog.Description>}
                 </div>
               </div>
             </div>
@@ -59,17 +49,9 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 {state.confirmText ?? '确认'}
               </Btn>
             </div>
-          </div>
-        </div>
+          </Dialog.Content>
+        </Dialog.Portal></Dialog.Root>
       )}
     </ConfirmContext.Provider>
   )
-}
-
-export function useConfirm() {
-  const context = useContext(ConfirmContext)
-  if (!context) {
-    throw new Error('useConfirm must be used within ConfirmProvider')
-  }
-  return context
 }

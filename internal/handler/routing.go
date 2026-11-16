@@ -27,6 +27,7 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 		c.Next()
 	})
 	s := service.NewRoutingService()
+	api.GET("/node-sync-logs", listNodeSyncLogs)
 	reply := func(c *gin.Context, v any, err error) {
 		if err != nil {
 			if errors.Is(err, service.ErrRoutingConflict) {
@@ -39,6 +40,7 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 		response.Success(c, v)
 	}
 	id := func(c *gin.Context) uint { n, _ := strconv.ParseUint(c.Param("id"), 10, 32); return uint(n) }
+	api.GET("/routing-overview", func(c *gin.Context) { v, err := s.Overview(); reply(c, v, err) })
 	api.GET("/routing-templates", func(c *gin.Context) {
 		var rows []entity.RoutingTemplate
 		err := repository.DB.Order("id").Find(&rows).Error
@@ -89,6 +91,16 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 	api.DELETE("/routing-templates/:id", RequireSuperAdmin(), func(c *gin.Context) { reply(c, nil, s.DeleteTemplate(id(c))) })
 	for path, scope := range map[string]string{"/nodes/:id/routing": "node", "/groups/:id/routing": "group", "/users/:id/routing": "user", "/settings/routing-default": "global"} {
 		scope := scope
+		api.POST(path+"/preview", func(c *gin.Context) {
+			var b entity.RoutingBinding
+			if err := c.ShouldBindJSON(&b); err != nil {
+				reply(c, nil, err)
+				return
+			}
+			b.Scope, b.TargetID = scope, id(c)
+			v, err := s.PreviewBinding(b, c.GetString(ctxRole) == entity.RoleSuperAdmin)
+			reply(c, v, err)
+		})
 		api.GET(path, func(c *gin.Context) { v, err := s.Binding(scope, id(c)); reply(c, v, err) })
 		api.PUT(path, func(c *gin.Context) {
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 300*1024)
@@ -156,8 +168,35 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 	})
 	api.GET("/config-deployments", func(c *gin.Context) {
 		var rows []entity.ConfigDeployment
-		err := repository.DB.Order("id DESC").Limit(100).Find(&rows).Error
-		reply(c, rows, err)
+		q := repository.DB.Model(&entity.ConfigDeployment{})
+		if raw := c.Query("node_id"); raw != "" {
+			n, err := strconv.ParseUint(raw, 10, 32)
+			if err != nil || n == 0 {
+				reply(c, nil, fmt.Errorf("无效节点 ID"))
+				return
+			}
+			q = q.Where("node_id = ?", n)
+		}
+		if c.Query("page") == "" {
+			err := q.Order("id DESC").Limit(100).Find(&rows).Error
+			reply(c, rows, err)
+			return
+		}
+		page, _ := strconv.Atoi(c.Query("page"))
+		if page < 1 {
+			page = 1
+		}
+		size, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+		if size < 1 || size > 100 {
+			size = 20
+		}
+		var total int64
+		if err := q.Count(&total).Error; err != nil {
+			reply(c, nil, err)
+			return
+		}
+		err := q.Order("id DESC").Offset((page - 1) * size).Limit(size).Find(&rows).Error
+		reply(c, gin.H{"list": rows, "total": total}, err)
 	})
 	api.GET("/config-deployments/:id", func(c *gin.Context) {
 		var row entity.ConfigDeployment

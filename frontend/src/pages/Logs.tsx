@@ -7,7 +7,7 @@ import { Table, Pagination } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
 import { Btn } from '@/components/ui/Form'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
-import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { useConfirm } from '@/lib/confirm-context'
 import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 20

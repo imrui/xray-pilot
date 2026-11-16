@@ -10,8 +10,9 @@ import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
-import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { useConfirm } from '@/lib/confirm-context'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { BindingEditor } from '@/components/routing/BindingEditor'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -53,6 +54,8 @@ export default function Groups() {
   const [form, setForm] = useState<FormState>(emptyForm())
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm())
   const [err, setErr] = useState('')
+  const [routingDirty, setRoutingDirty] = useState(false)
+  const [routingBusy, setRoutingBusy] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
@@ -88,6 +91,7 @@ export default function Groups() {
   })
 
   const openCreate = () => {
+    setRoutingDirty(false)
     const next = emptyForm()
     setForm(next)
     setInitialForm(next)
@@ -96,6 +100,7 @@ export default function Groups() {
   }
 
   const openEdit = (g: Group) => {
+    setRoutingDirty(false)
     const next = { name: g.name, description: g.description, node_ids: g.node_ids ?? [] }
     setForm(next)
     setInitialForm(next)
@@ -105,10 +110,10 @@ export default function Groups() {
 
   const closeDrawer = () => setDrawer({ open: false })
   const confirmCloseDrawer = async () => {
-    if (!dirty) return true
+    if (!dirty && !routingDirty) return true
     return confirm({
       title: '放弃未保存的分组修改？',
-      description: '关闭后，当前分组名称和节点关联更改将不会保存。',
+      description: '关闭后，未保存的分组信息、成员和路由修改将丢失。',
       confirmText: '放弃修改',
       cancelText: '继续编辑',
       tone: 'danger',
@@ -349,13 +354,13 @@ export default function Groups() {
         onClose={closeDrawer}
         title={drawer.group ? `编辑分组 · ${drawer.group.name}` : '新增分组'}
         description="在右侧集中维护分组名称、说明和节点关联关系。"
-        dirty={dirty}
-        saving={save.isPending}
+        dirty={dirty || routingDirty}
+        saving={save.isPending || routingBusy}
         onBeforeClose={confirmCloseDrawer}
         footer={
           <>
-            <Btn variant="secondary" onClick={closeDrawer}>取消</Btn>
-            <Btn loading={save.isPending} onClick={() => save.mutate()}>保存</Btn>
+            <Btn variant="secondary" disabled={routingBusy} onClick={() => void confirmCloseDrawer().then(ok => { if (ok) closeDrawer() })}>取消</Btn>
+            <Btn loading={save.isPending} disabled={routingDirty || routingBusy} title={routingDirty ? '请先保存或放弃路由修改' : undefined} onClick={() => save.mutate()}>保存分组</Btn>
           </>
         }
       >
@@ -365,6 +370,7 @@ export default function Groups() {
             <Field label="描述" value={form.description} onChange={f('description')} placeholder="例如：高优先级节点池 / 海外节点池" />
           </FieldGroup>
 
+          {drawer.group && <FieldGroup title="路由策略" description="继承全局默认或为该分组指定固定模板版本。"><BindingEditor key={drawer.group.id} scope="group" id={drawer.group.id} onDirtyChange={setRoutingDirty} onBusyChange={setRoutingBusy} /></FieldGroup>}
           <FieldGroup title="关联节点" description={`已选择 ${form.node_ids.length} 个节点，可直接在列表里切换。`}>
             {(allNodes ?? []).length === 0 ? (
               <p className="text-xs text-soft">暂无节点，请先添加节点。</p>

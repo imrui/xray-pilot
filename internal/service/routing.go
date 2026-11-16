@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -218,6 +219,20 @@ func effectiveKey(e *EffectiveRouting, err error) string {
 	return string(b)
 }
 func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, actor string, super bool, reports ...*BindingImpact) error {
+	return s.saveBinding(b, expected, actor, super, false, reports...)
+}
+
+// PreviewBinding runs the same validation and inheritance calculation in a
+// rolled-back transaction. No binding, outbox, status or audit write is committed.
+func (s *RoutingService) PreviewBinding(b entity.RoutingBinding, super bool) (BindingImpact, error) {
+	var impact BindingImpact
+	err := s.saveBinding(b, b.Version, "", super, true, &impact)
+	return impact, err
+}
+
+var errBindingPreview = errors.New("binding preview rollback")
+
+func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, actor string, super, preview bool, reports ...*BindingImpact) error {
 	impact := BindingImpact{Changed: []uint{}, Conflicts: map[uint]string{}}
 	if len(reports) > 0 {
 		defer func() { *reports[0] = impact }()
@@ -273,7 +288,7 @@ func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, act
 	if b.Scope != "node" && b.Overrides != "{}" {
 		return fmt.Errorf("只有节点允许字段覆盖")
 	}
-	return repository.DB.Transaction(func(tx *gorm.DB) error {
+	err := repository.DB.Transaction(func(tx *gorm.DB) error {
 		if b.Scope != "global" {
 			table := map[string]string{"node": "nodes", "group": "groups", "user": "users"}[b.Scope]
 			var n int64
@@ -300,7 +315,10 @@ func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, act
 			if json.Unmarshal([]byte(b.Overrides), &next) != nil {
 				return fmt.Errorf("覆盖必须是 JSON 对象")
 			}
-			if string(prev["custom_rules"]) != string(next["custom_rules"]) {
+			var previousRules, nextRules any
+			_ = json.Unmarshal(prev["custom_rules"], &previousRules)
+			_ = json.Unmarshal(next["custom_rules"], &nextRules)
+			if !reflect.DeepEqual(previousRules, nextRules) {
 				return fmt.Errorf("高级规则仅超级管理员可修改")
 			}
 		}
@@ -369,8 +387,15 @@ func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, act
 			}
 		}
 
+		if preview {
+			return errBindingPreview
+		}
 		return tx.Create(&entity.SyncLog{Actor: actor, Action: "routing_binding", Target: fmt.Sprintf("%s:%d", b.Scope, b.TargetID), Success: true, Message: fmt.Sprintf("绑定版本 %d", b.Version)}).Error
 	})
+	if preview && errors.Is(err, errBindingPreview) {
+		return nil
+	}
+	return err
 }
 func (s *RoutingService) UDP443Policy(node, user uint) string {
 	for _, pair := range []struct {

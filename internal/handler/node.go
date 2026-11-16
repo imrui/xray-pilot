@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
@@ -54,6 +55,22 @@ func (h *NodeHandler) List(c *gin.Context) {
 		Region:     c.Query("region"),
 		Owner:      c.Query("owner"),
 		Health:     c.Query("health"),
+	}
+	if raw, ok := c.GetQuery("ids"); ok {
+		parts := strings.Split(raw, ",")
+		if len(parts) > 1000 {
+			response.BadRequest(c, "节点筛选数量不能超过 1000")
+			return
+		}
+		filter.IDs = []uint{}
+		for _, part := range parts {
+			n, err := strconv.ParseUint(part, 10, 32)
+			if err != nil || n == 0 {
+				response.BadRequest(c, "无效节点筛选")
+				return
+			}
+			filter.IDs = append(filter.IDs, uint(n))
+		}
 	}
 	nodes, total, err := h.svc.List(page, pageSize, filter)
 	if err != nil {
