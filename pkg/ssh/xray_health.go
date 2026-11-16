@@ -124,7 +124,7 @@ for probe in probes:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1",0)); port=sock.getsockname()[1]
     probe["inbounds"]=[{"listen":"127.0.0.1","port":port,"protocol":"socks","settings":{"auth":"noauth"}}]
-    fd,path=tempfile.mkstemp(prefix=".pilot-probe.",dir=os.path.dirname(sys.argv[1]))
+    fd,path=tempfile.mkstemp(prefix=".pilot-probe.",suffix=".json",dir=os.path.dirname(sys.argv[1]))
     child=None
     try:
         with os.fdopen(fd,"w") as f: json.dump(probe,f)

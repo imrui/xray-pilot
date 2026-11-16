@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Run the actual probe client with an extensionless temporary config. Only the
+// Run the actual probe client with the production temporary config path. Only the
 // public HTTP request is replaced, so this also catches Xray CLI format errors.
 func TestActualProbeClientBoundedRetry(t *testing.T) {
 	binary := os.Getenv("XRAY_TEST_BINARY")

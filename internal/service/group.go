@@ -29,16 +29,19 @@ func (s *GroupService) Create(req *dto.CreateGroupRequest) (*dto.GroupResponse, 
 		Description: req.Description,
 		Active:      true,
 	}
-	if err := s.groupRepo.Create(group); err != nil {
-		return nil, fmt.Errorf("创建分组失败: %w", err)
-	}
 	if len(req.NodeIDs) > 0 {
 		nodes, err := s.nodeRepo.FindByIDs(req.NodeIDs)
-		if err == nil {
-			_ = s.groupRepo.ReplaceNodes(group, nodes)
-			// 新关联的节点需要同步新分组的用户配置
-			_ = s.nodeRepo.BatchUpdateSyncStatus(req.NodeIDs, entity.SyncStatusDrifted)
+		if err != nil {
+			return nil, err
 		}
+		if len(nodes) != len(unionUintSlices(nil, req.NodeIDs)) {
+			return nil, errors.New("选择的节点不存在，请刷新后重试")
+		}
+		group.Nodes = nodes
+	}
+	// A new group has neither users nor a routing binding; no node configuration changes yet.
+	if err := s.groupRepo.Create(group); err != nil {
+		return nil, fmt.Errorf("创建分组失败: %w", err)
 	}
 	return s.toResponse(group), nil
 }
@@ -58,24 +61,12 @@ func (s *GroupService) UpdateGroup(id uint, req *dto.UpdateGroupRequest) (*dto.G
 	if req.Active != nil {
 		group.Active = *req.Active
 	}
-	if err := s.groupRepo.Update(group); err != nil {
+	if err := s.groupRepo.Update(group, req.NodeIDs); err != nil {
 		return nil, err
 	}
-	if req.NodeIDs != nil {
-		// 记录变更前的旧节点 ID
-		oldIDs := make([]uint, 0, len(group.Nodes))
-		for _, n := range group.Nodes {
-			oldIDs = append(oldIDs, n.ID)
-		}
-
-		nodes, err := s.nodeRepo.FindByIDs(req.NodeIDs)
-		if err == nil {
-			_ = s.groupRepo.ReplaceNodes(group, nodes)
-		}
-
-		// 旧节点 ∪ 新节点均需重新同步（旧节点移除了该分组用户，新节点增加了该分组用户）
-		affected := unionUintSlices(oldIDs, req.NodeIDs)
-		_ = s.nodeRepo.BatchUpdateSyncStatus(affected, entity.SyncStatusDrifted)
+	group, err = s.groupRepo.FindByID(id)
+	if err != nil {
+		return nil, err
 	}
 	return s.toResponse(group), nil
 }
