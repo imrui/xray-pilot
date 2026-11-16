@@ -127,7 +127,7 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 		if err := s.userRepo.ReplaceGroupsTx(tx, user, req.GroupIDs); err != nil {
 			return fmt.Errorf("保存用户分组失败: %w", err)
 		}
-		return nil
+		return repository.InvalidateUserConfigs(tx, user.ID)
 	}); err != nil {
 		return nil, err
 	}
@@ -231,6 +231,9 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	}
 	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
 		if req.GroupIDs != nil {
+			if err := repository.InvalidateUserConfigs(tx, user.ID); err != nil {
+				return err
+			}
 			groupIDs, err := parseOptionalUintSlice(req.GroupIDs)
 			if err != nil {
 				return fmt.Errorf("解析分组失败: %w", err)
@@ -241,6 +244,9 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		}
 		if err := tx.Save(user).Error; err != nil {
 			return err
+		}
+		if shouldMarkSync {
+			return repository.InvalidateUserConfigs(tx, user.ID)
 		}
 		return nil
 	}); err != nil {
@@ -317,11 +323,11 @@ type SweepResult struct {
 }
 
 // SweepExpired 把已过期但仍启用的用户从节点运行时摘除（给调度器周期调用）。
-//   - live-apply on：逐用户 RemoveUserLive（失败节点已在 livesync 内标记漂移兜底）
-//   - live-apply off：MarkAllDrifted 一次，交给 restart 同步路径
+//   - live-apply on：逐用户 RemoveUserLive，再确认相关节点已撤权
+//   - live-apply off：标记漂移并执行完整同步；无法确认当前授权时在线停止保护
 //
 // 处理过的用户打 ExpiredSweptAt 标记，不重复扫；续期会清标记。
-// 订阅层的 403 拦截与本方法互补：前者挡新取订阅，后者断已连会话。
+// 订阅层的 403 拦截与本方法互补：前者挡新取订阅，后者撤销节点账号。
 func (s *UserService) SweepExpired(now time.Time) (*SweepResult, error) {
 	users, err := s.userRepo.FindExpiredUnswept(now)
 	if err != nil {
@@ -340,6 +346,13 @@ func (s *UserService) SweepExpired(now time.Time) (*SweepResult, error) {
 		u := &users[i]
 		if result.LiveApply {
 			s.liveSync.RemoveUserLive(s.userNodeIDs(u), u.Username)
+		}
+		var affected []uint
+		if err := repository.DB.Table("group_nodes").Joins("JOIN user_groups ON user_groups.group_id = group_nodes.group_id").Where("user_groups.user_id = ?", u.ID).Distinct("group_nodes.node_id").Pluck("group_nodes.node_id", &affected).Error; err != nil {
+			return result, err
+		}
+		if !s.confirmRevoked(affected) {
+			continue
 		}
 		if err := s.userRepo.MarkExpiredSwept(u.ID, now); err != nil {
 			return result, fmt.Errorf("标记用户 %s 已摘除失败: %w", u.Username, err)

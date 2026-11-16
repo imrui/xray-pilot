@@ -143,11 +143,24 @@ func (r *UserRepository) Update(user *entity.User) error {
 }
 
 func (r *UserRepository) UpdateActive(id uint, active bool) error {
-	return DB.Model(&entity.User{}).Where("id = ?", id).Update("active", active).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&entity.User{}).Where("id = ?", id).Update("active", active).Error; err != nil {
+			return err
+		}
+		return InvalidateUserConfigs(tx, id)
+	})
 }
 
 func (r *UserRepository) Delete(id uint) error {
-	return DB.Delete(&entity.User{}, id).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := InvalidateUserConfigs(tx, id); err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&entity.UserGroup{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&entity.User{}, id).Error
+	})
 }
 
 func (r *UserRepository) FindActiveByGroupID(groupID uint) ([]entity.User, error) {
@@ -169,6 +182,7 @@ func (r *UserRepository) FindActiveUsersByNodeID(nodeID uint) ([]entity.User, er
 		Distinct("users.*").
 		Joins("JOIN user_groups ug ON ug.user_id = users.id").
 		Joins("JOIN group_nodes gn ON gn.group_id = ug.group_id").
+		Joins("JOIN groups g ON g.id = ug.group_id AND g.active = ?", true).
 		Where(
 			"users.active = ? AND (users.expires_at IS NULL OR users.expires_at > ?) AND gn.node_id = ?",
 			true,
@@ -192,7 +206,7 @@ func (r *UserRepository) FindExpiredUnswept(now time.Time) ([]entity.User, error
 
 // MarkExpiredSwept 记录过期用户已被摘除
 func (r *UserRepository) MarkExpiredSwept(id uint, at time.Time) error {
-	return DB.Model(&entity.User{}).Where("id = ?", id).Update("expired_swept_at", at).Error
+	return DB.Model(&entity.User{}).Where("id = ? AND expires_at IS NOT NULL AND expires_at <= ?", id, at).Update("expired_swept_at", at).Error
 }
 
 // Count 返回用户总数
@@ -203,7 +217,12 @@ func (r *UserRepository) Count() (int64, error) {
 
 // UpdateUUID 更新用户 UUID（重置订阅身份）
 func (r *UserRepository) UpdateUUID(id uint, newUUID string) error {
-	return DB.Model(&entity.User{}).Where("id = ?", id).Update("uuid", newUUID).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&entity.User{}).Where("id = ?", id).Update("uuid", newUUID).Error; err != nil {
+			return err
+		}
+		return InvalidateUserConfigs(tx, id)
+	})
 }
 
 // UpdateToken 更新用户订阅 Token
@@ -217,6 +236,7 @@ func (r *UserRepository) CountActiveByNodeID(nodeID uint) (int64, error) {
 	err := DB.Model(&entity.User{}).
 		Joins("JOIN user_groups ug ON ug.user_id = users.id").
 		Joins("JOIN group_nodes gn ON gn.group_id = ug.group_id").
+		Joins("JOIN groups g ON g.id = ug.group_id AND g.active = ?", true).
 		Where(
 			"users.active = ? AND (users.expires_at IS NULL OR users.expires_at > ?) AND gn.node_id = ?",
 			true,

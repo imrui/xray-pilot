@@ -83,6 +83,7 @@ export const groupApi = {
 // ---- 节点 API ----
 // 节点列表筛选参数：筛选在服务端执行，避免只过滤当前页数据
 export interface NodeListParams extends PageParams {
+  ids?: string
   keyword?: string
   sync_status?: string
   region?: string

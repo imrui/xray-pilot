@@ -7,16 +7,22 @@ import { generateShortIds } from '@/lib/keygen'
 import { copyText } from '@/lib/clipboard'
 import { protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
 import type { InboundProfile, Node, NodeKey, SyncStatus } from '@/types'
-import { Modal } from '@/components/ui/Modal'
+import { PreviewConfigModal } from '@/components/nodes/ConfigPreview'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Btn, FieldGroup, SelectField, Switch } from '@/components/ui/Form'
 import { HintTip } from '@/components/ui/HintTip'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
-import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { useConfirm } from '@/lib/confirm-context'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { pushToast } from '@/lib/notify'
+import { useSearchParams } from 'react-router-dom'
+import { RoutingBindingDrawer } from '@/components/routing/BindingEditor'
+import { NodeDiagnostics, SyncHistory } from '@/components/routing/SyncTools'
+import { submitNodeSync, type SyncSubmission } from '@/lib/node-sync'
+import { useRoutingOverview } from '@/lib/routing'
+import { routingLabel, jobStatus } from '@/lib/routing-model'
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -74,6 +80,12 @@ const emptyForm = (): FormState => ({
 export default function Nodes() {
   const confirm = useConfirm()
   const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const affectedFilter = params.get('ids') ?? ''
+  const routing = useRoutingOverview()
+  const [routingNode, setRoutingNode] = useState<Node | null>(null)
+  const [diagnosticNode, setDiagnosticNode] = useState<Node | null>(null)
+  const [history, setHistory] = useState<{ nodeID?: number; submitted?: SyncSubmission[] } | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [drawer, setDrawer] = useState<{ open: boolean; node?: Node }>({ open: false })
@@ -85,7 +97,8 @@ export default function Nodes() {
   const [search, setSearch] = useState('')
   // 搜索防抖后的关键字：筛选走服务端查询（跨全部分页），避免请求随键入频繁触发
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'synced' | 'drifted' | 'failed' | 'pending'>('all')
+  const statusFilter = params.get('sync_status') || 'all'
+  const setStatusFilter = (value: string) => setParams(previous => { const next = new URLSearchParams(previous); if (value === 'all') next.delete('sync_status'); else next.set('sync_status', value); return next })
   const [healthFilter, setHealthFilter] = useState<'all' | 'healthy' | 'unhealthy' | 'unchecked'>('all')
   const [regionFilter, setRegionFilter] = useState<string>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
@@ -99,13 +112,17 @@ export default function Nodes() {
     return () => clearTimeout(timer)
   }, [search])
 
-  // 筛选条件变化时回到第 1 页，否则可能停留在超出结果集的空页
-  useEffect(() => {
+  const filterKey = JSON.stringify([debouncedSearch, statusFilter, healthFilter, regionFilter, ownerFilter, affectedFilter])
+  const [pageFilterKey, setPageFilterKey] = useState(filterKey)
+  if (pageFilterKey !== filterKey) {
+    setPageFilterKey(filterKey)
     setPage(1)
-  }, [debouncedSearch, statusFilter, healthFilter, regionFilter, ownerFilter])
+    setSelectedIds([])
+  }
 
   const { data, isLoading } = useQuery({
-    queryKey: ['nodes', page, pageSize, debouncedSearch, statusFilter, healthFilter, regionFilter, ownerFilter],
+    queryKey: ['nodes', page, pageSize, debouncedSearch, statusFilter, healthFilter, regionFilter, ownerFilter, affectedFilter],
+    refetchInterval: 5000,
     queryFn: () =>
       nodeApi
         .list({
@@ -116,6 +133,7 @@ export default function Nodes() {
           health: healthFilter === 'all' ? undefined : healthFilter,
           region: regionFilter === 'all' ? undefined : regionFilter,
           owner: ownerFilter === 'all' ? undefined : ownerFilter,
+          ids: affectedFilter || undefined,
         })
         .then((r) => r.data.data!),
   })
@@ -147,6 +165,13 @@ export default function Nodes() {
   const owners = filterOptions?.owners ?? []
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['nodes'] })
+  const nodeStatus = (n: Node) => {
+    const row = routing.data?.nodes.find(row => row.id === n.id)
+    if (row?.error) return { label: '路由冲突', tip: row.error, variant: 'red' as const }
+    if (row?.job_status && ['pending', 'validating', 'staged', 'persisted', 'applying', 'verifying', 'unknown'].includes(row.job_status)) return { label: jobStatus[row.job_status], tip: '在同步记录中查看任务结果', variant: 'yellow' as const }
+    if (n.sync_status !== 'synced' && row?.job_status && ['rolled_back', 'rollback_failed'].includes(row.job_status)) return { label: jobStatus[row.job_status], tip: '目标配置仍未同步，请查看记录并处理', variant: 'red' as const }
+    return getConfiguredProfiles(n.id).length === 0 && !n.last_sync_at ? unconfiguredStatusMeta : (statusMeta[n.sync_status] ?? statusMeta.pending)
+  }
 
   const save = useMutation({
     mutationFn: () => {
@@ -179,27 +204,21 @@ export default function Nodes() {
     onSuccess: invalidate,
   })
   const sync = useMutation({
-    mutationFn: (id: number) => nodeApi.sync(id),
-    onSuccess: (res) => {
-      pushToast({
-        title: '节点同步成功',
-        description: res.data.data?.message ?? '节点配置已同步到远端。',
-        variant: 'success',
-      })
+    mutationFn: (ids: number[]) => submitNodeSync(ids),
+    onSuccess: (submitted, ids) => {
+      setHistory({ nodeID: ids.length === 1 ? ids[0] : undefined, submitted })
+      setSelectedIds([])
       invalidate()
     },
   })
   const syncDrifted = useMutation({
-    mutationFn: () => nodeApi.syncDrifted(),
-    onSuccess: (res) => {
-      const summary = res.data.data
-      pushToast({
-        title: '批量同步已完成',
-        description: summary
-          ? `总计 ${summary.total} 个节点，成功 ${summary.success} 个，失败 ${summary.failed} 个。`
-          : '待处理节点已完成同步。',
-        variant: summary?.failed ? 'warning' : 'success',
-      })
+    mutationFn: async () => {
+      const current = await routing.refetch()
+      if (!current.data || current.error) throw new Error('无法读取待处理节点，请重试。')
+      return submitNodeSync(current.data.nodes.filter(n => n.active && ['pending', 'drifted', 'failed'].includes(n.sync_status)).map(n => n.id))
+    },
+    onSuccess: submitted => {
+      setHistory({ submitted })
       invalidate()
     },
   })
@@ -408,6 +427,7 @@ export default function Nodes() {
               className="w-full bg-transparent text-sm outline-none"
             >
               <option value="all">全部状态</option>
+              <option value="needs_sync">全部待处理</option>
               <option value="synced">已同步</option>
               <option value="drifted">待同步</option>
               <option value="failed">同步失败</option>
@@ -453,7 +473,8 @@ export default function Nodes() {
 
         <div className="flex items-center gap-2">
           <HintTip content="只有在「配置节点密钥」中保存过的协议才会参与该节点的配置生成；保存空对象 {} 表示继承协议默认参数。" />
-          <Btn variant="secondary" loading={syncDrifted.isPending} onClick={() => syncDrifted.mutate()}>
+          <Btn variant="secondary" onClick={() => setHistory({})}>同步记录</Btn>
+          <Btn variant="secondary" loading={syncDrifted.isPending} disabled={sync.isPending} onClick={() => syncDrifted.mutate()}>
             <RefreshCw className="h-4 w-4" />
             同步待处理节点
           </Btn>
@@ -475,11 +496,7 @@ export default function Nodes() {
               已选择 <span className="font-semibold text-[var(--text)]">{selectedNodes.length}</span> 个节点
             </div>
             <div className="flex flex-wrap gap-2">
-              <Btn variant="secondary" onClick={async () => {
-                await Promise.all(selectedNodes.map((n) => nodeApi.sync(n.id)))
-                setSelectedIds([])
-                invalidate()
-              }}>批量同步</Btn>
+              <Btn variant="secondary" loading={sync.isPending} disabled={syncDrifted.isPending} onClick={() => sync.mutate(selectedNodes.map(n => n.id))}>批量同步</Btn>
               <Btn variant="secondary" onClick={async () => {
                 await Promise.all(selectedNodes.map((n) => nodeApi.testSSH(n.id)))
                 setSelectedIds([])
@@ -552,7 +569,7 @@ export default function Nodes() {
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">所有者</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">用户 / Xray</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">协议</th>
+                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">配置</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
                 <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">最后同步</th>
                 <th className="px-4 py-3 text-right text-[11px] font-medium uppercase tracking-[0.12em] text-faint">操作</th>
@@ -598,14 +615,14 @@ export default function Nodes() {
                     </td>
                     <td className="px-4 py-3.5">
                       <Tooltip
-                        content={(getConfiguredProfiles(n.id).length === 0 ? unconfiguredStatusMeta : (statusMeta[n.sync_status] ?? statusMeta.pending)).tip}
+                        content={nodeStatus(n).tip}
                         side="right"
                         className="max-w-[220px] whitespace-normal"
                       >
                         <span tabIndex={0} className="inline-flex">
                           <Badge
-                            label={(getConfiguredProfiles(n.id).length === 0 ? unconfiguredStatusMeta : (statusMeta[n.sync_status] ?? statusMeta.pending)).label}
-                            variant={(getConfiguredProfiles(n.id).length === 0 ? unconfiguredStatusMeta : (statusMeta[n.sync_status] ?? statusMeta.pending)).variant}
+                            label={nodeStatus(n).label}
+                            variant={nodeStatus(n).variant}
                           />
                         </span>
                       </Tooltip>
@@ -633,6 +650,9 @@ export default function Nodes() {
                     </td>
                     <td className="px-4 py-3.5">
                       {renderProtocolCell(n)}
+                      <button className="mt-2 block max-w-xs text-left text-xs text-[var(--accent)]" title="已保存的目标路由，点击配置" onClick={() => setRoutingNode(n)}>
+                        路由：{routing.data?.nodes.find(row => row.id === n.id) ? routingLabel(routing.data.nodes.find(row => row.id === n.id)!, routing.data.templates) : routing.error ? '加载失败，点击重试' : '加载中…'}
+                      </button>
                     </td>
                     <td className="px-4 py-3.5">
                       <Switch checked={n.active} onChange={() => toggle.mutate(n.id)} />
@@ -642,15 +662,15 @@ export default function Nodes() {
                       <div className="flex flex-col items-end gap-2">
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() => sync.mutate(n.id)}
-                            disabled={getConfiguredProfiles(n.id).length === 0}
+                            onClick={() => sync.mutate([n.id])}
+                            disabled={sync.isPending || syncDrifted.isPending || (getConfiguredProfiles(n.id).length === 0 && !n.last_sync_at)}
                             className={`inline-flex h-9 items-center gap-1 rounded-md border px-3 text-xs font-medium transition ${
                               n.sync_status === 'failed'
                                 ? 'border-[var(--warning-border)] bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning-soft)]'
                                 : 'border-[var(--border)] bg-[var(--panel-strong)] text-[var(--accent)] hover:bg-[var(--panel-muted)]'
                             } ${getConfiguredProfiles(n.id).length === 0 ? 'cursor-not-allowed opacity-45 hover:bg-inherit' : ''}`}
                           >
-                            <RefreshCw className={`h-3.5 w-3.5${sync.isPending && sync.variables === n.id ? ' animate-spin' : ''}`} />
+                            <RefreshCw className={`h-3.5 w-3.5${sync.isPending && sync.variables?.includes(n.id) ? ' animate-spin' : ''}`} />
                             同步
                           </button>
                           <button
@@ -662,6 +682,9 @@ export default function Nodes() {
                           </button>
                           <ActionMenu
                             items={[
+                              { label: '路由配置', onSelect: () => setRoutingNode(n) },
+                              { label: '同步记录', onSelect: () => setHistory({ nodeID: n.id }) },
+                              { label: '诊断与恢复', onSelect: () => setDiagnosticNode(n) },
                               {
                                 label: '测试 SSH',
                                 onSelect: () => testSSH.mutate(n.id),
@@ -816,6 +839,10 @@ export default function Nodes() {
         </div>
       </Drawer>
 
+      {affectedFilter && <div className="text-sm text-soft">当前仅显示受影响节点。<Btn variant="secondary" onClick={() => setParams({})}>清除节点筛选</Btn></div>}
+      {history && <SyncHistory {...history} onClose={() => { setHistory(null); void invalidate() }} />}
+      {diagnosticNode && <NodeDiagnostics id={diagnosticNode.id} name={diagnosticNode.name} onClose={() => setDiagnosticNode(null)} />}
+      {routingNode && <RoutingBindingDrawer scope="node" id={routingNode.id} name={routingNode.name} onClose={() => setRoutingNode(null)} onPreview={() => { setPreviewNode(routingNode); setRoutingNode(null) }} />}
       {previewNode && (
         <PreviewConfigModal
           node={previewNode}
@@ -844,105 +871,6 @@ export default function Nodes() {
         replaceNode={replaceNode}
       />
     </PageShell>
-  )
-}
-
-function PreviewConfigModal({ node, activeProfiles, onClose }: { node: Node; activeProfiles: InboundProfile[]; onClose: () => void }) {
-  const [copied, setCopied] = useState(false)
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['previewConfig', node.id],
-    queryFn: () => nodeApi.previewConfig(node.id).then((r) => r.data.data!),
-    retry: false,
-  })
-  const { data: nodeKeys } = useQuery({
-    queryKey: ['nodeKeys', node.id],
-    queryFn: () => nodeApi.getKeys(node.id).then((r) => r.data.data ?? []),
-    retry: false,
-  })
-
-  useEffect(() => {
-    if (!copied) return
-    const timer = setTimeout(() => setCopied(false), 1800)
-    return () => clearTimeout(timer)
-  }, [copied])
-
-  const handleCopy = async () => {
-    if (!data?.config) return
-    const ok = await copyText(data.config)
-    if (ok) {
-      setCopied(true)
-    } else {
-      pushToast({
-        title: '复制失败',
-        description: '请手动选中预览内容并按 Ctrl+C 复制',
-        variant: 'warning',
-      })
-    }
-  }
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={`预览生成配置 · ${node.name}`}
-      size="xl"
-      footer={<Btn variant="secondary" onClick={onClose}>关闭</Btn>}
-    >
-      <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="space-y-1">
-            <p className="text-xs text-soft">仅预览，不会同步至节点；`private_key` 已脱敏。</p>
-            <ProtocolSummary nodeKeys={nodeKeys ?? []} activeProfiles={activeProfiles} />
-          </div>
-          <Btn variant="secondary" onClick={() => void handleCopy()} disabled={!data?.config}>
-            <Copy className="h-4 w-4" />
-            {copied ? '已复制' : '快速复制'}
-          </Btn>
-        </div>
-        {isLoading && <p className="py-8 text-center text-sm text-soft">生成中…</p>}
-        {error && (
-          <div className="rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-soft)] p-4">
-            <p className="text-sm font-medium text-[var(--danger)]">生成失败</p>
-            <p className="mt-1 text-xs text-[var(--danger)]">{(error as Error).message}</p>
-          </div>
-        )}
-        {data && (
-          <>
-            {(data.warnings ?? []).length > 0 && (
-              <div className="rounded-2xl border border-[var(--warning-border)] bg-[var(--warning-soft)] p-4">
-                <p className="mb-2 text-xs font-medium text-[var(--warning)]">部分协议生成失败，不影响其他协议：</p>
-                {data.warnings.map((w, i) => (
-                  <p key={i} className="text-xs text-[var(--warning)]">{w}</p>
-                ))}
-              </div>
-            )}
-            <pre className="max-h-[68vh] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--code-bg)] p-4 font-mono text-xs leading-5 text-[var(--code-text)] whitespace-pre">
-              {data.config}
-            </pre>
-          </>
-        )}
-      </div>
-    </Modal>
-  )
-}
-
-function ProtocolSummary({ nodeKeys, activeProfiles }: { nodeKeys: NodeKey[]; activeProfiles: InboundProfile[] }) {
-  const profileMap = new Map(activeProfiles.map((profile) => [profile.id, profile]))
-  const matchedProfiles = nodeKeys
-    .map((key) => profileMap.get(key.profile_id))
-    .filter((item): item is InboundProfile => Boolean(item))
-
-  if (matchedProfiles.length === 0) {
-    return <p className="text-xs text-soft">当前节点未绑定任何协议，预览只会包含系统基础入站。</p>
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-soft">
-      <span>当前绑定协议 {matchedProfiles.length} 个：</span>
-      {matchedProfiles.map((profile) => (
-        <Badge key={profile.id} label={profile.name} variant="blue" />
-      ))}
-    </div>
   )
 }
 
@@ -1047,7 +975,7 @@ function NodeProtocolsDrawer({
     : undefined
 
   // 端口冲突前端实时检测（后端仍会硬校验兜底）
-  const portConflict = useMemo(() => {
+  const portConflict = (() => {
     if (!activeProfile || !activeDraft) return null
     const effPort = activeDraft.port > 0 ? activeDraft.port : activeProfile.port
     const transport = activeProfile.protocol === 'hysteria2' ? 'udp' : 'tcp'
@@ -1062,7 +990,7 @@ function NodeProtocolsDrawer({
       }
     }
     return null
-  }, [activeProfile, activeDraft, nodeKeys, profiles])
+  })()
 
   const batchSave = useMutation({
     mutationFn: async () => {
@@ -1206,17 +1134,23 @@ function NodeProtocolsDrawer({
       : `批量保存 (${selectedProfileIds.length})`
     : keyByProfileId.has(activeProfileId ?? -1) ? '保存协议' : '绑定协议'
 
+  const protocolBusy = batchSave.isPending || keygen.isPending || lockToggle.isPending || remove.isPending
+  const canCloseProtocols = async () => dirtyProfileIds.length === 0 || await confirm({ title: '放弃未保存的协议修改？', description: '未保存的协议参数不会出现在完整配置预览中。', confirmText: '放弃修改', cancelText: '继续编辑', tone: 'danger' })
+
   return (
     <Drawer
       open
       onClose={onClose}
       title={`节点协议管理 · ${node.name}`}
+      dirty={dirtyProfileIds.length > 0}
+      saving={protocolBusy}
+      onBeforeClose={canCloseProtocols}
       description="左侧选择/多选协议；右侧编辑参数与端口。未绑协议直接保存即视为绑定。"
       width="xl"
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>关闭</Btn>
-          <Btn variant="secondary" onClick={onPreview}>
+          <Btn variant="secondary" disabled={protocolBusy} onClick={() => void canCloseProtocols().then(ok => { if (ok) onClose() })}>关闭</Btn>
+          <Btn variant="secondary" disabled={dirtyProfileIds.length > 0 || protocolBusy} title="仅预览已保存的完整配置，请先保存协议修改" onClick={onPreview}>
             <FileCode className="h-4 w-4" />
             查看完整配置
           </Btn>

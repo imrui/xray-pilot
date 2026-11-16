@@ -143,7 +143,7 @@ func (c *Client) UploadContent(content, remotePath string) error {
 	return nil
 }
 
-// ReadRemoteFile 读取远端文件内容（stderr 重定向至 /dev/null，防止错误信息污染文件内容 hash）
+// ReadRemoteFile 有界读取配置，stderr 不参与文件内容及哈希。
 func (c *Client) ReadRemoteFile(remotePath string) (string, error) {
 	sess, err := c.client.NewSession()
 	if err != nil {
@@ -152,14 +152,17 @@ func (c *Client) ReadRemoteFile(remotePath string) (string, error) {
 	defer sess.Close()
 
 	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	var stderr limitedOutput
 	sess.Stdout = &stdout
 	sess.Stderr = &stderr
 
 	quotedPath := shellQuote(remotePath)
-	cmd := fmt.Sprintf("sh -lc 'test -s %s && base64 < %s | tr -d \"\\n\"'", quotedPath, quotedPath)
+	// Limit the remote read to 16 MiB + 1 byte, and reject truncated files.
+	cmd := "test -s " + quotedPath + " && head -c 16777217 -- " + quotedPath + " | base64 | tr -d '\\n'"
+	timer := time.AfterFunc(30*time.Second, func() { _ = sess.Close() })
+	defer timer.Stop()
 	if err := sess.Run(cmd); err != nil {
-		return "", fmt.Errorf("读取远端文件失败 (%s): %w\nstderr: %s", remotePath, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("读取远端文件失败 (%s): %w", remotePath, err)
 	}
 
 	encoded := strings.TrimSpace(stdout.String())
@@ -170,6 +173,9 @@ func (c *Client) ReadRemoteFile(remotePath string) (string, error) {
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", fmt.Errorf("读取远端文件失败 (%s): base64 解码失败: %w", remotePath, err)
+	}
+	if len(decoded) > 16*1024*1024 {
+		return "", fmt.Errorf("远端配置超过 16 MiB 限制")
 	}
 	if len(decoded) == 0 {
 		return "", fmt.Errorf("读取远端文件失败 (%s): 解码后内容为空", remotePath)

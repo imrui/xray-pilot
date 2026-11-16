@@ -33,11 +33,12 @@ func ProtocolTransport(protocol string) string {
 // VlessRealitySettings VLESS+Reality 协议共享配置
 // PrivateKey/PublicKey/ShortIds 为可选默认值，各节点可通过 NodeProfileKey 覆盖
 type VlessRealitySettings struct {
-	SNI         string   `json:"sni"`
-	Fingerprint string   `json:"fingerprint"`          // TLS 指纹，如 chrome
-	PrivateKey  string   `json:"private_key,omitempty"` // 默认私钥（AES-GCM 加密存储）
-	PublicKey   string   `json:"public_key,omitempty"`  // 默认公钥
-	ShortIds    []string `json:"short_ids,omitempty"`   // 默认 short_id 列表
+	AllowEmptyShortID bool     `json:"allow_empty_short_id,omitempty"`
+	SNI               string   `json:"sni"`
+	Fingerprint       string   `json:"fingerprint"`           // TLS 指纹，如 chrome
+	PrivateKey        string   `json:"private_key,omitempty"` // 默认私钥（AES-GCM 加密存储）
+	PublicKey         string   `json:"public_key,omitempty"`  // 默认公钥
+	ShortIds          []string `json:"short_ids,omitempty"`   // 默认 short_id 列表
 }
 
 // VlessWSTLSSettings VLESS+WebSocket+TLS 协议共享配置
@@ -60,17 +61,18 @@ type Hysteria2Settings struct {
 
 // Reality 默认参数：节点密钥与协议模板都未提供时的兜底值
 const (
-	DefaultRealitySNI         = "www.microsoft.com"
+	DefaultRealitySNI         = "www.apple.com"
 	DefaultRealityFingerprint = "chrome"
 )
 
 // RealityKeyMaterial 节点 Reality 密钥材料（per-node 覆盖，为空则 fallback 到 VlessRealitySettings）
 type RealityKeyMaterial struct {
-	PrivateKey  string   `json:"private_key"` // AES-GCM 加密存储
-	PublicKey   string   `json:"public_key"`
-	ShortIds    []string `json:"short_ids"`             // short_id 列表，Xray 要求数组格式
-	SNI         string   `json:"sni,omitempty"`         // 节点级 SNI 覆盖，空则继承协议模板
-	Fingerprint string   `json:"fingerprint,omitempty"` // 节点级 TLS 指纹覆盖，空则继承协议模板
+	AllowEmptyShortID bool     `json:"allow_empty_short_id,omitempty"`
+	PrivateKey        string   `json:"private_key"` // AES-GCM 加密存储
+	PublicKey         string   `json:"public_key"`
+	ShortIds          []string `json:"short_ids"`             // short_id 列表，Xray 要求数组格式
+	SNI               string   `json:"sni,omitempty"`         // 节点级 SNI 覆盖，空则继承协议模板
+	Fingerprint       string   `json:"fingerprint,omitempty"` // 节点级 TLS 指纹覆盖，空则继承协议模板
 }
 
 // EffectiveRealitySNI 返回 Reality 实际使用的 SNI：节点密钥覆盖 > 协议模板 > 默认。

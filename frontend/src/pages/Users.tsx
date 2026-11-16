@@ -11,10 +11,12 @@ import { QRModal } from '@/components/ui/QRModal'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
-import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { useConfirm } from '@/lib/confirm-context'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { pushToast } from '@/lib/notify'
 import { copyText } from '@/lib/clipboard'
+
+const isExpired = (u: User) => (u.expires_at ? new Date(u.expires_at) < new Date() : false)
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
@@ -314,10 +316,6 @@ function ExpiryDateTimeField({
   const dateInputRef = useRef<HTMLInputElement | null>(null)
   const timeInputRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => {
-    if (!open) setDraftValue(value)
-  }, [open, value])
-
   const originalValue = value
   const currentDisplay = formatDateTimeLocalDisplay(value)
   const currentExpired = isLocalDateTimeExpired(value)
@@ -336,7 +334,7 @@ function ExpiryDateTimeField({
     <div className="flex flex-col space-y-1.5">
       <label className="text-[12px] font-medium text-soft">{label}</label>
 
-      <DropdownMenu.Root modal={false} open={open} onOpenChange={setOpen}>
+      <DropdownMenu.Root modal={false} open={open} onOpenChange={next => { if (next) setDraftValue(value); setOpen(next) }}>
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
@@ -632,8 +630,6 @@ export default function Users() {
 
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [k]: e.target.value }))
-
-  const isExpired = (u: User) => (u.expires_at ? new Date(u.expires_at) < new Date() : false)
 
   const filteredUsers = useMemo(() => {
     return (data?.list ?? []).filter((u) => {
@@ -1058,8 +1054,8 @@ export default function Users() {
         onBeforeClose={confirmCloseDrawer}
         footer={
           <>
-            <Btn variant="secondary" onClick={closeDrawer}>取消</Btn>
-            <Btn loading={save.isPending} onClick={() => save.mutate()}>保存</Btn>
+            <Btn variant="secondary" onClick={() => void confirmCloseDrawer().then(ok => { if (ok) closeDrawer() })}>取消</Btn>
+            <Btn loading={save.isPending} onClick={() => save.mutate()}>保存用户</Btn>
           </>
         }
       >

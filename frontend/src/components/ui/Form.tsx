@@ -1,4 +1,4 @@
-import { type InputHTMLAttributes } from 'react'
+import { type InputHTMLAttributes, useId } from 'react'
 import { cn } from '@/lib/utils'
 
 interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -7,9 +7,11 @@ interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export function Field({ label, error, className, ...props }: FieldProps) {
+  const generatedID = useId()
+  const id = props.id ?? generatedID
   return (
     <div className="flex flex-col space-y-1.5">
-      <label className="text-[12px] font-medium text-soft">{label}</label>
+      <label htmlFor={id} className="text-[12px] font-medium text-soft">{label}</label>
       <input
         className={cn(
           'h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] placeholder:text-faint transition-all duration-200 focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]',
@@ -17,6 +19,7 @@ export function Field({ label, error, className, ...props }: FieldProps) {
           className
         )}
         {...props}
+        id={id}
       />
       {error && <p className="mt-1 text-[11px] font-medium text-[var(--danger)]">{error}</p>}
     </div>
@@ -32,10 +35,12 @@ interface SelectFieldProps {
 }
 
 export function SelectField({ label, value, onChange, options, placeholder }: SelectFieldProps) {
+  const id = useId()
   return (
     <div className="flex flex-col space-y-1.5">
-      <label className="text-[12px] font-medium text-soft">{label}</label>
+      <label htmlFor={id} className="text-[12px] font-medium text-soft">{label}</label>
       <select
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] transition-all duration-200 focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
@@ -80,8 +85,8 @@ export function Btn({ variant = 'primary', loading, children, className, ...prop
         btnClass[variant],
         className
       )}
-      disabled={loading || props.disabled}
       {...props}
+      disabled={loading || props.disabled}
     >
       {loading && <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />}
       {children}

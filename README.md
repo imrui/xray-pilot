@@ -55,6 +55,12 @@ Manage subscription users, groups and expiry; copy links, show QR codes, check t
 
 Protocol templates hold shared settings; node keys hold per-node key material and port overrides.
 
+### Routing Configuration
+
+Save a routing template draft, publish a fixed revision, then select it for a node, group or the global default. Each node has one effective routing policy and can keep multiple protocol bindings. Node domain lists can inherit the template, replace a list, or explicitly clear its rules. Preview the complete configuration and synchronize it from the node list.
+
+Domain rules use strict `ForceIPv4` / `ForceIPv6`; unmatched traffic uses ordinary direct routing. IPv6 rules require working IPv6 connectivity and do not fall back to IPv4. Optional system-default and AI/media presets are provided without automatically binding nodes. Failed health checks restore a configuration compatible with current user authorization while leaving the requested policy pending.
+
 ### Node Alerts
 
 ![Alerts](./docs/screenshots/06-alerts.png)
@@ -154,6 +160,8 @@ curl -fsSL https://raw.githubusercontent.com/imrui/xray-pilot/main/scripts/node-
 `PANEL_URL` and `INSTALL_TOKEN` come from the dialog. Tokens default to 10-minute TTL, are single-use, and are bound to the first source IP that fetches the panel pubkey. The script falls back to the interactive flow when these variables are absent.
 
 Administrators can change **Xray 稳定版本** under **系统设置 → 节点与同步 → Xray 安装版本** (default: `26.3.27`). Each newly generated command includes that version as `XRAY_VERSION`; existing commands retain the version selected when they were generated. Changing this setting does not update existing nodes. Running a bootstrap command installs its specified version, including downgrading a different version already present on the target node, and stops if the installer fails or the installed version does not match.
+
+For LAN or NAT deployments, add `NODE_IP=192.168.10.3` before `bash` in the generated command to register the address reachable from the panel. Both IPv4 and IPv6 addresses are supported; without this option, the script detects the public IPv4 address as before.
 
 ## Upgrade
 

@@ -52,10 +52,11 @@ type InstallTokenResponse struct {
 
 // RegisterNodeRequest 节点装机脚本回调时上报的自检信息
 type RegisterNodeRequest struct {
-	PublicIP    string `json:"public_ip"`
-	XrayVersion string `json:"xray_version"`
-	Kernel      string `json:"kernel"`
-	Distro      string `json:"distro"`
+	BootstrapConfigSHA256 string `json:"bootstrap_config_sha256,omitempty"`
+	PublicIP              string `json:"public_ip"`
+	XrayVersion           string `json:"xray_version"`
+	Kernel                string `json:"kernel"`
+	Distro                string `json:"distro"`
 }
 
 // RegisterNodeResponse 注册成功后返回

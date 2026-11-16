@@ -11,9 +11,9 @@ func TestEffectiveRealitySNI(t *testing.T) {
 	}{
 		{"节点覆盖优先", &VlessRealitySettings{SNI: "tpl.com"}, &RealityKeyMaterial{SNI: "node.com"}, "node.com"},
 		{"节点空回退模板", &VlessRealitySettings{SNI: "tpl.com"}, &RealityKeyMaterial{}, "tpl.com"},
-		{"模板节点都空用默认", &VlessRealitySettings{}, &RealityKeyMaterial{}, DefaultRealitySNI},
+		{"模板节点都空用默认", &VlessRealitySettings{}, &RealityKeyMaterial{}, "www.apple.com"},
 		{"key 为 nil 用模板", &VlessRealitySettings{SNI: "tpl.com"}, nil, "tpl.com"},
-		{"全 nil 用默认", nil, nil, DefaultRealitySNI},
+		{"全 nil 用默认", nil, nil, "www.apple.com"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

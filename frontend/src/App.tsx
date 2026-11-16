@@ -8,6 +8,7 @@ import Groups from '@/pages/Groups'
 import Nodes from '@/pages/Nodes'
 import Profiles from '@/pages/Profiles'
 import Logs from '@/pages/Logs'
+import Routing from '@/pages/Routing'
 import { AdminsSection, BackupSection, SettingsLayout, StatusSection, SubscriptionSection, SyncSection } from '@/pages/settings'
 import { useAuthStore } from '@/store/auth'
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
@@ -43,6 +44,7 @@ export default function App() {
                 <Route path="nodes" element={<Nodes />} />
                 <Route path="profiles" element={<Profiles />} />
                 <Route path="logs" element={<Logs />} />
+                <Route path="routing" element={<Routing />} />
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<Navigate to="/settings/status" replace />} />
                   <Route path="status" element={<StatusSection />} />

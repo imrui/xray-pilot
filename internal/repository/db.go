@@ -71,6 +71,9 @@ func Connect() error {
 	if err := autoMigrate(db); err != nil {
 		return fmt.Errorf("数据库迁移失败: %w", err)
 	}
+	if err := migrateRoutingDefaults(db); err != nil {
+		return fmt.Errorf("迁移路由默认值失败: %w", err)
+	}
 	if err := migrateLegacyUserGroups(db); err != nil {
 		return fmt.Errorf("迁移用户分组关系失败: %w", err)
 	}
@@ -112,6 +115,7 @@ func cleanupOrphanRelations(db *gorm.DB) error {
 
 func autoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
+		&entity.RoutingTemplate{}, &entity.RoutingTemplateRevision{}, &entity.RoutingBinding{}, &entity.ConfigDeployment{}, &entity.NodeConfigState{},
 		&entity.User{},
 		&entity.UserGroup{},
 		&entity.Group{},

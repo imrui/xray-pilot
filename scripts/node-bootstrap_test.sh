@@ -5,9 +5,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-unset XRAY_VERSION
+unset XRAY_VERSION NODE_IP
 # shellcheck source=node-bootstrap.sh
 source "${SCRIPT_DIR}/node-bootstrap.sh"
+test_dir="$(mktemp -d)"
+trap 'rm -rf "$test_dir"' EXIT
+export XRAY_CONFIG_FILE="${test_dir}/config.json"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -20,7 +23,7 @@ curl() {
     fail) return 22 ;;
     empty) return 0 ;;
   esac
-  printf '%s\n' 'printf "INSTALL_ARGS: %s %s %s\n" "$@"; exit "${MOCK_INSTALL_EXIT:-0}"'
+  printf '%s\n' 'printf "INSTALL_ARGS: %s %s %s\n" "$@"; if [[ "${MOCK_WRITE_CONFIG:-false}" == true && ! -e "$XRAY_CONFIG_FILE" ]]; then printf '\''{"inbounds":[{"protocol":"socks","port":1080}]}'\'' > "$XRAY_CONFIG_FILE"; fi; exit "${MOCK_INSTALL_EXIT:-0}"'
 }
 
 xray() {
@@ -92,4 +95,51 @@ unset MOCK_INSTALLED_VERSION
 MOCK_VERSION_FAILURE=true
 assert_install_failure 'Failed to read the installed Xray version'
 
-echo 'PASS: stable/default/custom versions, validation, stdin entry point and installation failures'
+MOCK_VERSION_FAILURE=false
+export MOCK_WRITE_CONFIG=true
+install_xray >/dev/null
+expected_hash="$(sha256sum "${XRAY_CONFIG_FILE}" | awk '{print $1}')"
+[[ "${BOOTSTRAP_CONFIG_SHA256}" == "${expected_hash}" ]] || fail 'installer sample was not attested'
+# Modify after installation. Registration must send the original attestation,
+# so the panel will reject the now-modified file at first synchronization.
+printf '%s' '{"inbounds":[{"protocol":"socks","port":2080}]}' > "${XRAY_CONFIG_FILE}"
+AUTO_MODE=true
+PANEL_URL=https://panel.invalid
+INSTALL_TOKEN=test-token
+curl() {
+  if [[ "$*" == *'/api/install/register?'* ]]; then
+    while [[ "$#" -gt 0 ]]; do
+      if [[ "$1" == -d ]]; then
+        printf '%s' "$2" > "${test_dir}/registered.json"
+        return 0
+      fi
+      shift
+    done
+    return 2
+  fi
+  if [[ "$*" == *'api.ipify.org'* ]]; then echo 192.0.2.1; return 0; fi
+  if [[ "$*" == "-fsSL ${XRAY_INSTALL_URL}" ]]; then echo 'exit 0'; return 0; fi
+  return 2
+}
+report_to_panel >/dev/null
+grep -Fq "\"bootstrap_config_sha256\":\"${expected_hash}\"" "${test_dir}/registered.json" || fail 'registration recomputed the baseline'
+grep -Fq '"public_ip":"192.0.2.1"' "${test_dir}/registered.json" || fail 'public IP detection failed'
+NODE_IP=192.168.10.3
+report_to_panel >/dev/null
+grep -Fq '"public_ip":"192.168.10.3"' "${test_dir}/registered.json" || fail 'panel-reachable address ignored'
+NODE_IP=2001:db8::1
+report_to_panel >/dev/null
+grep -Fq '"public_ip":"2001:db8::1"' "${test_dir}/registered.json" || fail 'IPv6 registration override ignored'
+NODE_IP='invalid; echo bad'
+# Exercise the real entry point with only prerequisite checks replaced.
+require_root() { :; }
+require_cmd() { :; }
+if output="$(main 2>&1)"; then fail 'invalid NODE_IP accepted'; fi
+[[ "${output}" == *'Invalid NODE_IP'* && "${output}" != *'Fetching panel SSH'* ]] || fail 'invalid address reached side effects'
+NODE_IP=''
+install_xray >/dev/null
+[[ -z "${BOOTSTRAP_CONFIG_SHA256}" ]] || fail 'existing manual config gained installation permission'
+report_to_panel >/dev/null
+grep -Fq '"bootstrap_config_sha256":""' "${test_dir}/registered.json" || fail 'old attestation reused'
+
+echo 'PASS: versions, validation, entry points, failures, sample attestation, post-install edits and existing manual configuration'

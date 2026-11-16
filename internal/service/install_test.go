@@ -133,6 +133,12 @@ func TestReplaceToken_UpdatesExistingNode(t *testing.T) {
 	}
 
 	// 更换模式：不传 name（沿用现有节点名），同名校验应跳过
+	if err := repository.EnsureConfigState(repository.DB, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ?", created.ID).Updates(map[string]any{"disk_hash": "old-machine", "runtime_hash": "old-machine", "process_id": "old-process", "verification": "protocol", "verified_at": time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
 	resp, err := svc.CreateToken(&dto.CreateInstallTokenRequest{
 		ReplaceNodeID: &created.ID,
 		PanelURL:      "https://panel.example",
@@ -155,7 +161,8 @@ func TestReplaceToken_UpdatesExistingNode(t *testing.T) {
 	if err := svc.BindTokenIP(tok, "192.0.2.2"); err != nil {
 		t.Fatalf("bind ip: %v", err)
 	}
-	regResp, err := svc.RegisterNode(tok, "192.0.2.2", &dto.RegisterNodeRequest{PublicIP: "192.0.2.2"})
+	bootstrapHash := strings.Repeat("ab", 32)
+	regResp, err := svc.RegisterNode(tok, "192.0.2.2", &dto.RegisterNodeRequest{PublicIP: "192.0.2.2", BootstrapConfigSHA256: bootstrapHash})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -173,6 +180,16 @@ func TestReplaceToken_UpdatesExistingNode(t *testing.T) {
 	}
 	if node.SyncStatus != "pending" || node.ConfigHash != "" {
 		t.Fatalf("expected pending status + empty hash, got %s / %q", node.SyncStatus, node.ConfigHash)
+	}
+	var state entity.NodeConfigState
+	if err := repository.DB.First(&state, "node_id = ?", node.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if state.DiskHash != "" || state.RuntimeHash != "" || state.ProcessID != "" || state.VerifiedAt != nil || !state.RecoveryPending {
+		t.Fatalf("stale machine receipt: %+v", state)
+	}
+	if !state.InitialBaseline || state.InitialBaselineHash != bootstrapHash || state.RuntimeAuthorizationHash != "" {
+		t.Fatal("replacement lost new installation baseline or retained old authorization")
 	}
 	var count int64
 	repository.DB.Table("nodes").Where("name = ?", "sg01").Count(&count)

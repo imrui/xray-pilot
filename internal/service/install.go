@@ -255,6 +255,15 @@ func (s *InstallService) BindTokenIP(t *entity.NodeInstallToken, ip string) erro
 // 分组关联 / 协议密钥 / 端口 SNI 覆盖全部保留。
 // 调用前应 AuthorizeToken 校验过 IP 匹配。
 func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP string, req *dto.RegisterNodeRequest) (*dto.RegisterNodeResponse, error) {
+	// Only the authenticated installer may attest a newly created file. Old
+	// installers remain compatible but receive no implicit overwrite permission.
+	if req.BootstrapConfigSHA256 != "" {
+		decoded, err := hex.DecodeString(req.BootstrapConfigSHA256)
+		if err != nil || len(decoded) != 32 {
+			return nil, fmt.Errorf("安装配置基线必须为 SHA-256")
+		}
+		req.BootstrapConfigSHA256 = strings.ToLower(req.BootstrapConfigSHA256)
+	}
 	var meta nodeMeta
 	if err := json.Unmarshal([]byte(t.NodeMeta), &meta); err != nil {
 		return nil, fmt.Errorf("解析 token 节点元数据失败: %w", err)
@@ -367,12 +376,25 @@ func (s *InstallService) registerCreate(t *entity.NodeInstallToken, ip string, n
 		}
 		return nil, err
 	}
+	if err := repository.EnsureConfigState(repository.DB, node.ID); err != nil {
+		return nil, err
+	}
+	if err := repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ?", node.ID).Updates(map[string]any{"initial_baseline": req.BootstrapConfigSHA256 != "", "initial_baseline_hash": req.BootstrapConfigSHA256}).Error; err != nil {
+		return nil, err
+	}
+
 	return node, nil
 }
 
 // registerReplace 更换模式：更新现有节点的 IP/SSH/版本信息，不新建记录。
 // Node ID 不变 → 分组关联、NodeProfileKey（Reality 私钥等）、端口/SNI 覆盖原样保留。
 func (s *InstallService) registerReplace(t *entity.NodeInstallToken, ip string, now time.Time, meta *nodeMeta, req *dto.RegisterNodeRequest) (*entity.Node, error) {
+	defer lockNode(*t.ReplaceNodeID)()
+	_, release, err := repository.AcquireConfigLease(*t.ReplaceNodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	node, err := s.nodeRepo.FindByID(*t.ReplaceNodeID)
 	if err != nil {
 		return nil, ErrReplaceNodeNotFound
@@ -407,7 +429,7 @@ func (s *InstallService) registerReplace(t *entity.NodeInstallToken, ip string, 
 	node.ConfigHash = ""
 	node.RegisteredAt = &now
 
-	if err := s.nodeRepo.Update(node); err != nil {
+	if err := s.nodeRepo.ReplaceHost(node, req.BootstrapConfigSHA256); err != nil {
 		return nil, fmt.Errorf("更新节点失败: %w", err)
 	}
 	return node, nil

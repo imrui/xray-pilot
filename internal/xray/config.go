@@ -59,6 +59,10 @@ type Routing struct {
 }
 
 type RoutingRule struct {
+	Domain      []string `json:"domain,omitempty"`
+	Port        string   `json:"port,omitempty"`
+	Network     string   `json:"network,omitempty"`
+	Protocol    []string `json:"protocol,omitempty"`
 	Type        string   `json:"type,omitempty"`
 	IP          []string `json:"ip,omitempty"`     // 目标 IP 匹配
 	Source      []string `json:"source,omitempty"` // 来源 IP 匹配（http/socks 白名单用）
@@ -82,8 +86,9 @@ type Sniffing struct {
 }
 
 type Outbound struct {
-	Protocol string `json:"protocol"`
-	Tag      string `json:"tag"`
+	Settings interface{} `json:"settings,omitempty"`
+	Protocol string      `json:"protocol"`
+	Tag      string      `json:"tag"`
 }
 
 // VLESS 入站结构
@@ -204,6 +209,9 @@ func GenerateConfig(node *entity.Node, profileKeys []entity.NodeProfileKey, user
 		if key.Profile == nil || !key.Profile.Active {
 			continue
 		}
+		if key.Profile.Protocol == types.ProtocolHysteria2 {
+			continue
+		} // managed externally; keep subscription support
 		portKey := fmt.Sprintf("%s/%d", types.ProtocolTransport(key.Profile.Protocol), effectivePort(key.Profile, &key))
 		if owner, ok := usedPorts[portKey]; ok {
 			warnings = append(warnings, fmt.Sprintf("协议[%s]端口 %s 与[%s]冲突，已跳过该入站", key.Profile.Name, portKey, owner))
@@ -362,7 +370,6 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 
 	// SNI / 指纹走 helper：节点密钥覆盖 > 协议模板 > 默认
 	sni := types.EffectiveRealitySNI(&ps, &km)
-	fingerprint := types.EffectiveRealityFingerprint(&ps, &km)
 
 	clients := buildVlessClients(users, "xtls-rprx-vision")
 
@@ -385,7 +392,6 @@ func buildVlessRealityInbound(profile *entity.InboundProfile, key *entity.NodePr
 				ServerNames: []string{sni},
 				PrivateKey:  privateKey,
 				ShortIds:    shortIds,
-				Fingerprint: fingerprint,
 			},
 		},
 		Sniffing: &Sniffing{

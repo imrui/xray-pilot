@@ -32,7 +32,7 @@ import { systemApi } from '@/lib/api'
 import { SyncStatusPill } from '@/components/SyncStatusPill'
 import { ChangelogDrawer } from '@/components/ChangelogDrawer'
 import { ChangePasswordModal } from '@/components/ChangePasswordModal'
-import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { useConfirm } from '@/lib/confirm-context'
 import { useSettingsDraft } from '@/store/settingsDraft'
 import { SETTINGS_SECTIONS } from '@/pages/settings/context'
 
@@ -64,6 +64,7 @@ const navGroups = [
     items: [
       { path: '/nodes', label: '节点管理', subtitle: '管理服务节点与配置同步', icon: Server },
       { path: '/profiles', label: '协议配置', subtitle: '维护协议模板与节点密钥', icon: Shield },
+      { path: '/routing', label: '路由配置', subtitle: '路由模板与使用关系', icon: Shield },
       { path: '/groups', label: '分组管理', subtitle: '管理节点分组和策略映射', icon: Layers },
     ],
   },

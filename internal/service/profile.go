@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +42,13 @@ func (s *ProfileService) Create(req *dto.CreateProfileRequest) (*dto.ProfileResp
 		Active:   active,
 		Remark:   req.Remark,
 	}
+	if p.Protocol == types.ProtocolVlessReality {
+		var err error
+		p.Settings, err = normalizeRealityShortIDs(p.Settings, "")
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := s.profileRepo.Create(p); err != nil {
 		return nil, fmt.Errorf("创建协议配置失败: %w", err)
 	}
@@ -63,7 +71,14 @@ func (s *ProfileService) Update(id uint, req *dto.UpdateProfileRequest) (*dto.Pr
 		p.Port = *req.Port
 	}
 	if len(req.Settings) > 0 {
-		p.Settings = normalizeSettingsJSON(req.Settings)
+		raw := normalizeSettingsJSON(req.Settings)
+		if p.Protocol == types.ProtocolVlessReality {
+			raw, err = normalizeRealityShortIDs(raw, p.Settings)
+			if err != nil {
+				return nil, err
+			}
+		}
+		p.Settings = raw
 	}
 	if req.Active != nil {
 		p.Active = *req.Active
@@ -147,6 +162,20 @@ func (s *ProfileService) UpsertNodeKey(nodeID, profileID uint, req *dto.UpsertNo
 	settingsJSON := normalizeSettingsJSON(req.Settings)
 	// 对 Reality 私钥加密存储
 	if profile.Protocol == types.ProtocolVlessReality {
+		previous := ""
+		if keys, readErr := s.profileRepo.FindKeysForNode(nodeID); readErr != nil {
+			return nil, readErr
+		} else {
+			for _, key := range keys {
+				if key.ProfileID == profileID {
+					previous = key.Settings
+				}
+			}
+		}
+		settingsJSON, err = normalizeRealityShortIDs(settingsJSON, previous)
+		if err != nil {
+			return nil, err
+		}
 		settingsJSON, err = encryptRealityKey(settingsJSON)
 		if err != nil {
 			return nil, fmt.Errorf("加密私钥失败: %w", err)
@@ -167,6 +196,55 @@ func (s *ProfileService) UpsertNodeKey(nodeID, profileID uint, req *dto.UpsertNo
 	}
 	_ = s.nodeRepo.MarkAllDrifted()
 	return toNodeKeyResponse(key), nil
+}
+
+func normalizeRealityShortIDs(raw, previous string) (string, error) {
+	if raw == "" {
+		return raw, nil
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return "", fmt.Errorf("Reality 设置必须是 JSON 对象")
+	}
+	var next, old types.RealityKeyMaterial
+	if err := json.Unmarshal([]byte(raw), &next); err != nil {
+		return "", err
+	}
+	_ = json.Unmarshal([]byte(previous), &old)
+	legacyEmpty := previous != "" && old.PrivateKey != "" && len(old.ShortIds) == 0
+	for _, sid := range old.ShortIds {
+		if sid == "" {
+			legacyEmpty = true
+		}
+	}
+	if len(next.ShortIds) == 0 && next.PrivateKey != "" {
+		if next.AllowEmptyShortID || legacyEmpty {
+			next.ShortIds = []string{""}
+		} else {
+			sid, err := xray.GenerateShortID()
+			if err != nil {
+				return "", err
+			}
+			next.ShortIds = []string{sid}
+		}
+	}
+	for _, sid := range next.ShortIds {
+		if sid == "" {
+			if !next.AllowEmptyShortID && !legacyEmpty {
+				return "", fmt.Errorf("空 shortId 需要显式设置 allow_empty_short_id；默认关闭")
+			}
+			continue
+		}
+		if _, err := hex.DecodeString(sid); err != nil || len(sid) > 16 {
+			return "", fmt.Errorf("shortId 必须是最多 16 位的偶数长度十六进制")
+		}
+	}
+	if len(next.ShortIds) > 0 {
+		data, _ := json.Marshal(next.ShortIds)
+		values["short_ids"] = data
+	}
+	data, err := json.Marshal(values)
+	return string(data), err
 }
 
 // GetNodeKeys 获取节点关联的所有协议密钥（编辑场景返回可编辑明文）

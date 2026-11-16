@@ -8,6 +8,7 @@ import (
 
 	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/repository"
+	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
 
 // 配置键常量
@@ -35,6 +36,7 @@ const (
 	KeyXrayLogError             = "xray.log_error"
 	KeyXrayLogLevel             = "xray.log_level"
 	KeyXrayStableVersion        = "xray.stable_version"
+	KeyXrayProbeURL             = "xray.health_probe_url"
 	// 用户增删时是否走 gRPC 即时生效（不重启 xray）。off 时回退到「标记漂移 → 全量 SSH push + restart」旧路径。
 	// v0.4.5 首发默认 off；v0.4.9 起默认 on（真节点已验证不掉线）。老面板 DB 中已有的值不受影响。
 	KeyXrayLiveApply = "xray.live_apply_enabled"
@@ -72,6 +74,7 @@ func normalizeXrayStableVersion(value string) (string, error) {
 
 // 硬编码默认值（三级优先级最后兜底）
 var settingDefaults = map[string]string{
+	KeyXrayProbeURL:               xssh.DefaultProbeURL,
 	KeySchedulerDriftInterval:     "300",
 	KeySchedulerHealthInterval:    "120",
 	KeySchedulerTrafficInterval:   "300",
@@ -149,6 +152,11 @@ func (s *SettingService) BatchUpdate(kv map[string]string) error {
 	filtered := make(map[string]string, len(kv))
 	for k, v := range kv {
 		if _, known := settingDefaults[k]; known {
+			if k == KeyXrayProbeURL {
+				if err := xssh.ValidateProbeURL(v); err != nil {
+					return err
+				}
+			}
 			if k == KeyXrayStableVersion {
 				var err error
 				v, err = normalizeXrayStableVersion(v)

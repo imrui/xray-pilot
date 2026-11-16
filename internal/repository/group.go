@@ -2,6 +2,7 @@ package repository
 
 import (
 	"github.com/imrui/xray-pilot/internal/entity"
+	"gorm.io/gorm"
 )
 
 type GroupRepository struct{}
@@ -32,20 +33,49 @@ func (r *GroupRepository) List(page, pageSize int) ([]entity.Group, int64, error
 }
 
 func (r *GroupRepository) Update(group *entity.Group) error {
-	return DB.Save(group).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(group).Error; err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, nil)
+	})
 }
 
 func (r *GroupRepository) UpdateActive(id uint, active bool) error {
-	return DB.Model(&entity.Group{}).Where("id = ?", id).Update("active", active).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&entity.Group{}).Where("id = ?", id).Update("active", active).Error; err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, nil)
+	})
 }
 
 func (r *GroupRepository) Delete(id uint) error {
-	return DB.Delete(&entity.Group{}, id).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("scope = ? AND target_id = ?", "group", id).Delete(&entity.RoutingBinding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM group_nodes WHERE group_id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("group_id = ?", id).Delete(&entity.UserGroup{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&entity.Group{}, id).Error; err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, nil)
+	})
 }
 
 // ReplaceNodes 替换分组关联节点（many2many）
 func (r *GroupRepository) ReplaceNodes(group *entity.Group, nodes []entity.Node) error {
-	return DB.Model(group).Association("Nodes").Replace(nodes)
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(group).Association("Nodes").Replace(nodes); err != nil {
+			return err
+		}
+		return InvalidateConfigs(tx, nil)
+	})
 }
 
 func (r *GroupRepository) FindNamesByNodeID(nodeID uint) ([]string, error) {
