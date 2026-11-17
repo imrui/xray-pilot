@@ -14,20 +14,15 @@ import { TrafficRankingChart } from './TrafficRankingChart'
 const control = 'h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm'
 
 function ObjectFilter({ label, options, value, onChange }: { label: string; options: TrafficOption[]; value: number | undefined; onChange: (id: number | undefined) => void }) {
-  const [search, setSearch] = useState('')
-  const shown = options.filter(o => o.id === value || o.name.toLowerCase().includes(search.toLowerCase()))
   return (
-    <div className="flex w-full min-w-0 items-center gap-2 sm:w-60">
+    <label className="flex w-full min-w-0 items-center gap-2 sm:w-60">
       <span className="shrink-0 text-sm text-soft">{label}</span>
-      <div className="flex min-w-0 flex-1 overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel-strong)] focus-within:border-[var(--accent)]">
-        <input className="h-9 w-16 min-w-0 border-r border-[var(--border)] bg-transparent px-2 text-sm outline-none focus-visible:bg-[var(--panel-muted)]" type="search" aria-label={`搜索${label}`} placeholder="搜索" value={search} onChange={e => setSearch(e.target.value)} />
-        <select className="h-9 min-w-0 flex-1 bg-transparent px-2 text-sm focus-visible:outline-[var(--accent)]" aria-label={`筛选${label}`} value={value ?? ''} onChange={e => onChange(e.target.value ? Number(e.target.value) : undefined)}>
+        <select className="h-9 min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm focus-visible:outline-[var(--accent)]" aria-label={`筛选${label}`} value={value ?? ''} onChange={e => onChange(e.target.value ? Number(e.target.value) : undefined)}>
           <option value="">全部{label}</option>
           {value && !options.some(o => o.id === value) && <option value={value}>已删除{label} #{value}</option>}
-          {shown.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
-      </div>
-    </div>
+    </label>
   )
 }
 

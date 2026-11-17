@@ -112,7 +112,7 @@ export default function Dashboard() {
         </SurfaceCard>
   )
   const nodeHealth = (
-        <SurfaceCard className="@container flex min-w-0 flex-col">
+        <SurfaceCard className="flex min-w-0 flex-col">
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] px-5">
             <h3 className="font-semibold">节点健康</h3>
             <Btn variant="ghost" className="h-8 px-2" onClick={() => void nodesQuery.refetch()} disabled={nodesQuery.isFetching}>
@@ -126,7 +126,7 @@ export default function Dashboard() {
             ) : sortedNodes.length === 0 ? (
               <div className="px-5 py-10 text-sm text-soft">{nodesQuery.isFetching ? '正在加载…' : '暂无可用节点数据'}</div>
             ) : (
-              <div className="grid gap-3 p-4 @min-[520px]:max-[1600px]:grid-cols-2">{sortedNodes.map((node) => <NodeHealthRow key={node.id} node={node} />)}</div>
+              <div className="grid grid-cols-1 gap-3 p-4">{sortedNodes.map((node) => <NodeHealthRow key={node.id} node={node} />)}</div>
             )}
           </div>
         </SurfaceCard>
