@@ -34,6 +34,7 @@ type SSHParams struct {
 	OnPhase             func(string)
 	RollbackContent     string
 	ConfirmedProcess    string
+	RequiresIPv6        bool
 }
 
 // SyncResult 单次同步结果
@@ -73,7 +74,7 @@ func SyncWithFallback(params SSHParams, configContent string) *SyncResult {
 	}
 	defer client.Close()
 
-	if err := client.ApplyXrayConfig(configContent, configPath, true, false, xssh.TransactionOptions{BaselineHash: params.BaselineHash, AllowInitial: params.AllowInitial, InitialBaselineHash: params.InitialBaselineHash, OnBaseline: params.OnBaseline, BeforeApply: params.BeforeApply, ProbeURL: params.ProbeURL, OnPhase: params.OnPhase, RollbackContent: params.RollbackContent, ConfirmedProcess: params.ConfirmedProcess}); err != nil {
+	if err := client.ApplyXrayConfig(configContent, configPath, true, false, xssh.TransactionOptions{BaselineHash: params.BaselineHash, AllowInitial: params.AllowInitial, InitialBaselineHash: params.InitialBaselineHash, OnBaseline: params.OnBaseline, BeforeApply: params.BeforeApply, ProbeURL: params.ProbeURL, OnPhase: params.OnPhase, RollbackContent: params.RollbackContent, ConfirmedProcess: params.ConfirmedProcess, RequiresIPv6: params.RequiresIPv6}); err != nil {
 		result := &SyncResult{ElapsedMs: time.Since(start).Milliseconds(), Error: fmt.Sprintf("上传配置失败: %v", err)}
 		if strings.Contains(err.Error(), "目标文件已存在") {
 			if raw, e := client.ReadRemoteFile(configPath); e == nil && ConfigHash(raw) == ConfigHash(configContent) {

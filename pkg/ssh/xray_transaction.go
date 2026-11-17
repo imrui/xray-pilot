@@ -13,6 +13,11 @@ import (
 
 // ApplyXrayConfig validates before replacing, serializes remote writers and refuses
 // rollback across an authorization change. validateOnly never mutates live config.
+type ValidateReceipt struct {
+	XrayVersion string
+	Detail      string
+}
+
 type TransactionOptions struct {
 	BaselineHash        string
 	AllowInitial        bool
@@ -24,6 +29,8 @@ type TransactionOptions struct {
 	RollbackContent     string
 	// ConfirmedProcess is supplied only for this exact content's acknowledged runtime.
 	ConfirmedProcess string
+	RequiresIPv6     bool
+	ValidateResult   *ValidateReceipt
 }
 
 func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly bool, opts ...TransactionOptions) error {
@@ -85,6 +92,9 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 		return err
 	}
 	payload["rollback"] = rollback
+	if opt.RequiresIPv6 {
+		payload["requires_ipv6"] = true
+	}
 	encoded, _ := json.Marshal(payload)
 	envelope = string(encoded)
 	script := xrayTransactionScript(path, hex.EncodeToString(expected[:]), restart, validateOnly)
@@ -112,6 +122,10 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 			_, _ = stdin.Write([]byte("COMMIT\n"))
 		} else if strings.HasPrefix(line, "PILOT:PHASE:") && opt.OnPhase != nil {
 			opt.OnPhase(strings.TrimPrefix(line, "PILOT:PHASE:"))
+		} else if strings.HasPrefix(line, "PILOT:XRAY_VERSION:") && opt.ValidateResult != nil {
+			opt.ValidateResult.XrayVersion = strings.TrimSpace(strings.TrimPrefix(line, "PILOT:XRAY_VERSION:"))
+		} else if strings.HasPrefix(line, "PILOT:VALIDATE_ERR:") && opt.ValidateResult != nil {
+			opt.ValidateResult.Detail = strings.TrimSpace(strings.TrimPrefix(line, "PILOT:VALIDATE_ERR:"))
 		}
 	}
 	sess.Stdout = &output
@@ -245,16 +259,17 @@ chown "$service_user:$service_group" "$tmp"
 chmod 600 "$tmp"
 chown "$service_user:$service_group" "$tmp.rollback.json"
 chmod 600 "$tmp.rollback.json"
+__VERSION_PROBE__
 # Strict policy is enabled only on the baseline whose configuration was verified.
 if grep -q 'ForceIPv' "$tmp"; then
  "$binary" version | head -1 | grep -Eq 'Xray 26\.3\.27([[:space:]]|$)' || { echo VERSION_UNSUPPORTED; exit 22; }
 fi
-if grep -q '"direct-v6"' "$tmp"; then
+req_v6=$(python3 -c 'import json,sys;print(1 if json.load(open(sys.argv[1])).get("requires_ipv6") else 0)' "$tmp.probes")
+if test "$req_v6" = 1 || grep -q '"direct-v6"' "$tmp"; then
  ip -6 route show default | grep -q default || { echo IPV6_UNAVAILABLE; exit 23; }
- probe_url=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["probe_url"])' "$tmp.probes")
- timeout 10 curl -6 -fsS --max-time 8 "$probe_url" >/dev/null || { echo IPV6_UNAVAILABLE; exit 23; }
+ __IPV6_CURL__
 fi
-if ! timeout 30 "$binary" run -test -format json -config "$tmp" >/dev/null 2>&1; then echo PREFLIGHT_FAILED; exit 24; fi
+__XRAY_TEST__
 __ROLLBACK_PREFLIGHT__
 sync -f "$tmp"
 echo PILOT:PHASE:staged
@@ -280,10 +295,26 @@ __RESTART__
 	s = strings.ReplaceAll(s, "__CHECK_PATH__", xrayPathCheckScript)
 	s = strings.ReplaceAll(s, "__HASH__", shellQuote(expected))
 	pre := ""
+	versionProbe := ""
+	ipv6Curl := `probe_url=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["probe_url"])' "$tmp.probes")
+ timeout 10 curl -6 -fsS --max-time 8 "$probe_url" >/dev/null || { echo IPV6_UNAVAILABLE; exit 23; }`
+	xrayTest := `if ! timeout 30 "$binary" run -test -format json -config "$tmp" >/dev/null 2>&1; then echo PREFLIGHT_FAILED; exit 24; fi`
 	if validateOnly {
 		pre = "echo VALIDATED; exit 0"
+		versionProbe = `ver_line=$("$binary" version 2>/dev/null | head -1 | awk '{print $2}' || true)
+test -z "$ver_line" || echo "PILOT:XRAY_VERSION:$ver_line"`
+		ipv6Curl = ""
+		xrayTest = `if ! test_out=$(timeout 30 "$binary" run -test -format json -config "$tmp" 2>&1); then
+ clean_err=$(printf '%s' "$test_out" | tr '\r\n' '  ' | head -c 400)
+ echo "PILOT:VALIDATE_ERR:$clean_err"
+ echo PREFLIGHT_FAILED
+ exit 24
+fi`
 	}
 	s = strings.ReplaceAll(s, "__VALIDATE__", pre)
+	s = strings.ReplaceAll(s, "__VERSION_PROBE__", versionProbe)
+	s = strings.ReplaceAll(s, "__IPV6_CURL__", ipv6Curl)
+	s = strings.ReplaceAll(s, "__XRAY_TEST__", xrayTest)
 	rollbackPreflight := ""
 	if restart {
 		rollbackPreflight = `command -v curl >/dev/null || { echo PREFLIGHT_FAILED; exit 24; }

@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Code2, Network, Route, SlidersHorizontal } from 'lucide-react'
+import { Code2, FlaskConical, Network, Route, SlidersHorizontal } from 'lucide-react'
 import { Drawer } from '@/components/ui/Drawer'
 import { Btn, Field, FieldGroup, SelectField } from '@/components/ui/Form'
 import { JsonEditor } from '@/components/ui/JsonEditor'
+import { DraftPreflightModal } from './DraftPreflightModal'
 import { useConfirm } from '@/lib/confirm-context'
 import { useAuthStore } from '@/store/auth'
 import {
@@ -77,6 +78,7 @@ export function TemplateEditor({
   const [policyJsonText, setPolicyJsonText] = useState(() => JSON.stringify(initial, null, 2))
   const [hasRuleCardError, setHasRuleCardError] = useState(false)
   const [hasOutboundCardError, setHasOutboundCardError] = useState(false)
+  const [sandboxOpen, setSandboxOpen] = useState(false)
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -291,8 +293,17 @@ export function TemplateEditor({
           </div>
 
           <div className="flex items-center gap-2" data-slot="sandbox-preflight">
-            {headerActions ?? (
-              <span className="text-xs text-soft">Schema v3 · 保存时自动加密出站凭据</span>
+            {headerActions}
+            {writable && (
+              <Btn
+                variant="accent"
+                disabled={busy}
+                onClick={() => setSandboxOpen(true)}
+                className="h-8 px-3 text-xs"
+              >
+                <FlaskConical className="h-3.5 w-3.5" />
+                节点沙箱预检
+              </Btn>
             )}
           </div>
         </div>
@@ -393,6 +404,32 @@ export function TemplateEditor({
             </Btn>
           )}
         </div>
+      )}
+
+      {sandboxOpen && (
+        <DraftPreflightModal
+          open={sandboxOpen}
+          onClose={() => setSandboxOpen(false)}
+          nodes={overview.data?.nodes ?? []}
+          getDraftPolicy={() => {
+            if (viewMode === 'structured') {
+              if (hasRuleCardError || hasOutboundCardError) {
+                throw new Error('请先修正单条卡片内的 JSON 语法错误，再执行远端预检。')
+              }
+              return buildCurrentPolicy()
+            }
+            const parsed = JSON.parse(policyJsonText) as Record<string, unknown>
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+              throw new Error('路由策略必须是 JSON 对象。')
+            }
+            return {
+              ...upgradeRoutingPolicy(policyJsonText),
+              ...(parsed.dns !== undefined ? { dns: parsed.dns } : {}),
+              ...(parsed.balancers !== undefined ? { balancers: parsed.balancers } : {}),
+              ...(parsed.observatory !== undefined ? { observatory: parsed.observatory } : {}),
+            }
+          }}
+        />
       )}
     </Drawer>
   )

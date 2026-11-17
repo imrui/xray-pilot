@@ -31,7 +31,7 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 	api.GET("/node-sync-logs", listNodeSyncLogs)
 	reply := func(c *gin.Context, v any, err error) {
 		if err != nil {
-			if errors.Is(err, service.ErrRoutingConflict) {
+			if errors.Is(err, service.ErrRoutingConflict) || errors.Is(err, service.ErrNodeSyncBusy) {
 				response.Fail(c, 409, err.Error())
 				return
 			}
@@ -165,6 +165,15 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 		})
 	}
 	api.POST("/nodes/:id/preflight", func(c *gin.Context) { reply(c, nil, service.NewSyncService().PreflightNode(id(c))) })
+	api.POST("/nodes/:id/preflight-draft", RequireSuperAdmin(), func(c *gin.Context) {
+		var req service.PreflightDraftRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			reply(c, nil, err)
+			return
+		}
+		res, err := service.NewSyncService().PreflightDraft(id(c), req)
+		reply(c, res, err)
+	})
 	api.POST("/nodes/:id/restore-policy", RequireSuperAdmin(), func(c *gin.Context) {
 		var req struct {
 			Version uint   `json:"version"`

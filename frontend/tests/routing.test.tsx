@@ -829,3 +829,102 @@ test('节点绑定支持按出站 Tag 重映射与参数替换，并清理残留
     '198.51.100.88',
   )
 })
+
+test('Phase 2 场景片段库即插即用与未发布草稿远端沙箱预检闭环', async () => {
+  api((method, url, body) => {
+    if (method === 'post' && url === '/nodes/1/preflight-draft') {
+      const policy = body.policy as {
+        custom_outbounds: { tag: string }[]
+        custom_rules: { domain?: string[]; ip?: string[]; outboundTag: string }[]
+      }
+      assert.equal(policy.custom_outbounds[0].tag, 'warp-egress')
+      assert.equal(policy.custom_rules.length, 2)
+      assert.equal(policy.custom_rules[0].outboundTag, 'warp-egress')
+      return {
+        valid: true,
+        xray_version: '26.3.27',
+        requires_ipv6: false,
+        elapsed_ms: 420,
+        warnings: [],
+        redacted_config: '{\n  "outbounds": [{"tag": "warp-egress"}]\n}',
+        error: '',
+      }
+    }
+  })
+
+  mount(<TemplateEditor template={template} onClose={() => {}} onConfigure={() => {}} />)
+
+  // 1. 插入 Cloudflare WARP 出站片段并补填 secretKey
+  fireEvent.click(screen.getByRole('tab', { name: /自定义出站/ }))
+  fireEvent.click(screen.getByRole('button', { name: /场景出站片段/ }))
+  fireEvent.click(screen.getByRole('button', { name: /Cloudflare WARP/ }))
+  fireEvent.change(screen.getByLabelText(/本机私钥/), {
+    target: { value: 'test-wg-secret' },
+  })
+
+  // 2. 插入 Telegram 域名与 IP 配套规则片段并选择目标出站 warp-egress
+  fireEvent.click(screen.getByRole('tab', { name: /路由规则/ }))
+  fireEvent.click(screen.getByRole('button', { name: /插入规则片段/ }))
+  fireEvent.click(screen.getByRole('button', { name: /Telegram 域名与 IP 集合/ }))
+  const modal = await screen.findByRole('dialog', { name: /插入规则片段 · Telegram/ })
+  assert.equal(
+    (within(modal).getByLabelText(/选择片段命中的目标出站/) as HTMLSelectElement).value,
+    'warp-egress',
+  )
+  fireEvent.click(within(modal).getByRole('button', { name: '确认插入规则' }))
+  assert.ok(screen.getByLabelText('规则 #2 备注'))
+
+  // 3. 在未保存、未发布状态下直接发起远端节点沙箱预检
+  fireEvent.click(screen.getByRole('button', { name: /节点沙箱预检/ }))
+  const pfModal = await screen.findByRole('dialog', { name: '未发布草稿远端沙箱预检' })
+  fireEvent.click(within(pfModal).getByRole('button', { name: /运行远端沙箱预检/ }))
+
+  await within(pfModal).findByText('远端 Xray 沙箱预检通过')
+  assert.ok(within(pfModal).getByText('Xray 26.3.27'))
+  assert.match(
+    (within(pfModal).getByLabelText('沙箱预检合成配置预览') as HTMLTextAreaElement).value,
+    /warp-egress/,
+  )
+  // 确认未产生任何模板保存或绑定写入请求
+  assert.equal(
+    calls.filter((c) => c.method === 'post' && c.url !== '/nodes/1/preflight-draft').length,
+    0,
+  )
+  assert.equal(calls.filter((c) => c.method === 'patch' || c.method === 'put').length, 0)
+})
+
+test('节点路由绑定抽屉支持在保存覆盖前直接对本节点执行沙箱预检', async () => {
+  api((method, url, body) => {
+    if (method === 'get' && url.endsWith('/routing')) {
+      return { ...binding, overrides: '{}' }
+    }
+    if (method === 'post' && url === '/nodes/1/preflight-draft') {
+      const customOv = JSON.parse(body.custom_overrides as string)
+      assert.deepEqual(customOv, { ipv4_force_domains: ['domain:sandbox-before-save.example'] })
+      return {
+        valid: false,
+        xray_version: '26.3.27',
+        requires_ipv6: false,
+        elapsed_ms: 310,
+        warnings: [],
+        redacted_config: '{\n  "routing": {}\n}',
+        error: 'PREFLIGHT_FAILED: geosite.dat missing entry',
+      }
+    }
+  })
+
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  await screen.findByLabelText('IPv4 模板域名')
+  fireEvent.change(screen.getByLabelText('强制 IPv4 域名'), { target: { value: 'custom' } })
+  fireEvent.change(screen.getByLabelText('IPv4 覆盖域名'), {
+    target: { value: 'domain:sandbox-before-save.example' },
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: /沙箱预检/ }))
+  const pfModal = await screen.findByRole('dialog', { name: '远端沙箱预检 · lab-1' })
+  fireEvent.click(within(pfModal).getByRole('button', { name: /运行远端沙箱预检/ }))
+
+  await within(pfModal).findByText('沙箱预检未通过')
+  assert.ok(within(pfModal).getByText(/geosite\.dat missing entry/))
+  assert.equal(calls.filter((c) => c.method === 'put').length, 0)
+})

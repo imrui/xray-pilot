@@ -6,11 +6,15 @@ import {
   Lock,
   Plus,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Btn, Field, FieldGroup, SelectField, Switch } from '@/components/ui/Form'
+import { Modal } from '@/components/ui/Modal'
 import { JsonEditor } from '@/components/ui/JsonEditor'
+import { RULE_SNIPPETS } from '@/lib/routing-snippets'
+import type { RuleSnippet } from '@/lib/routing-snippets'
 import {
   BUILTIN_OUTBOUNDS,
   domainLines,
@@ -429,6 +433,9 @@ export function RuleWaterfallEditor({
   onPendingErrorChange?: (hasError: boolean) => void
 }) {
   const [importOpen, setImportOpen] = useState(false)
+  const [snippetsOpen, setSnippetsOpen] = useState(false)
+  const [pendingSnippet, setPendingSnippet] = useState<RuleSnippet | null>(null)
+  const [snippetTargetTag, setSnippetTargetTag] = useState('block')
   const [ruleErrors, setRuleErrors] = useState<Record<number, string>>({})
 
   const updateRuleError = (idx: number, err: string) => {
@@ -504,15 +511,45 @@ export function RuleWaterfallEditor({
         title={`自定义分流规则 · ${rules.length} 条`}
         description="按从上到下顺序优先匹配，优先级高于下方强制 IPv4 / IPv6 快捷域名列表。"
       >
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-soft">
             支持 geosite / geoip / 协议嗅探与自定义出站联动；暂停的规则在节点下发时自动跳过。
           </span>
-          <Btn variant="secondary" disabled={disabled || rules.length >= 200} onClick={addRule}>
-            <Plus className="h-4 w-4" />
-            添加分流规则
-          </Btn>
+          <div className="flex flex-wrap gap-2">
+            <Btn
+              variant="secondary"
+              disabled={disabled || rules.length >= 200}
+              onClick={() => setSnippetsOpen(!snippetsOpen)}
+            >
+              <Sparkles className="h-4 w-4" />
+              插入规则片段
+            </Btn>
+            <Btn variant="secondary" disabled={disabled || rules.length >= 200} onClick={addRule}>
+              <Plus className="h-4 w-4" />
+              添加分流规则
+            </Btn>
+          </div>
         </div>
+
+        {snippetsOpen && (
+          <div className="grid gap-2.5 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 sm:grid-cols-2">
+            {RULE_SNIPPETS.map((snippet) => (
+              <button
+                key={snippet.key}
+                type="button"
+                disabled={disabled || rules.length >= 200}
+                onClick={() => {
+                  setPendingSnippet(snippet)
+                  setSnippetTargetTag(snippet.defaultTarget(outbounds))
+                }}
+                className="flex flex-col items-start gap-1 rounded border border-[var(--border)] bg-[var(--panel-muted)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--panel)]"
+              >
+                <span className="text-xs font-semibold text-[var(--accent)]">{snippet.name}</span>
+                <span className="text-[11px] leading-4 text-soft">{snippet.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {rules.length === 0 ? (
           <p className="rounded-md border border-dashed border-[var(--border-strong)] bg-[var(--panel-strong)] p-4 text-center text-xs text-soft">
@@ -620,6 +657,48 @@ export function RuleWaterfallEditor({
           </div>
         )}
       </FieldGroup>
+
+      <Modal
+        open={!!pendingSnippet}
+        onClose={() => setPendingSnippet(null)}
+        size="sm"
+        title={`插入规则片段 · ${pendingSnippet?.name ?? ''}`}
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => setPendingSnippet(null)}>
+              取消
+            </Btn>
+            <Btn
+              onClick={() => {
+                if (!pendingSnippet) return
+                onRulesChange([...rules, ...pendingSnippet.build(snippetTargetTag)])
+                setPendingSnippet(null)
+                setSnippetsOpen(false)
+              }}
+            >
+              确认插入规则
+            </Btn>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-xs leading-5 text-soft">{pendingSnippet?.description}</p>
+          <SelectField
+            label="选择片段命中的目标出站（outboundTag）"
+            value={snippetTargetTag}
+            onChange={setSnippetTargetTag}
+            options={[
+              ...BUILTIN_OUTBOUNDS.map((b) => ({ value: b.tag, label: b.label })),
+              ...outbounds
+                .filter((o) => o.tag)
+                .map((o) => ({
+                  value: o.tag,
+                  label: `${o.tag}（${o.protocol}${o.remark ? ` · ${o.remark}` : ''}）`,
+                })),
+            ]}
+          />
+        </div>
+      </Modal>
     </div>
   )
 }

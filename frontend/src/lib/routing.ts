@@ -7,9 +7,26 @@ import type {
   EffectiveRouting,
   RoutingBinding,
   RoutingOverview,
+  RoutingPolicy,
   RoutingRevision,
   RoutingScope,
 } from './routing-model'
+
+export interface PreflightDraftRequest {
+  policy: RoutingPolicy | Record<string, unknown>
+  use_node_overrides?: boolean
+  custom_overrides?: Record<string, unknown> | string | null
+}
+
+export interface PreflightDraftResponse {
+  valid: boolean
+  xray_version: string
+  requires_ipv6: boolean
+  elapsed_ms: number
+  warnings: string[]
+  redacted_config: string
+  error: string
+}
 export async function routingGet<T>(url: string): Promise<T> {
   return (await request.get<{ data: T }>(url)).data.data
 }
@@ -45,6 +62,15 @@ export async function previewBinding(binding: RoutingBinding) {
     await request.post<{ data: BindingImpact }>(
       bindingPath(binding.scope, binding.target_id) + '/preview',
       binding
+    )
+  ).data.data
+}
+
+export async function preflightDraft(nodeID: number, payload: PreflightDraftRequest) {
+  return (
+    await request.post<{ data: PreflightDraftResponse }>(
+      `/nodes/${nodeID}/preflight-draft`,
+      payload,
     )
   ).data.data
 }

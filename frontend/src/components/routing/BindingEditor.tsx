@@ -2,15 +2,18 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { FlaskConical } from 'lucide-react'
 import { Btn } from '@/components/ui/Form'
 import { Drawer } from '@/components/ui/Drawer'
 import { useConfirm } from '@/lib/confirm-context'
 import { useAuthStore } from '@/store/auth'
 import { BindingFields } from './BindingFields'
+import { DraftPreflightModal } from './DraftPreflightModal'
 import {
   getBinding,
   invalidateRouting,
   previewBinding,
+  previewTemplate,
   saveBinding,
   useRoutingOverview,
 } from '@/lib/routing'
@@ -41,6 +44,7 @@ export function BindingEditor({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [impact, setImpact] = useState<{ result: BindingImpact; saved: boolean } | null>(null)
+  const [sandboxOpen, setSandboxOpen] = useState(false)
   const value = draft ?? query.data
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(query.data)
   const editable = superAdmin || scope === 'node'
@@ -94,6 +98,11 @@ export function BindingEditor({
     )
   const source = scope === 'node' ? overview.data?.nodes.find((n) => n.id === id) : null
   const ids = impact ? affectedIDs(impact.result) : []
+  const canSandboxNode =
+    scope === 'node' &&
+    superAdmin &&
+    value.mode !== 'legacy' &&
+    (value.mode === 'inherit' || (value.template_id > 0 && value.revision > 0))
   const actions = editable ? (
     <div className="flex flex-wrap justify-end gap-2">
       {dirty && (
@@ -108,6 +117,12 @@ export function BindingEditor({
           }}
         >
           放弃本节修改
+        </Btn>
+      )}
+      {canSandboxNode && (
+        <Btn variant="accent" disabled={busy} onClick={() => setSandboxOpen(true)}>
+          <FlaskConical className="h-4 w-4" />
+          沙箱预检
         </Btn>
       )}
       <Btn variant="secondary" loading={busy} onClick={() => void run(false)}>
@@ -206,6 +221,29 @@ export function BindingEditor({
         </div>
       )}
       {footerElement ? createPortal(actions, footerElement) : actions}
+      {sandboxOpen && scope === 'node' && (
+        <DraftPreflightModal
+          open={sandboxOpen}
+          onClose={() => setSandboxOpen(false)}
+          nodes={overview.data?.nodes ?? []}
+          lockedNodeID={id}
+          customOverrides={(() => {
+            try {
+              return normalizeBinding(value).overrides
+            } catch {
+              return value.overrides
+            }
+          })()}
+          getDraftPolicy={async () => {
+            const normalized = normalizeBinding(value)
+            const resolved = await previewTemplate(normalized)
+            if (!resolved.policy) {
+              throw new Error('未能解析所选模板策略。')
+            }
+            return resolved.policy
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -103,6 +103,7 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	}
 
 	params := s.sshParams(node)
+	params.RequiresIPv6 = snapshot.Policy != nil && snapshot.Policy.RequiresIPv6()
 	if state.VerifiedAt != nil && state.RuntimeHash == xray.ConfigHash(configContent) && state.DiskHash == state.RuntimeHash {
 		params.ConfirmedProcess = state.ProcessID
 	}

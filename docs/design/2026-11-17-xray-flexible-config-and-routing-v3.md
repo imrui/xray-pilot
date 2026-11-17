@@ -451,9 +451,9 @@
   - [x] `frontend`：扩展 `BindingFields` 支持节点按出站 Tag 覆盖/重映射，补齐前端测试与构建（`npm run lint && npm test && npm run build`）
 
 ### Phase 2：场景片段库 + 未发布草稿远端沙箱预检
-- [ ] 后端新增 `POST /api/nodes/:id/preflight-draft`（限 `super_admin`，复用 `lockNode`，礼让活跃部署租约，跑只读 `xray -test`，隔离飞书告警）及接口单测
-- [ ] 前端新增 `routing-snippets.ts`（WARP / 多 IP / 链式落地出站片段 + AI / 流媒体 / Telegram / BT / 广告规则片段）并接入编辑器快捷插入菜单
-- [ ] 前端在 `TemplateEditor` 与 `BindingEditor` 接入「选节点预览合并配置 + 一键远端沙箱预检」面板
+- [x] 后端新增 `POST /api/nodes/:id/preflight-draft`（限 `super_admin`，复用 `lockNode`，礼让活跃部署租约，跑只读 `xray -test`，隔离飞书告警）及接口单测
+- [x] 前端新增 `routing-snippets.ts`（WARP / 多 IP / 链式落地出站片段 + AI / 流媒体 / Telegram / BT / 广告规则片段）并接入编辑器快捷插入菜单
+- [x] 前端在 `TemplateEditor` 与 `BindingEditor` 接入「选节点预览合并配置 + 一键远端沙箱预检」面板
 
 ### Phase 3：服务端 DNS 分流 + 负载均衡与探测
 - [ ] 后端放开 `SchemaVersion: 3` 中的 `dns`、`balancers`、`observatory` 与 `RoutingRule.BalancerTag` 校验及合并渲染

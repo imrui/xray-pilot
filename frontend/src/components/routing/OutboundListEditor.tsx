@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Code2, KeyRound, Link2, Plus, ShieldCheck, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Code2, KeyRound, Link2, Plus, ShieldCheck, SlidersHorizontal, Sparkles, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Btn, Field, SelectField } from '@/components/ui/Form'
 import { JsonEditor } from '@/components/ui/JsonEditor'
+import { OUTBOUND_SNIPPETS } from '@/lib/routing-snippets'
 import {
   BUILTIN_OUTBOUNDS,
   STRUCTURED_OUTBOUND_PROTOCOLS,
@@ -662,6 +663,7 @@ export function OutboundListEditor({
   onPendingErrorChange?: (hasError: boolean) => void
 }) {
   const [newProtocol, setNewProtocol] = useState<string>('socks')
+  const [snippetsOpen, setSnippetsOpen] = useState(false)
   const [cardErrors, setCardErrors] = useState<Record<number, string>>({})
 
   const updateCardError = (idx: number, err: string) => {
@@ -709,23 +711,55 @@ export function OutboundListEditor({
         </div>
       </section>
 
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
-        <div className="w-full sm:w-72">
-          <SelectField
-            label="选择要添加的出站类型"
-            value={newProtocol}
-            onChange={setNewProtocol}
-            options={STRUCTURED_OUTBOUND_PROTOCOLS.map((p) => ({ value: p.value, label: p.label }))}
-          />
+      <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="w-full sm:w-72">
+            <SelectField
+              label="选择要添加的出站类型"
+              value={newProtocol}
+              onChange={setNewProtocol}
+              options={STRUCTURED_OUTBOUND_PROTOCOLS.map((p) => ({ value: p.value, label: p.label }))}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Btn
+              variant="secondary"
+              disabled={disabled || outbounds.length >= 32}
+              onClick={() => setSnippetsOpen(!snippetsOpen)}
+            >
+              <Sparkles className="h-4 w-4" />
+              场景出站片段
+            </Btn>
+            <Btn
+              variant="secondary"
+              disabled={disabled || outbounds.length >= 32}
+              onClick={addOutbound}
+            >
+              <Plus className="h-4 w-4" />
+              添加自定义出站（{outbounds.length}/32）
+            </Btn>
+          </div>
         </div>
-        <Btn
-          variant="secondary"
-          disabled={disabled || outbounds.length >= 32}
-          onClick={addOutbound}
-        >
-          <Plus className="h-4 w-4" />
-          添加自定义出站（{outbounds.length}/32）
-        </Btn>
+
+        {snippetsOpen && (
+          <div className="grid gap-2.5 border-t border-[var(--border)] pt-3 sm:grid-cols-3">
+            {OUTBOUND_SNIPPETS.map((snippet) => (
+              <button
+                key={snippet.key}
+                type="button"
+                disabled={disabled || outbounds.length >= 32}
+                onClick={() => {
+                  onChange([...outbounds, snippet.build(allTags)])
+                  setSnippetsOpen(false)
+                }}
+                className="flex flex-col items-start gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--panel-strong)] disabled:opacity-50"
+              >
+                <span className="text-xs font-semibold text-[var(--accent)]">{snippet.name}</span>
+                <span className="text-[11px] leading-4 text-soft">{snippet.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {outbounds.length === 0 ? (

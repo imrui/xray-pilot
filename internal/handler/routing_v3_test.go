@@ -109,4 +109,37 @@ func TestRoutingV3HandlerMaskingAndPermissions(t *testing.T) {
 	if forbiddenRes.Code == 0 {
 		t.Fatal("admin unexpectedly succeeded in modifying outbound_overrides via HTTP")
 	}
+
+	// POST /api/nodes/:id/preflight-draft：仅限 super_admin；活跃租约返回 409；静态校验错误返回 200 + valid:false
+	preflightPayload := map[string]any{
+		"policy": json.RawMessage(`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[],"custom_rules":[{"type":"field","outboundTag":"api","port":"443"}]}`),
+	}
+	if wOps, _ := doJSON(t, r, http.MethodPost, fmt.Sprintf("/api/nodes/%d/preflight-draft", node.ID), ops, preflightPayload); wOps.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for normal admin preflight-draft, got %d", wOps.Code)
+	}
+	wStatic, resStatic := doJSON(t, r, http.MethodPost, fmt.Sprintf("/api/nodes/%d/preflight-draft", node.ID), root, preflightPayload)
+	if wStatic.Code != http.StatusOK || resStatic.Code != 0 {
+		t.Fatalf("expected 200 static validation response, got %d %s", wStatic.Code, resStatic.Message)
+	}
+	var pfBody struct {
+		Data service.PreflightDraftResult `json:"data"`
+	}
+	_ = json.Unmarshal(wStatic.Body.Bytes(), &pfBody)
+	if pfBody.Data.Valid || pfBody.Data.Error == "" {
+		t.Fatalf("expected valid=false with error message, got %+v", pfBody.Data)
+	}
+
+	// 持有节点配置租约时，preflight-draft 立即返回 HTTP 409
+	_, release, err := repository.AcquireConfigLease(node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validPreflightPayload := map[string]any{
+		"policy": draft,
+	}
+	wBusy, resBusy := doJSON(t, r, http.MethodPost, fmt.Sprintf("/api/nodes/%d/preflight-draft", node.ID), root, validPreflightPayload)
+	release()
+	if wBusy.Code != http.StatusConflict && resBusy.Code != 409 {
+		t.Fatalf("expected 409 conflict when lease held, got http=%d code=%d msg=%s", wBusy.Code, resBusy.Code, resBusy.Message)
+	}
 }
