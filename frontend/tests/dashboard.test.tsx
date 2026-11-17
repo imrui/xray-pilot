@@ -9,12 +9,14 @@ import request from '../src/lib/axios'
 import Dashboard from '../src/pages/Dashboard'
 import { TrafficChart } from '../src/components/traffic/TrafficChart'
 import { TrafficRankingChart } from '../src/components/traffic/TrafficRankingChart'
+import { TrafficStatsInfo } from '../src/components/traffic/TrafficStatsInfo'
 import type { TrafficAnalytics } from '../src/types/traffic'
 
 let chartWidth = 1100
 Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: class {
   constructor(private callback: (entries: unknown[]) => void) {}
   observe() { this.callback([{ contentRect: { width: chartWidth } }]) }
+  unobserve() {}
   disconnect() {}
 } })
 let clients: QueryClient[] = []
@@ -123,6 +125,51 @@ test('趋势完整日期使用 UTC+8，小时补充时间，缺采断点保留',
   assert.equal((path.match(/L/g) ?? []).length, 0)
   rerender(<TrafficChart series={analytics.series} direction="total" interval="hour" />)
   assert.ok(screen.getAllByText('00:00').length > 0)
+})
+
+test('统计说明点击后以浮层展示，支持 Esc、关闭按钮、重复点击与外部点击关闭', async () => {
+  const { container } = mountDashboard()
+  const trigger = await screen.findByRole('button', { name: '统计说明 2 次采集失败' })
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false')
+  fireEvent.mouseEnter(trigger)
+  assert.equal(screen.queryByRole('dialog', { name: '统计说明' }), null)
+  fireEvent.click(trigger)
+  let dialog = await screen.findByRole('dialog', { name: '统计说明' })
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true')
+  // The content is portalled outside the dashboard, so it cannot expand the chart card.
+  assert.equal(container.contains(dialog), false)
+  assert.ok(within(dialog).getByText(/成功 100 次，失败 2 次/))
+  assert.ok(within(dialog).getByText(/历史缺采无法补算/))
+  fireEvent.keyDown(dialog, { key: 'Escape' })
+  await waitFor(() => assert.equal(screen.queryByRole('dialog', { name: '统计说明' }), null))
+  await waitFor(() => assert.equal(document.activeElement, trigger))
+  fireEvent.click(trigger)
+  dialog = await screen.findByRole('dialog', { name: '统计说明' })
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭统计说明' }))
+  await waitFor(() => assert.equal(trigger.getAttribute('aria-expanded'), 'false'))
+  fireEvent.click(trigger)
+  await screen.findByRole('dialog', { name: '统计说明' })
+  fireEvent.click(trigger)
+  await waitFor(() => assert.equal(trigger.getAttribute('aria-expanded'), 'false'))
+  fireEvent.click(trigger)
+  await screen.findByRole('dialog', { name: '统计说明' })
+  // DismissableLayer installs its outside-pointer listener on the next task.
+  await new Promise(resolve => setTimeout(resolve, 0))
+  fireEvent.pointerDown(screen.getByRole('heading', { name: '节点用量排名' }), { pointerType: 'mouse' })
+  await waitFor(() => assert.equal(screen.queryByRole('dialog', { name: '统计说明' }), null))
+})
+
+test('统计说明正确展示小时粒度与最近采集，零失败和加载中不显示错误计数', async () => {
+  const { rerender } = render(<TrafficStatsInfo data={{ ...analytics, interval: 'hour', failed_polls: 0, last_poll_at: '2026-11-17T05:00:00Z' }} />)
+  const trigger = screen.getByRole('button', { name: '统计说明' })
+  fireEvent.click(trigger)
+  const dialog = await screen.findByRole('dialog', { name: '统计说明' })
+  assert.ok(within(dialog).getByText(/^按小时汇总/))
+  assert.ok(within(dialog).getByText(/成功 100 次，失败 0 次/))
+  assert.ok(within(dialog).getByText(/最近成功采集：.*13:00:00/))
+  rerender(<TrafficStatsInfo />)
+  assert.ok(screen.getByRole('button', { name: '统计说明' }))
+  assert.equal(within(dialog).queryByText(/区间采集/), null)
 })
 
 test('窄屏排名分页不丢对象，长名称可读且支持键盘选择，零用量安全显示', () => {

@@ -10,6 +10,7 @@ import { Btn } from '@/components/ui/Form'
 import { DateRangePicker } from './DateRangePicker'
 import { TrafficChart } from './TrafficChart'
 import { TrafficRankingChart } from './TrafficRankingChart'
+import { TrafficStatsInfo } from './TrafficStatsInfo'
 
 const control = 'h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm'
 
@@ -114,16 +115,7 @@ export function TrafficAnalyticsPanel({ onRefresh, refreshing = false, recentAct
                 </div>
               </div>
               {data ? <TrafficChart key={`${dimension}-${nodeId}-${userId}`} series={data.series} direction={direction} interval={data.interval} /> : <div className="flex h-80 items-center justify-center text-sm text-soft">正在加载趋势…</div>}
-              <details className="mt-4 border-t border-[var(--border)] pt-3 text-sm text-soft">
-                <summary className="w-fit cursor-pointer rounded hover:text-[var(--text)]">统计说明{data && data.failed_polls > 0 && <span className="ml-2 text-[var(--warning)]">{data.failed_polls} 次采集失败</span>}</summary>
-                <div className="mt-3 space-y-2 leading-relaxed">
-                  <p>按{data?.interval === 'hour' ? '小时' : '天'}汇总，展示总用量前 5 项及其他。点击图例可隐藏曲线。</p>
-                  <p>北京时间（UTC+8），用量按采集时间计入区间。上行和下行以用户视角统计，活跃用户与节点指区间内实际产生流量的对象。</p>
-                  <p>缺少成功采集依据的时段保留断点，历史缺采无法补算；缺采期间的用量可能计入后续采集周期，统计不代表实时速率。</p>
-                  {data && <p>区间采集：成功 {data.successful_polls} 次，失败 {data.failed_polls} 次（按节点计）。</p>}
-                  {data?.last_poll_at && <p>最近成功采集：{new Date(data.last_poll_at).toLocaleString('zh-CN', { timeZone: TRAFFIC_TIMEZONE })}</p>}
-                </div>
-              </details>
+              <TrafficStatsInfo data={data} />
             </SurfaceCard>
 
             <SurfaceCard className="min-w-0">
