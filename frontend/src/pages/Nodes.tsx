@@ -471,7 +471,7 @@ export default function Nodes() {
           </label>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end [&>*]:shrink-0 [&>button]:whitespace-nowrap">
           <HintTip content="只有在「配置节点密钥」中保存过的协议才会参与该节点的配置生成；保存空对象 {} 表示继承协议默认参数。" />
           <Btn variant="secondary" onClick={() => setHistory({})}>同步记录</Btn>
           <Btn variant="secondary" loading={syncDrifted.isPending} disabled={sync.isPending} onClick={() => syncDrifted.mutate()}>
