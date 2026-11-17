@@ -80,12 +80,12 @@ export function TrafficAnalyticsPanel({ onRefresh, refreshing = false, recentAct
         {[
           { title: '节点总数', value: data?.total_nodes ?? '—', hint: '当前全部节点', icon: Server },
           { title: '健康节点', value: data ? `${data.healthy_nodes} / ${data.enabled_nodes}` : '—', hint: '当前健康 / 启用节点', icon: Activity, color: data && data.healthy_nodes < data.enabled_nodes ? 'var(--warning)' : 'var(--success)' },
-          { title: '启用用户', value: data ? `${data.enabled_users} / ${data.total_users}` : '—', hint: '当前启用 / 用户总数', icon: Users },
-          { title: '区间总用量', value: formatBytes(total), hint: '所选区间 · 上行 + 下行', icon: Database },
-          { title: '区间上行', value: formatBytes(data?.up_bytes), hint: '所选区间 · 用户上传', icon: ArrowUp },
-          { title: '区间下行', value: formatBytes(data?.down_bytes), hint: '所选区间 · 用户下载', icon: ArrowDown, color: 'var(--success)' },
-          { title: '区间活跃用户', value: data?.active_users ?? '—', hint: '所选区间 · 有流量的用户', icon: Users },
           { title: '有用量节点', value: data?.active_nodes ?? '—', hint: '所选区间 · 含已删除节点', icon: Network },
+          { title: '启用用户', value: data ? `${data.enabled_users} / ${data.total_users}` : '—', hint: '当前启用 / 用户总数', icon: Users },
+          { title: '上行流量', value: formatBytes(data?.up_bytes), hint: '所选区间 · 用户上传', icon: ArrowUp },
+          { title: '下行流量', value: formatBytes(data?.down_bytes), hint: '所选区间 · 用户下载', icon: ArrowDown, color: 'var(--success)' },
+          { title: '总流量', value: formatBytes(total), hint: '所选区间 · 上行 + 下行', icon: Database },
+          { title: '活跃用户', value: data?.active_users ?? '—', hint: '所选区间 · 有流量的用户', icon: Users },
         ].map(({ title, value, hint, icon: Icon, color }) => <SurfaceCard key={title} className="min-w-0 p-4">
           <div className="flex items-center justify-between gap-2"><h3 className="text-sm text-soft">{title}</h3><Icon aria-hidden="true" className="h-4 w-4 shrink-0" style={{ color: color ?? 'var(--accent)' }} /></div>
           <p className="mt-3 break-words text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">{value}</p>
