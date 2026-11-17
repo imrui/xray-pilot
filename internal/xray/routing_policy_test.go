@@ -133,6 +133,32 @@ func TestActualXrayRoutingFixtures(t *testing.T) {
 			t.Logf("Xray %s passed", tc.name)
 		})
 	}
+	t.Run("schema-v3-custom-outbounds", func(t *testing.T) {
+		p, err := DecodeRoutingPolicy(`{
+			"schema_version": 3,
+			"domain_strategy": "IPIfNonMatch",
+			"ipv4_force_domains": ["domain:example.com"],
+			"ipv6_force_domains": [],
+			"ipv6_failure_policy": "strict",
+			"custom_outbounds": [
+				{"tag": "socks-out", "protocol": "socks", "remark": "test", "settings": {"servers": [{"address": "203.0.113.10", "port": 1080}]}, "streamSettings": {"sockopt": {"dialerProxy": "direct-v4"}}},
+				{"tag": "multi-ip", "protocol": "freedom", "sendThrough": "127.0.0.1"}
+			],
+			"custom_rules": [
+				{"type": "field", "remark": "bt", "protocol": ["bittorrent", "quic"], "outboundTag": "block"},
+				{"type": "field", "domain": ["keyword:openai", "full:api.openai.com"], "outboundTag": "socks-out"},
+				{"type": "field", "ip": ["198.51.100.0/24"], "outboundTag": "multi-ip"}
+			]
+		}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := ApplyRoutingPolicy(base, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, data)
+	})
 }
 
 func TestRoutingPreservesOperationalDirect(t *testing.T) {

@@ -227,7 +227,9 @@ test('新路由直接配置两组强制域名，不再使用 IPv6 开关', async
   const payload = (
     calls.find((c) => c.method === 'patch')!.data as { draft: Record<string, unknown> }
   ).draft
-  assert.equal(payload.schema_version, 2)
+  assert.equal(payload.schema_version, 3)
+  assert.equal(payload.domain_strategy, 'IPIfNonMatch')
+  assert.deepEqual(payload.custom_outbounds, [])
   assert.equal('enable_ipv6_outbound' in payload, false)
   assert.deepEqual(payload.ipv4_force_domains, ['domain:v4.example'])
   assert.deepEqual(payload.ipv6_force_domains, ['domain:v6.example'])
@@ -256,7 +258,7 @@ test('旧版 IPv6 关闭的草稿转换时保留原出口，新版空列表不�
   assert.equal((screen.getByLabelText(/强制 IPv6 域名/) as HTMLTextAreaElement).value, '')
   assert.ok(screen.getByText(/正在转换旧版草稿/))
   const converted = upgradeRoutingPolicy(old)
-  assert.equal(converted.schema_version, 2)
+  assert.equal(converted.schema_version, 3)
   const unversioned = upgradeRoutingPolicy(
     JSON.stringify({ ipv6_force_domains: ['domain:old.example'], ipv6_failure_policy: 'strict' }),
   )
@@ -688,4 +690,142 @@ test('加载中的按钮不能被 disabled=false 重新启用，抽屉支持 Esc
   fireEvent.keyDown(document, { key: 'Escape' })
   await waitFor(() => assert.equal(screen.queryByRole('dialog', { name: '测试抽屉' }), null))
   await waitFor(() => assert.equal(document.activeElement, opener))
+})
+
+test('Schema v3 双模式模板编辑器支持结构化与 JSON 双向无损同步、规则调序与出站引用禁删', async () => {
+  api((_method, _url, body) =>
+    body.draft ? { ...template, draft: JSON.stringify(body.draft), version: 5 } : undefined,
+  )
+  mount(<TemplateEditor template={template} onClose={() => {}} onConfigure={() => {}} />)
+
+  // 切换到自定义出站标签页并新增一个 SOCKS5 出站
+  fireEvent.click(screen.getByRole('tab', { name: /自定义出站/ }))
+  fireEvent.click(screen.getByRole('button', { name: /添加自定义出站/ }))
+  fireEvent.change(screen.getByLabelText('出站 Tag *'), { target: { value: 'hk-landing' } })
+  fireEvent.change(screen.getByLabelText('落地服务器地址 *'), { target: { value: '203.0.113.10' } })
+
+  // 切回路由规则标签页，添加两条规则并测试上下调序与引用联动
+  fireEvent.click(screen.getByRole('tab', { name: /路由规则/ }))
+  fireEvent.click(screen.getByRole('button', { name: '添加分流规则' }))
+  fireEvent.change(screen.getByLabelText('规则 #1 备注'), { target: { value: '第一条规则' } })
+  fireEvent.click(screen.getByRole('button', { name: '添加分流规则' }))
+  fireEvent.change(screen.getByLabelText('规则 #2 备注'), { target: { value: '第二条规则' } })
+  fireEvent.click(screen.getByRole('button', { name: '上移规则 #2' }))
+  assert.equal((screen.getByLabelText('规则 #1 备注') as HTMLInputElement).value, '第二条规则')
+
+  // 被规则引用的出站禁止删除
+  fireEvent.click(screen.getByRole('tab', { name: /自定义出站/ }))
+  assert.equal(
+    (screen.getByRole('button', { name: '使用中禁删' }) as HTMLButtonElement).disabled,
+    true,
+  )
+
+  // 切换到全局策略 JSON 源码视图，注入未知扩展字段 mux 与 ruleTag，再切回结构化视图修改后保存
+  fireEvent.click(screen.getByRole('tab', { name: '策略 JSON 源码' }))
+  const jsonArea = screen.getByLabelText('策略 JSON 源码') as HTMLTextAreaElement
+  const parsed = JSON.parse(jsonArea.value)
+  parsed.domain_strategy = 'IPOnDemand'
+  parsed.custom_outbounds[0].mux = { enabled: true, concurrency: 8 }
+  parsed.custom_rules[0].ruleTag = 'custom-tag-1'
+  fireEvent.change(jsonArea, { target: { value: JSON.stringify(parsed, null, 2) } })
+
+  fireEvent.click(screen.getByRole('tab', { name: '结构化视图' }))
+  fireEvent.click(screen.getByRole('tab', { name: /路由规则/ }))
+  assert.equal(
+    (screen.getByLabelText('路由域名解析策略（routing.domainStrategy）') as HTMLSelectElement).value,
+    'IPOnDemand',
+  )
+
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText('草稿已保存。')
+  const savedDraft = (
+    calls.find((c) => c.method === 'patch')!.data as {
+      draft: {
+        schema_version: number
+        domain_strategy: string
+        custom_outbounds: Record<string, unknown>[]
+        custom_rules: Record<string, unknown>[]
+      }
+    }
+  ).draft
+  assert.equal(savedDraft.schema_version, 3)
+  assert.equal(savedDraft.domain_strategy, 'IPOnDemand')
+  assert.deepEqual(savedDraft.custom_outbounds[0].mux, { enabled: true, concurrency: 8 })
+  assert.equal(savedDraft.custom_rules[0].ruleTag, 'custom-tag-1')
+})
+
+test('节点绑定支持按出站 Tag 重映射与参数替换，并清理残留失效覆盖', async () => {
+  const v3Policy = {
+    schema_version: 3,
+    domain_strategy: 'IPIfNonMatch',
+    ipv4_force_domains: [],
+    ipv6_force_domains: [],
+    ipv6_failure_policy: 'strict',
+    custom_outbounds: [
+      {
+        tag: 'hk-landing',
+        protocol: 'socks',
+        remark: '香港落地',
+        settings: { servers: [{ address: '203.0.113.10', port: 1080 }] },
+      },
+      {
+        tag: 'warp-egress',
+        protocol: 'wireguard',
+        remark: 'WARP',
+        settings: {
+          secretKey: 'enc:v1:00112233445566778899aabbccddeeff',
+          peers: [{ endpoint: 'engage.cloudflareclient.com:2408', publicKey: 'pub' }],
+        },
+      },
+    ],
+    custom_rules: [{ type: 'field', domain: ['geosite:openai'], outboundTag: 'hk-landing' }],
+  }
+  api((method, url) => {
+    if (method === 'get' && url.endsWith('/routing')) {
+      return {
+        ...binding,
+        overrides: JSON.stringify({
+          outbound_overrides: {
+            'obsolete-tag': { mode: 'remap', target_tag: 'direct' },
+          },
+        }),
+      }
+    }
+    if (url.endsWith('/routing/template-preview')) {
+      return { ...overview.nodes[0].routing, policy: v3Policy }
+    }
+  })
+
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  // 清理模板已移除的残留出站覆盖
+  fireEvent.click(await screen.findByRole('button', { name: '清理失效出站覆盖' }))
+
+  // 将 warp-egress 重映射为 direct-v4，将 hk-landing 替换为本节点自定义地址
+  fireEvent.change(screen.getByLabelText('出站覆盖模式 · warp-egress'), {
+    target: { value: 'remap' },
+  })
+  fireEvent.change(screen.getByLabelText('重映射目标出站 · warp-egress'), {
+    target: { value: 'direct-v4' },
+  })
+  fireEvent.change(screen.getByLabelText('出站覆盖模式 · hk-landing'), {
+    target: { value: 'replace' },
+  })
+  fireEvent.change(screen.getByLabelText('落地服务器地址 *'), {
+    target: { value: '198.51.100.88' },
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await screen.findByText(/已保存：1 个节点/)
+  const savedOverrides = JSON.parse(
+    (calls.find((c) => c.method === 'put')!.data as RoutingBinding).overrides,
+  )
+  assert.equal('obsolete-tag' in savedOverrides.outbound_overrides, false)
+  assert.deepEqual(savedOverrides.outbound_overrides['warp-egress'], {
+    mode: 'remap',
+    target_tag: 'direct-v4',
+  })
+  assert.equal(
+    savedOverrides.outbound_overrides['hk-landing'].outbound.settings.servers[0].address,
+    '198.51.100.88',
+  )
 })

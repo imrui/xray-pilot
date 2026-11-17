@@ -1,8 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/imrui/xray-pilot/internal/xray"
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
@@ -50,7 +53,7 @@ func redactConfig(raw string) string {
 		case map[string]any:
 			for k, y := range x {
 				switch k {
-				case "privateKey", "password", "id", "email", "pass", "user":
+				case "privateKey", "password", "id", "email", "pass", "user", "secretKey", "preSharedKey":
 					x[k] = "<masked>"
 				default:
 					walk(y)
@@ -63,6 +66,10 @@ func redactConfig(raw string) string {
 		}
 	}
 	walk(obj)
-	data, _ := json.MarshalIndent(obj, "", "  ")
-	return string(data)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(obj)
+	return strings.TrimSuffix(buf.String(), "\n")
 }

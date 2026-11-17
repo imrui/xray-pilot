@@ -13,6 +13,7 @@ import (
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/xray"
+	"github.com/imrui/xray-pilot/pkg/crypto"
 	"gorm.io/gorm"
 )
 
@@ -127,6 +128,10 @@ func resolveRoutingBinding(db *gorm.DB, nodeID uint, b entity.RoutingBinding) (*
 			out.Sources[k] = "节点覆盖"
 		}
 	}
+	if v, ok := overrides["outbound_overrides"]; ok && !isEmptyJSONObjectOrNull(v) {
+		out.Sources["outbound_overrides"] = "节点覆盖"
+		out.Sources["custom_outbounds"] = "节点覆盖"
+	}
 	return out, nil
 }
 func (s *RoutingService) Effective(nodeID uint) (*EffectiveRouting, error) {
@@ -164,12 +169,33 @@ func (s *RoutingService) SaveTemplate(id, expected uint, name, description, draf
 	if err != nil {
 		return nil, err
 	}
-	data, _ := json.Marshal(p)
 	if strings.TrimSpace(name) == "" || len(name) > 100 {
 		return nil, fmt.Errorf("模板名称不能为空且不能超过 100 字节")
 	}
-	t := entity.RoutingTemplate{ID: id, Name: strings.TrimSpace(name), Description: description, Draft: string(data), Version: 1}
+	t := entity.RoutingTemplate{ID: id, Name: strings.TrimSpace(name), Description: description, Version: 1}
 	err = repository.DB.Transaction(func(tx *gorm.DB) error {
+		var prevPtr *xray.RoutingPolicy
+		if id > 0 {
+			var prev entity.RoutingTemplate
+			if err := tx.First(&prev, id).Error; err != nil {
+				return err
+			}
+			if prev.Version != expected {
+				return ErrRoutingConflict
+			}
+			if prevPolicy, decErr := xray.DecodeRoutingPolicy(prev.Draft); decErr == nil {
+				prevPtr = &prevPolicy
+			}
+		}
+		encPolicy, encErr := xray.EncryptPolicySecrets(p, prevPtr)
+		if encErr != nil {
+			return encErr
+		}
+		data, marshalErr := json.Marshal(encPolicy)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		t.Draft = string(data)
 		if id == 0 {
 			return tx.Create(&t).Error
 		}
@@ -250,8 +276,67 @@ func effectiveKey(e *EffectiveRouting, err error) string {
 	if err != nil {
 		return "error:" + err.Error()
 	}
-	b, _ := json.Marshal([]any{e.TemplateID, e.Revision, e.Policy, e.Binding.ConfigPath})
-	return string(b)
+	var normalized any
+	if e.Policy != nil {
+		if dec, decErr := xray.DecryptPolicySecrets(*e.Policy); decErr == nil {
+			normalized = dec
+		} else {
+			normalized = e.Policy
+		}
+	}
+	b, _ := json.Marshal([]any{e.TemplateID, e.Revision, normalized, e.Binding.ConfigPath})
+	return crypto.HashConfig(string(b))
+}
+
+func isEmptyJSONObjectOrNull(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" || trimmed == "{}" {
+		return true
+	}
+	var m map[string]any
+	return json.Unmarshal(raw, &m) == nil && len(m) == 0
+}
+
+func normalizeOptionalMapJSON(raw json.RawMessage) any {
+	if isEmptyJSONObjectOrNull(raw) {
+		return nil
+	}
+	var v any
+	_ = json.Unmarshal(raw, &v)
+	return v
+}
+
+// MaskEffectiveRouting 面向普通管理员脱敏节点有效路由中的敏感凭据。
+func MaskEffectiveRouting(e *EffectiveRouting) *EffectiveRouting {
+	if e == nil {
+		return nil
+	}
+	cp := *e
+	cp.Binding.Overrides = xray.MaskOverridesJSON(cp.Binding.Overrides)
+	if cp.Policy != nil {
+		masked := xray.MaskPolicySecrets(*cp.Policy)
+		cp.Policy = &masked
+	}
+	return &cp
+}
+
+// MaskRoutingOverview 面向普通管理员脱敏路由概览中的模板草稿与节点有效路由凭据。
+func MaskRoutingOverview(o *RoutingOverview) *RoutingOverview {
+	if o == nil {
+		return nil
+	}
+	cp := *o
+	cp.Templates = make([]RoutingTemplateSummary, len(o.Templates))
+	for i, t := range o.Templates {
+		t.Draft = xray.MaskPolicyJSON(t.Draft)
+		cp.Templates[i] = t
+	}
+	cp.Nodes = make([]NodeRoutingSummary, len(o.Nodes))
+	for i, n := range o.Nodes {
+		n.Routing = MaskEffectiveRouting(n.Routing)
+		cp.Nodes[i] = n
+	}
+	return &cp
 }
 func (s *RoutingService) SaveBinding(b entity.RoutingBinding, expected uint, actor string, super bool, reports ...*BindingImpact) error {
 	return s.saveBinding(b, expected, actor, super, false, reports...)
@@ -300,10 +385,10 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 	if b.Overrides == "" {
 		b.Overrides = "{}"
 	}
-	// Validate shape independently with IPv6 allowed; the resolved base is validated below.
-	validationBase := `{"schema_version":1,"enable_ipv6_outbound":true,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[]}`
-	if _, err := xray.MergeRoutingPolicy(validationBase, b.Overrides); err != nil {
-		return err
+	if super {
+		if err := xray.ValidateRoutingOverrides(b.Overrides); err != nil {
+			return err
+		}
 	}
 	if b.Mode == "legacy" && b.Overrides != "{}" {
 		return fmt.Errorf("基础路由不接受节点路由覆盖；请先选择继承或指定模板")
@@ -335,7 +420,7 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 			}
 			var prev, next map[string]json.RawMessage
 			_ = json.Unmarshal([]byte(old.Overrides), &prev)
-			if json.Unmarshal([]byte(b.Overrides), &next) != nil {
+			if json.Unmarshal([]byte(b.Overrides), &next) != nil || next == nil {
 				return fmt.Errorf("覆盖必须是 JSON 对象")
 			}
 			var previousRules, nextRules any
@@ -344,15 +429,45 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 			if !reflect.DeepEqual(previousRules, nextRules) {
 				return fmt.Errorf("高级规则仅超级管理员可修改")
 			}
+			var maskedPrev map[string]json.RawMessage
+			_ = json.Unmarshal([]byte(xray.MaskOverridesJSON(old.Overrides)), &maskedPrev)
+			prevOutOv := normalizeOptionalMapJSON(maskedPrev["outbound_overrides"])
+			rawPrevOutOv := normalizeOptionalMapJSON(prev["outbound_overrides"])
+			nextOutOv := normalizeOptionalMapJSON(next["outbound_overrides"])
+			if !reflect.DeepEqual(prevOutOv, nextOutOv) && !reflect.DeepEqual(rawPrevOutOv, nextOutOv) {
+				return fmt.Errorf("节点出站覆盖仅超级管理员可修改")
+			}
+			if !isEmptyJSONObjectOrNull(prev["outbound_overrides"]) {
+				next["outbound_overrides"] = prev["outbound_overrides"]
+				restored, marshalErr := json.Marshal(next)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				b.Overrides = string(restored)
+			}
+			if err := xray.ValidateRoutingOverrides(b.Overrides); err != nil {
+				return err
+			}
 		}
+		var basePolicyPtr *xray.RoutingPolicy
 		if b.TemplateID > 0 {
 			var rev entity.RoutingTemplateRevision
 			if err := tx.Where("template_id = ? AND revision = ?", b.TemplateID, b.Revision).First(&rev).Error; err != nil {
 				return fmt.Errorf("模板修订不存在")
 			}
+			if bp, decErr := xray.DecodeRoutingPolicy(rev.Payload); decErr == nil {
+				basePolicyPtr = &bp
+			}
 		}
 		if b.Mode == "template" && b.TemplateID == 0 {
 			return fmt.Errorf("请选择已发布模板")
+		}
+		if super && b.Overrides != "{}" {
+			encOv, encErr := xray.EncryptOverridesSecrets(b.Overrides, old.Overrides, basePolicyPtr)
+			if encErr != nil {
+				return encErr
+			}
+			b.Overrides = encOv
 		}
 
 		var nodes []entity.Node

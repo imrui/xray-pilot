@@ -439,16 +439,16 @@
 ## 8. 分阶段验收清单（Implementation Checklist）
 
 ### Phase 1：自定义出站 + 路由升级 + 双模式编辑器 + 节点 Tag 覆盖
-- [ ] **Step 1（后端引擎与单测）**
-  - [ ] `internal/xray`：落地 `SchemaVersion: 3` 全量结构体定义（含 Phase 3 预留字段）、`CustomOutbound` / `RoutingRule` 未知字段无损 `Extra` 编解码、面板元数据（`remark` / `disabled`）剥离
-  - [ ] `internal/xray`：实现保留 Tag 锁死、5 类出站校验、`dialerProxy` 环路检测、`geosite:` / `geoip:` / `quic` / `domain_strategy` 校验、引用完整性校验及精细化 `RequiresIPv6()`
-  - [ ] `internal/xray`：升级 `MergeRoutingPolicy` 支持节点 `outbound_overrides`（`replace` / `remap`）
-  - [ ] `internal/xray` & `internal/service`：实现出站敏感字段 `enc:v1:` AES-GCM 加密、密文未改幂等保留、`admin` 角色权限拦截及 `redactConfig` 扩展脱敏
-  - [ ] 通过全部 Go 单元测试与回归测试（`go test ./...`）
-- [ ] **Step 2（前端双模式编辑器与联调）**
-  - [ ] `frontend`：引入 `@codemirror/*` 封装适配主题变量的 `JsonEditor`
-  - [ ] `frontend`：重构 `TemplateEditor` 为 `xl` 宽抽屉，完成「结构化视图 ⇄ 策略 JSON」双向同步、路由瀑布流卡片排序与 5 类自定义出站表单 + 单条 JSON 切换
-  - [ ] `frontend`：扩展 `BindingFields` 支持节点按出站 Tag 覆盖/重映射，补齐前端测试与构建（`npm run lint && npm test && npm run build`）
+- [x] **Step 1（后端引擎与单测）**
+  - [x] `internal/xray`：落地 `SchemaVersion: 3` 全量结构体定义（含 Phase 3 预留字段）、`CustomOutbound` / `RoutingRule` 未知字段无损 `Extra` 编解码、面板元数据（`remark` / `disabled`）剥离
+  - [x] `internal/xray`：实现保留 Tag 锁死、5 类出站校验、`dialerProxy` 环路检测、`geosite:` / `geoip:` / `quic` / `domain_strategy` 校验、引用完整性校验及精细化 `RequiresIPv6()`
+  - [x] `internal/xray`：升级 `MergeRoutingPolicy` 支持节点 `outbound_overrides`（`replace` / `remap`）
+  - [x] `internal/xray` & `internal/service`：实现出站敏感字段 `enc:v1:` AES-GCM 加密、密文未改幂等保留、`admin` 角色权限拦截及 `redactConfig` 扩展脱敏
+  - [x] 通过全部 Go 单元测试与回归测试（`go test ./...`）
+- [x] **Step 2（前端双模式编辑器与联调）**
+  - [x] `frontend`：引入 `@codemirror/*` 封装适配主题变量的 `JsonEditor`
+  - [x] `frontend`：重构 `TemplateEditor` 为 `xl` 宽抽屉，完成「结构化视图 ⇄ 策略 JSON」双向同步、路由瀑布流卡片排序与 5 类自定义出站表单 + 单条 JSON 切换
+  - [x] `frontend`：扩展 `BindingFields` 支持节点按出站 Tag 覆盖/重映射，补齐前端测试与构建（`npm run lint && npm test && npm run build`）
 
 ### Phase 2：场景片段库 + 未发布草稿远端沙箱预检
 - [ ] 后端新增 `POST /api/nodes/:id/preflight-draft`（限 `super_admin`，复用 `lockNode`，礼让活跃部署租约，跑只读 `xray -test`，隔离飞书告警）及接口单测

@@ -8,6 +8,7 @@ import (
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/service"
+	"github.com/imrui/xray-pilot/internal/xray"
 	"github.com/imrui/xray-pilot/pkg/response"
 	"net/http"
 	"strconv"
@@ -39,8 +40,15 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 		}
 		response.Success(c, v)
 	}
+	isSuper := func(c *gin.Context) bool { return c.GetString(ctxRole) == entity.RoleSuperAdmin }
 	id := func(c *gin.Context) uint { n, _ := strconv.ParseUint(c.Param("id"), 10, 32); return uint(n) }
-	api.GET("/routing-overview", func(c *gin.Context) { v, err := s.Overview(); reply(c, v, err) })
+	api.GET("/routing-overview", func(c *gin.Context) {
+		v, err := s.Overview()
+		if err == nil && !isSuper(c) {
+			v = service.MaskRoutingOverview(v)
+		}
+		reply(c, v, err)
+	})
 	api.POST("/nodes/:id/routing/template-preview", func(c *gin.Context) {
 		var req struct {
 			Mode       string `json:"mode"`
@@ -52,26 +60,47 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 			return
 		}
 		v, err := s.PreviewTemplate(id(c), req.Mode, req.TemplateID, req.Revision)
+		if err == nil && !isSuper(c) {
+			v = service.MaskEffectiveRouting(v)
+		}
 		reply(c, v, err)
 	})
 	api.GET("/routing-templates", func(c *gin.Context) {
 		var rows []entity.RoutingTemplate
 		err := repository.DB.Order("id").Find(&rows).Error
+		if err == nil && !isSuper(c) {
+			for i := range rows {
+				rows[i].Draft = xray.MaskPolicyJSON(rows[i].Draft)
+			}
+		}
 		reply(c, rows, err)
 	})
 	api.GET("/routing-templates/:id", func(c *gin.Context) {
 		var row entity.RoutingTemplate
 		err := repository.DB.First(&row, id(c)).Error
+		if err == nil && !isSuper(c) {
+			row.Draft = xray.MaskPolicyJSON(row.Draft)
+		}
 		reply(c, row, err)
 	})
 	api.GET("/routing-templates/:id/impact", func(c *gin.Context) {
 		var rows []entity.RoutingBinding
 		err := repository.DB.Where("template_id = ?", id(c)).Find(&rows).Error
+		if err == nil && !isSuper(c) {
+			for i := range rows {
+				rows[i].Overrides = xray.MaskOverridesJSON(rows[i].Overrides)
+			}
+		}
 		reply(c, rows, err)
 	})
 	api.GET("/routing-templates/:id/revisions", func(c *gin.Context) {
 		var rows []entity.RoutingTemplateRevision
 		err := repository.DB.Where("template_id = ?", id(c)).Order("revision DESC").Find(&rows).Error
+		if err == nil && !isSuper(c) {
+			for i := range rows {
+				rows[i].Payload = xray.MaskPolicyJSON(rows[i].Payload)
+			}
+		}
 		reply(c, rows, err)
 	})
 	save := func(c *gin.Context) {
@@ -114,7 +143,13 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 			v, err := s.PreviewBinding(b, c.GetString(ctxRole) == entity.RoleSuperAdmin)
 			reply(c, v, err)
 		})
-		api.GET(path, func(c *gin.Context) { v, err := s.Binding(scope, id(c)); reply(c, v, err) })
+		api.GET(path, func(c *gin.Context) {
+			v, err := s.Binding(scope, id(c))
+			if err == nil && !isSuper(c) {
+				v.Overrides = xray.MaskOverridesJSON(v.Overrides)
+			}
+			reply(c, v, err)
+		})
 		api.PUT(path, func(c *gin.Context) {
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 300*1024)
 			var b entity.RoutingBinding
@@ -171,6 +206,9 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 		if err != nil {
 			reply(c, nil, err)
 			return
+		}
+		if !isSuper(c) {
+			v = service.MaskEffectiveRouting(v)
 		}
 		content, warnings, err := service.NewSyncService().PreviewConfig(id(c))
 		hash, hashErr := service.NewSyncService().DesiredConfigHash(id(c))

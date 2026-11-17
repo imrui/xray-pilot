@@ -1,21 +1,28 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { Code2, Network, Route, SlidersHorizontal } from 'lucide-react'
 import { Drawer } from '@/components/ui/Drawer'
 import { Btn, Field, FieldGroup, SelectField } from '@/components/ui/Form'
+import { JsonEditor } from '@/components/ui/JsonEditor'
 import { useConfirm } from '@/lib/confirm-context'
 import { useAuthStore } from '@/store/auth'
-import { routingControl } from './BindingFields'
 import {
   domainLines,
   nodesLink,
-  parseRules,
   readPolicy,
-  upgradeRoutingPolicy,
+  revisionSummaryLabel,
   routingLabel,
   templateBinding,
+  upgradeRoutingPolicy,
 } from '@/lib/routing-model'
-import type { RoutingPolicy, RoutingTemplate } from '@/lib/routing-model'
+import type {
+  CustomOutbound,
+  DomainStrategy,
+  RoutingPolicy,
+  RoutingRuleItem,
+  RoutingTemplate,
+} from '@/lib/routing-model'
 import {
   getBinding,
   getRevisions,
@@ -27,15 +34,19 @@ import {
 import request from '@/lib/axios'
 import { PreviewConfigModal } from '@/components/nodes/ConfigPreview'
 import { NodeRoutingPreview } from './NodeRoutingPreview'
+import { OutboundListEditor } from './OutboundListEditor'
+import { RuleWaterfallEditor } from './RuleWaterfallEditor'
 
 export function TemplateEditor({
   template,
   onClose,
   onConfigure,
+  headerActions,
 }: {
   template: RoutingTemplate
   onClose: () => void
   onConfigure: (t: RoutingTemplate) => void
+  headerActions?: React.ReactNode
 }) {
   const qc = useQueryClient()
   const confirm = useConfirm()
@@ -45,26 +56,83 @@ export function TemplateEditor({
   const preset4 = referencePolicy?.ipv4_force_domains ?? []
   const preset6 = referencePolicy?.ipv6_force_domains ?? []
   const writable = useAuthStore((s) => s.role) === 'super_admin'
+
   const [base, setBase] = useState(template)
   const [name, setName] = useState(template.name)
   const [description, setDescription] = useState(template.description)
+
   const initial = upgradeRoutingPolicy(template.edit_payload ?? template.draft)
+  const [domainStrategy, setDomainStrategy] = useState<DomainStrategy>(
+    initial.domain_strategy ?? 'IPIfNonMatch',
+  )
   const [v4, setV4] = useState(initial.ipv4_force_domains.join('\n'))
   const [v6, setV6] = useState(initial.ipv6_force_domains.join('\n'))
-  const [rules, setRules] = useState(JSON.stringify(initial.custom_rules, null, 2))
-  const [importOpen, setImportOpen] = useState(false)
+  const [customOutbounds, setCustomOutbounds] = useState<CustomOutbound[]>(
+    initial.custom_outbounds ?? [],
+  )
+  const [customRules, setCustomRules] = useState<RoutingRuleItem[]>(initial.custom_rules ?? [])
+
+  const [viewMode, setViewMode] = useState<'structured' | 'json'>('structured')
+  const [activeTab, setActiveTab] = useState<'rules' | 'outbounds'>('rules')
+  const [policyJsonText, setPolicyJsonText] = useState(() => JSON.stringify(initial, null, 2))
+  const [hasRuleCardError, setHasRuleCardError] = useState(false)
+  const [hasOutboundCardError, setHasOutboundCardError] = useState(false)
+
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+
+  const buildCurrentPolicy = (): RoutingPolicy => ({
+    schema_version: 3,
+    domain_strategy: domainStrategy,
+    ipv4_force_domains: domainLines(v4),
+    ipv6_force_domains: domainLines(v6),
+    ipv6_failure_policy: 'strict',
+    custom_outbounds: customOutbounds,
+    custom_rules: customRules.map((r) => ({ type: 'field', ...r })),
+  })
+
   const original = upgradeRoutingPolicy(base.draft)
-  const legacy = readPolicy(base.draft).schema_version !== 2
+  const legacyV1 = (readPolicy(base.draft).schema_version ?? 1) < 2
+  const currentSerialized =
+    viewMode === 'json' ? policyJsonText : JSON.stringify(buildCurrentPolicy(), null, 2)
+  const originalSerialized = JSON.stringify(original, null, 2)
+
   const dirty =
     name !== base.name ||
     description !== base.description ||
-    legacy ||
-    v4 !== original.ipv4_force_domains.join('\n') ||
-    v6 !== original.ipv6_force_domains.join('\n') ||
-    rules !== JSON.stringify(original.custom_rules, null, 2)
+    legacyV1 ||
+    currentSerialized !== originalSerialized
+
+  const applyUpgradedPolicyToState = (p: RoutingPolicy) => {
+    setDomainStrategy(p.domain_strategy ?? 'IPIfNonMatch')
+    setV4(p.ipv4_force_domains.join('\n'))
+    setV6(p.ipv6_force_domains.join('\n'))
+    setCustomOutbounds(p.custom_outbounds ?? [])
+    setCustomRules(p.custom_rules ?? [])
+  }
+
+  const switchViewMode = (target: 'structured' | 'json') => {
+    if (target === viewMode) return
+    setError('')
+    if (target === 'json') {
+      if (hasRuleCardError || hasOutboundCardError) {
+        setError('请先修正单条卡片内的 JSON 语法错误，再切换至全局策略 JSON 源码视图。')
+        return
+      }
+      setPolicyJsonText(JSON.stringify(buildCurrentPolicy(), null, 2))
+      setViewMode('json')
+      return
+    }
+    try {
+      const upgraded = upgradeRoutingPolicy(policyJsonText)
+      applyUpgradedPolicyToState(upgraded)
+      setViewMode('structured')
+    } catch (e) {
+      setError(`策略 JSON 解析失败：${(e as Error).message}`)
+    }
+  }
+
   const close = async () =>
     !dirty ||
     (await confirm({
@@ -74,19 +142,36 @@ export function TemplateEditor({
       cancelText: '继续编辑',
       tone: 'danger',
     }))
+
   const save = async (publish: boolean) => {
     setBusy(true)
     setError('')
     setMessage('')
     try {
       if (!name.trim()) throw new Error('请填写模板名称。')
-      const policy: RoutingPolicy = {
-        schema_version: 2,
-        ipv4_force_domains: domainLines(v4),
-        ipv6_force_domains: domainLines(v6),
-        ipv6_failure_policy: 'strict',
-        custom_rules: parseRules(rules),
+      if (viewMode === 'structured' && (hasRuleCardError || hasOutboundCardError)) {
+        throw new Error('存在尚未修正的单条 JSON 语法错误，请先修正后再保存。')
       }
+
+      let policy: RoutingPolicy
+      if (viewMode === 'json') {
+        const rawObj = JSON.parse(policyJsonText) as Record<string, unknown>
+        if (!rawObj || typeof rawObj !== 'object' || Array.isArray(rawObj)) {
+          throw new Error('路由策略必须是 JSON 对象。')
+        }
+        // 保留用户在 JSON 源码视图中编写的原样字段（含用于校验测试的预留字段），仅补齐 schema_version: 3 默认项
+        policy = {
+          ...upgradeRoutingPolicy(policyJsonText),
+          ...(rawObj.dns !== undefined ? { dns: rawObj.dns as Record<string, unknown> | null } : {}),
+          ...(rawObj.balancers !== undefined ? { balancers: rawObj.balancers as unknown[] } : {}),
+          ...(rawObj.observatory !== undefined
+            ? { observatory: rawObj.observatory as Record<string, unknown> | null }
+            : {}),
+        }
+      } else {
+        policy = buildCurrentPolicy()
+      }
+
       const payload = { name: name.trim(), description, draft: policy, version: base.version }
       const res = base.id
         ? await request.patch(`/routing-templates/${base.id}`, payload)
@@ -94,10 +179,11 @@ export function TemplateEditor({
       let saved = { ...base, ...res.data.data } as RoutingTemplate
       setBase(saved)
       setName(saved.name)
-      setV4(policy.ipv4_force_domains.join('\n'))
-      setV6(policy.ipv6_force_domains.join('\n'))
-      setRules(JSON.stringify(policy.custom_rules, null, 2))
+      const savedPolicy = upgradeRoutingPolicy(saved.draft)
+      applyUpgradedPolicyToState(savedPolicy)
+      setPolicyJsonText(JSON.stringify(savedPolicy, null, 2))
       setMessage('草稿已保存。')
+
       if (publish) {
         const r = await request.post(`/routing-templates/${saved.id}/publish`, {
           version: saved.version,
@@ -119,13 +205,14 @@ export function TemplateEditor({
       setBusy(false)
     }
   }
+
   return (
     <Drawer
       open
-      width="lg"
+      width="xl"
       onClose={onClose}
       title={template.id ? `编辑路由模板 · ${template.name}` : '新增路由模板'}
-      description="保存草稿用于继续编辑；发布版本后才能被节点选用。"
+      description="支持结构化卡片编排与策略 JSON 源码双向无损切换；发布版本后方可绑定节点。"
       dirty={dirty}
       saving={busy}
       onBeforeClose={close}
@@ -151,105 +238,147 @@ export function TemplateEditor({
                 保存并发布版本
               </Btn>
             </>
-          )}{' '}
+          )}
         </>
       }
     >
       <fieldset disabled={!writable || busy} className="space-y-4">
         <FieldGroup title="基本信息">
-          <Field label="模板名称 *" value={name} onChange={(e) => setName(e.target.value)} />
-          <Field
-            label="说明"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="模板名称 *" value={name} onChange={(e) => setName(e.target.value)} />
+            <Field
+              label="说明"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
         </FieldGroup>
-        <FieldGroup
-          title="域名路由"
-          description="未命中规则保持默认直连。每行一条，例如 domain:example.com；自定义规则优先于域名列表，两组域名重叠时 IPv4 优先。"
-        >
-          <p className="text-xs text-soft">
-            默认出站：正常直连，不强制 IPv4 或 IPv6。两组列表留空时保持默认行为。
-          </p>
-          {legacy && (
-            <p className="text-xs text-[var(--warning)]">
-              正在转换旧版草稿：原先实际走 IPv4 的域名已归入 IPv4
-              列表。保存并发布新版本、重新绑定后生效，旧版本不变。
-            </p>
-          )}
-          <label className="block space-y-2 text-sm">
-            <span>强制 IPv4 域名 · {domainLines(v4).length} 条</span>
-            <textarea
-              rows={5}
-              className={routingControl}
-              value={v4}
-              onChange={(e) => setV4(e.target.value)}
-            />
-          </label>
-          <label className="block space-y-2 text-sm">
-            <span>强制 IPv6 域名 · {domainLines(v6).length} 条</span>
-            <textarea
-              rows={5}
-              className={routingControl}
-              value={v6}
-              onChange={(e) => setV6(e.target.value)}
-            />
-          </label>
-          <p className="text-xs text-soft">
-            强制 IPv6 需要节点有 IPv6 出口，失败不回退
-            IPv4；无出口的节点会在同步前被拦截。策略与客户端使用 IPv4 或 IPv6 连接节点无关。
-          </p>
-          <Btn
-            variant="secondary"
-            disabled={!referencePolicy}
-            onClick={() => setImportOpen(!importOpen)}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] px-3.5 py-2.5">
+          <div
+            role="tablist"
+            aria-label="编辑器视图切换"
+            className="inline-flex rounded-md border border-[var(--border)] bg-[var(--panel)] p-0.5 text-xs"
           >
-            导入参考域名
-          </Btn>
-          {importOpen && (
-            <div className="space-y-3 rounded border border-[var(--border)] p-3 text-xs">
-              <p>起始列表不代表完整服务域名库。google.com 覆盖范围较广，默认不包含，可按需添加。</p>
-              <p>IPv4：{preset4.join('、')}</p>
-              <p>IPv6：{preset6.join('、')}</p>
-              <div className="flex gap-2">
-                {[false, true].map((replace) => (
-                  <Btn
-                    key={String(replace)}
-                    variant="secondary"
-                    onClick={() => {
-                      setV4(
-                        domainLines(
-                          [...(replace ? [] : domainLines(v4)), ...preset4].join('\n'),
-                        ).join('\n'),
-                      )
-                      setV6(
-                        domainLines(
-                          [...(replace ? [] : domainLines(v6)), ...preset6].join('\n'),
-                        ).join('\n'),
-                      )
-                      setImportOpen(false)
-                    }}
-                  >
-                    {replace ? '替换现有列表' : '追加到现有列表'}
-                  </Btn>
-                ))}
-              </div>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'structured'}
+              onClick={() => switchViewMode('structured')}
+              className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 font-medium transition ${
+                viewMode === 'structured'
+                  ? 'bg-[var(--accent)] text-white'
+                  : 'text-soft hover:text-[var(--text)]'
+              }`}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              结构化视图
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'json'}
+              onClick={() => switchViewMode('json')}
+              className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 font-medium transition ${
+                viewMode === 'json'
+                  ? 'bg-[var(--accent)] text-white'
+                  : 'text-soft hover:text-[var(--text)]'
+              }`}
+            >
+              <Code2 className="h-3.5 w-3.5" />
+              策略 JSON 源码
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2" data-slot="sandbox-preflight">
+            {headerActions ?? (
+              <span className="text-xs text-soft">Schema v3 · 保存时自动加密出站凭据</span>
+            )}
+          </div>
+        </div>
+
+        {viewMode === 'structured' ? (
+          <div className="space-y-4">
+            <div
+              role="tablist"
+              aria-label="策略功能分区"
+              className="flex gap-2 border-b border-[var(--border)] pb-2"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'rules'}
+                onClick={() => setActiveTab('rules')}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium transition ${
+                  activeTab === 'rules'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                    : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                <Route className="h-4 w-4" />
+                路由规则（{customRules.length}）
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'outbounds'}
+                onClick={() => setActiveTab('outbounds')}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium transition ${
+                  activeTab === 'outbounds'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                    : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                <Network className="h-4 w-4" />
+                自定义出站（{customOutbounds.length}）
+              </button>
             </div>
-          )}
-        </FieldGroup>
-        <details>
-          <summary className="cursor-pointer text-sm">高级自定义规则</summary>
-          <label className="mt-3 block space-y-2 text-sm">
-            <span>路由规则 JSON 数组</span>
-            <textarea
-              rows={8}
-              className={routingControl + ' font-mono'}
-              value={rules}
-              onChange={(e) => setRules(e.target.value)}
+
+            {activeTab === 'rules' ? (
+              <RuleWaterfallEditor
+                domainStrategy={domainStrategy}
+                onDomainStrategyChange={setDomainStrategy}
+                rules={customRules}
+                onRulesChange={setCustomRules}
+                outbounds={customOutbounds}
+                v4Text={v4}
+                onV4Change={setV4}
+                v6Text={v6}
+                onV6Change={setV6}
+                legacyV1={legacyV1}
+                preset4={preset4}
+                preset6={preset6}
+                hasReferencePreset={!!referencePolicy}
+                disabled={!writable || busy}
+                onPendingErrorChange={setHasRuleCardError}
+              />
+            ) : (
+              <OutboundListEditor
+                outbounds={customOutbounds}
+                rules={customRules}
+                disabled={!writable || busy}
+                onChange={setCustomOutbounds}
+                onPendingErrorChange={setHasOutboundCardError}
+              />
+            )}
+          </div>
+        ) : (
+          <FieldGroup
+            title="策略 JSON 源码（Schema v3）"
+            description="可直接粘贴或编辑完整策略 JSON。未知合法高级字段（如 mux、sockopt）在切回结构化视图与保存时无损保留；系统入站与管理端口由面板在合并期强制保护。"
+          >
+            <JsonEditor
+              ariaLabel="策略 JSON 源码"
+              value={policyJsonText}
+              readOnly={!writable || busy}
+              minHeight="420px"
+              maxHeight="62vh"
+              onChange={setPolicyJsonText}
             />
-          </label>
-        </details>
+          </FieldGroup>
+        )}
       </fieldset>
+
       {error && (
         <p role="alert" className="mt-4 text-sm text-[var(--danger)]">
           {error} 输入已保留。
@@ -310,11 +439,10 @@ export function TemplateHistory({
         {query.data?.map((r) => (
           <details key={r.revision} className="rounded-md border border-[var(--border)] p-3">
             <summary className="cursor-pointer text-sm">
-              v{r.revision} ·{' '}
-              {readPolicy(r.payload).schema_version === 2 ? '默认直连' : '旧版 IPv4 兜底'} ·{' '}
+              v{r.revision} · {revisionSummaryLabel(r.payload)} ·{' '}
               {new Date(r.created_at).toLocaleString()} · {r.actor}
             </summary>
-            <pre className="my-3 max-h-72 overflow-auto text-xs">
+            <pre className="my-3 max-h-72 overflow-auto rounded bg-[var(--code-bg)] p-3 font-mono text-xs text-[var(--code-text)]">
               {JSON.stringify(JSON.parse(r.payload), null, 2)}
             </pre>
             {writable && (
@@ -572,7 +700,7 @@ export function TemplateNodes({
                 { value: 0, label: '请选择已发布版本' },
                 ...(revisions.data ?? []).map((r) => ({
                   value: r.revision,
-                  label: `v${r.revision}${readPolicy(r.payload).schema_version === 2 ? ' · 默认直连' : ' · 旧版 IPv4 兜底'}`,
+                  label: `v${r.revision} · ${revisionSummaryLabel(r.payload)}`,
                 })),
               ]}
             />

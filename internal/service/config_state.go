@@ -173,10 +173,18 @@ func (s *SyncService) RestorePolicy(nodeID uint, expected uint, actor string) er
 		b.Overrides = "{}"
 	} else {
 		// Store only routing policy; current users and keys are regenerated on execution.
+		var rev entity.RoutingTemplateRevision
+		if err := repository.DB.Where("template_id = ? AND revision = ?", state.LastHealthyTemplateID, state.LastHealthyTemplateRevision).First(&rev).Error; err != nil {
+			return fmt.Errorf("历史模板修订不存在: %w", err)
+		}
+		overrides, ovErr := xray.BuildOverridesForTarget(rev.Payload, state.LastHealthyPolicy)
+		if ovErr != nil {
+			return ovErr
+		}
 		b.Mode = "template"
 		b.TemplateID = state.LastHealthyTemplateID
 		b.Revision = state.LastHealthyTemplateRevision
-		b.Overrides = state.LastHealthyPolicy
+		b.Overrides = overrides
 	}
 	return NewRoutingService().SaveBinding(b, expected, actor, true)
 }

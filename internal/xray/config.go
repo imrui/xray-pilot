@@ -15,13 +15,15 @@ import (
 // ---- Xray JSON 数据结构 ----
 
 type Config struct {
-	Log       Log        `json:"log"`
-	API       *API       `json:"api,omitempty"`
-	Stats     *struct{}  `json:"stats,omitempty"`
-	Policy    *Policy    `json:"policy,omitempty"`
-	Routing   *Routing   `json:"routing,omitempty"`
-	Inbounds  []Inbound  `json:"inbounds"`
-	Outbounds []Outbound `json:"outbounds"`
+	Log         Log        `json:"log"`
+	API         *API       `json:"api,omitempty"`
+	DNS         any        `json:"dns,omitempty"`
+	Stats       *struct{}  `json:"stats,omitempty"`
+	Policy      *Policy    `json:"policy,omitempty"`
+	Routing     *Routing   `json:"routing,omitempty"`
+	Inbounds    []Inbound  `json:"inbounds"`
+	Outbounds   []Outbound `json:"outbounds"`
+	Observatory any        `json:"observatory,omitempty"`
 }
 
 // Policy 启用按用户/inbound 维度的流量统计
@@ -56,18 +58,23 @@ type API struct {
 type Routing struct {
 	DomainStrategy string        `json:"domainStrategy,omitempty"`
 	Rules          []RoutingRule `json:"rules"`
+	Balancers      []Balancer    `json:"balancers,omitempty"`
 }
 
 type RoutingRule struct {
-	Domain      []string `json:"domain,omitempty"`
-	Port        string   `json:"port,omitempty"`
-	Network     string   `json:"network,omitempty"`
-	Protocol    []string `json:"protocol,omitempty"`
-	Type        string   `json:"type,omitempty"`
-	IP          []string `json:"ip,omitempty"`     // 目标 IP 匹配
-	Source      []string `json:"source,omitempty"` // 来源 IP 匹配（http/socks 白名单用）
-	InboundTag  []string `json:"inboundTag,omitempty"`
-	OutboundTag string   `json:"outboundTag"`
+	Domain      []string                   `json:"domain,omitempty"`
+	Port        string                     `json:"port,omitempty"`
+	Network     string                     `json:"network,omitempty"`
+	Protocol    []string                   `json:"protocol,omitempty"`
+	Type        string                     `json:"type,omitempty"`
+	IP          []string                   `json:"ip,omitempty"`     // 目标 IP 匹配
+	Source      []string                   `json:"source,omitempty"` // 来源 IP 匹配（http/socks 白名单用）
+	InboundTag  []string                   `json:"inboundTag,omitempty"`
+	OutboundTag string                     `json:"outboundTag,omitempty"`
+	BalancerTag string                     `json:"balancerTag,omitempty"`
+	Remark      string                     `json:"remark,omitempty"`
+	Disabled    bool                       `json:"disabled,omitempty"`
+	Extra       map[string]json.RawMessage `json:"-"`
 }
 
 type Inbound struct {
@@ -86,9 +93,13 @@ type Sniffing struct {
 }
 
 type Outbound struct {
-	Settings interface{} `json:"settings,omitempty"`
-	Protocol string      `json:"protocol"`
-	Tag      string      `json:"tag"`
+	Settings       interface{}                `json:"settings,omitempty"`
+	Protocol       string                     `json:"protocol"`
+	Tag            string                     `json:"tag"`
+	SendThrough    string                     `json:"sendThrough,omitempty"`
+	StreamSettings interface{}                `json:"streamSettings,omitempty"`
+	Mux            interface{}                `json:"mux,omitempty"`
+	Extra          map[string]json.RawMessage `json:"-"`
 }
 
 // VLESS 入站结构
