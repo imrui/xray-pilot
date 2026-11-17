@@ -1,8 +1,14 @@
 package repository
 
 import (
+	"encoding/json"
+	"errors"
+	"reflect"
+
 	"github.com/imrui/xray-pilot/internal/entity"
+	"github.com/imrui/xray-pilot/pkg/crypto"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type InboundProfileRepository struct{}
@@ -40,22 +46,57 @@ func (r *InboundProfileRepository) FindAll() ([]entity.InboundProfile, error) {
 
 func (r *InboundProfileRepository) Update(p *entity.InboundProfile) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(p).Error; err != nil {
+		var previous entity.InboundProfile
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&previous, p.ID).Error; err != nil {
 			return err
 		}
-		return InvalidateConfigs(tx, nil)
+		if err := tx.Omit(clause.Associations).Save(p).Error; err != nil {
+			return err
+		}
+		if !previous.Active && !p.Active {
+			return nil
+		}
+		keys := tx.Model(&entity.NodeProfileKey{}).Where("profile_id = ?", p.ID)
+		if previous.Active == p.Active && previous.Protocol == p.Protocol && profileSettingsEqual(previous.Settings, p.Settings) {
+			if previous.Port == p.Port {
+				return nil
+			}
+			// A node with its own port does not follow the shared default port.
+			keys = keys.Where("port = 0")
+		}
+		var ids []uint
+		if err := keys.Distinct("node_id").Pluck("node_id", &ids).Error; err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		return InvalidateConfigs(tx, ids)
 	})
 }
 
 func (r *InboundProfileRepository) Delete(id uint) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
+		var profile entity.InboundProfile
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&profile, id).Error; err != nil {
+			return err
+		}
+		var ids []uint
+		if profile.Active {
+			if err := tx.Model(&entity.NodeProfileKey{}).Where("profile_id = ?", id).Distinct("node_id").Pluck("node_id", &ids).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Where("profile_id = ?", id).Delete(&entity.NodeProfileKey{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Delete(&entity.InboundProfile{}, id).Error; err != nil {
 			return err
 		}
-		return InvalidateConfigs(tx, nil)
+		if len(ids) == 0 {
+			return nil
+		}
+		return InvalidateConfigs(tx, ids)
 	})
 }
 
@@ -91,25 +132,39 @@ func (r *InboundProfileRepository) FindActiveKeysForNode(nodeID uint) ([]entity.
 
 // UpsertKey 创建或更新节点密钥材料
 func (r *InboundProfileRepository) UpsertKey(key *entity.NodeProfileKey) error {
-	var existing entity.NodeProfileKey
-	err := DB.Where("node_id = ? AND profile_id = ?", key.NodeID, key.ProfileID).First(&existing).Error
-	if err != nil {
-		// 不存在则创建
-		return DB.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Create(key).Error; err != nil {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var profile entity.InboundProfile
+		if err := tx.First(&profile, key.ProfileID).Error; err != nil {
+			return err
+		}
+		var node entity.Node
+		if err := tx.Select("id").First(&node, key.NodeID).Error; err != nil {
+			return err
+		}
+		var existing entity.NodeProfileKey
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("node_id = ? AND profile_id = ?", key.NodeID, key.ProfileID).First(&existing).Error
+		changed := true
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := tx.Omit(clause.Associations).Create(key).Error; err != nil {
 				return err
 			}
-			return InvalidateConfigs(tx, []uint{key.NodeID})
-		})
-	}
-	if existing.Locked {
-		return ErrNodeKeyLocked
-	}
-	existing.Settings = key.Settings
-	existing.Port = key.Port
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&existing).Error; err != nil {
-			return err
+		} else {
+			if err != nil {
+				return err
+			}
+			if existing.Locked {
+				return ErrNodeKeyLocked
+			}
+			existing.Profile, key.Profile = &profile, &profile
+			changed = existing.EffectivePort() != key.EffectivePort() || !profileSettingsEqual(existing.Settings, key.Settings)
+			existing.Settings, existing.Port = key.Settings, key.Port
+			if err := tx.Omit(clause.Associations).Save(&existing).Error; err != nil {
+				return err
+			}
+			*key = existing
+		}
+		if !profile.Active || !changed {
+			return nil
 		}
 		return InvalidateConfigs(tx, []uint{key.NodeID})
 	})
@@ -117,19 +172,48 @@ func (r *InboundProfileRepository) UpsertKey(key *entity.NodeProfileKey) error {
 
 // DeleteKey 删除节点密钥
 func (r *InboundProfileRepository) DeleteKey(nodeID, profileID uint) error {
-	var existing entity.NodeProfileKey
-	if err := DB.Where("node_id = ? AND profile_id = ?", nodeID, profileID).First(&existing).Error; err != nil {
-		return err
-	}
-	if existing.Locked {
-		return ErrNodeKeyLocked
-	}
 	return DB.Transaction(func(tx *gorm.DB) error {
+		var existing entity.NodeProfileKey
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Profile").Where("node_id = ? AND profile_id = ?", nodeID, profileID).First(&existing).Error; err != nil {
+			return err
+		}
+		if existing.Locked {
+			return ErrNodeKeyLocked
+		}
 		if err := tx.Where("node_id = ? AND profile_id = ?", nodeID, profileID).Delete(&entity.NodeProfileKey{}).Error; err != nil {
 			return err
 		}
+		if existing.Profile == nil || !existing.Profile.Active {
+			return nil
+		}
 		return InvalidateConfigs(tx, []uint{nodeID})
 	})
+}
+
+// Saving the same Reality private key produces a new AES nonce. Compare its
+// plaintext value in memory so an unchanged form does not invalidate the node.
+func profileSettingsEqual(a, b string) bool {
+	decode := func(raw string) (map[string]any, error) {
+		if raw == "" {
+			raw = "{}"
+		}
+		var value map[string]any
+		if err := json.Unmarshal([]byte(raw), &value); err != nil {
+			return nil, err
+		}
+		if key, ok := value["private_key"].(string); ok && key != "" {
+			if plain, err := crypto.Decrypt(key); err == nil {
+				value["private_key"] = plain
+			}
+		}
+		return value, nil
+	}
+	av, ae := decode(a)
+	bv, be := decode(b)
+	if ae != nil || be != nil {
+		return a == b
+	}
+	return reflect.DeepEqual(av, bv)
 }
 
 // SetKeyLocked 更新节点协议锁定状态
