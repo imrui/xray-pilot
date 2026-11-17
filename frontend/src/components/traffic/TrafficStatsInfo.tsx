@@ -5,15 +5,15 @@ import type { TrafficAnalytics } from '@/types/traffic'
 
 export function TrafficStatsInfo({ data }: { data?: TrafficAnalytics }) {
   return (
-    <div className="mt-4 border-t border-[var(--border)] pt-3 text-sm text-soft">
+    <div className="shrink-0 text-sm text-soft">
       <Popover.Root>
-        <Popover.Trigger className="inline-flex min-h-9 cursor-pointer flex-wrap items-center gap-2 rounded-md px-2 text-left transition-colors hover:bg-[var(--panel-muted)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
+        <Popover.Trigger className="inline-flex min-h-9 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-2 text-left transition-colors hover:bg-[var(--panel-muted)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
           <Info aria-hidden="true" className="h-4 w-4 shrink-0" />
           <span>统计说明</span>
           {data && data.failed_polls > 0 && <span className="text-[var(--warning)]">{data.failed_polls} 次采集失败</span>}
         </Popover.Trigger>
         <Popover.Portal>
-          <Popover.Content side="top" align="start" sideOffset={8} collisionPadding={12}
+          <Popover.Content side="bottom" align="start" sideOffset={8} collisionPadding={12}
             className="z-50 max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[min(26rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] p-4 text-sm text-[var(--text)] shadow-xl focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
             <div className="mb-3 flex items-center justify-between gap-3">
               <Popover.Title className="font-semibold">统计说明</Popover.Title>

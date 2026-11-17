@@ -130,6 +130,10 @@ test('趋势完整日期使用 UTC+8，小时补充时间，缺采断点保留',
 test('统计说明点击后以浮层展示，支持 Esc、关闭按钮、重复点击与外部点击关闭', async () => {
   const { container } = mountDashboard()
   const trigger = await screen.findByRole('button', { name: '统计说明 2 次采集失败' })
+  const header = screen.getByRole('heading', { name: '用量趋势' }).parentElement!
+  assert.ok(header.contains(trigger))
+  const dimension = within(header).getByRole('combobox', { name: '统计维度' })
+  assert.ok(trigger.compareDocumentPosition(dimension) & Node.DOCUMENT_POSITION_FOLLOWING)
   assert.equal(trigger.getAttribute('aria-expanded'), 'false')
   fireEvent.mouseEnter(trigger)
   assert.equal(screen.queryByRole('dialog', { name: '统计说明' }), null)

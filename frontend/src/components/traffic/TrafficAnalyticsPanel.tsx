@@ -109,13 +109,15 @@ export function TrafficAnalyticsPanel({ onRefresh, refreshing = false, recentAct
             <SurfaceCard className="min-w-0 p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h3 className="font-semibold">用量趋势</h3>
-                <div className="flex gap-2">
-                  <select className={control} aria-label="统计维度" value={dimension} onChange={e => setDimension(e.target.value as TrafficDimension)}><option value="all">总览</option><option value="node">按节点</option><option value="user">按用户</option></select>
-                  <select className={control} aria-label="流量方向" value={direction} onChange={e => setDirection(e.target.value as TrafficDirection)}><option value="total">总用量</option><option value="up">上行</option><option value="down">下行</option></select>
+                <div className="flex max-w-full flex-wrap items-center gap-2">
+                  <TrafficStatsInfo data={data} />
+                  <div className="flex shrink-0 gap-2">
+                    <select className={control} aria-label="统计维度" value={dimension} onChange={e => setDimension(e.target.value as TrafficDimension)}><option value="all">总览</option><option value="node">按节点</option><option value="user">按用户</option></select>
+                    <select className={control} aria-label="流量方向" value={direction} onChange={e => setDirection(e.target.value as TrafficDirection)}><option value="total">总用量</option><option value="up">上行</option><option value="down">下行</option></select>
+                  </div>
                 </div>
               </div>
               {data ? <TrafficChart key={`${dimension}-${nodeId}-${userId}`} series={data.series} direction={direction} interval={data.interval} /> : <div className="flex h-80 items-center justify-center text-sm text-soft">正在加载趋势…</div>}
-              <TrafficStatsInfo data={data} />
             </SurfaceCard>
 
             <SurfaceCard className="min-w-0">
