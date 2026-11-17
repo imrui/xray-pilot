@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowDown, ArrowUp, RefreshCcw, X } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowDown, ArrowUp, Database, Network, RefreshCcw, Server, Users, X } from 'lucide-react'
 import { trafficApi } from '@/lib/api'
 import { formatBytes } from '@/lib/utils'
 import { presetRange, TRAFFIC_TIMEZONE, type DateSelection } from '@/lib/trafficDates'
@@ -9,18 +9,18 @@ import { SurfaceCard } from '@/components/ui/Page'
 import { Btn } from '@/components/ui/Form'
 import { DateRangePicker } from './DateRangePicker'
 import { TrafficChart } from './TrafficChart'
+import { TrafficRankingChart } from './TrafficRankingChart'
 
-const PAGE_SIZE = 5
 const control = 'h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm'
 
 function ObjectFilter({ label, options, value, onChange }: { label: string; options: TrafficOption[]; value: number | undefined; onChange: (id: number | undefined) => void }) {
   const [search, setSearch] = useState('')
   const shown = options.filter(o => o.id === value || o.name.toLowerCase().includes(search.toLowerCase()))
   return (
-    <div className="flex w-full min-w-0 items-center gap-2 sm:w-80">
+    <div className="flex w-full min-w-0 items-center gap-2 sm:w-60">
       <span className="shrink-0 text-sm text-soft">{label}</span>
       <div className="flex min-w-0 flex-1 overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel-strong)] focus-within:border-[var(--accent)]">
-        <input className="h-9 w-24 min-w-0 border-r border-[var(--border)] bg-transparent px-3 text-sm outline-none focus-visible:bg-[var(--panel-muted)]" type="search" aria-label={`搜索${label}`} placeholder="搜索" value={search} onChange={e => setSearch(e.target.value)} />
+        <input className="h-9 w-16 min-w-0 border-r border-[var(--border)] bg-transparent px-2 text-sm outline-none focus-visible:bg-[var(--panel-muted)]" type="search" aria-label={`搜索${label}`} placeholder="搜索" value={search} onChange={e => setSearch(e.target.value)} />
         <select className="h-9 min-w-0 flex-1 bg-transparent px-2 text-sm focus-visible:outline-[var(--accent)]" aria-label={`筛选${label}`} value={value ?? ''} onChange={e => onChange(e.target.value ? Number(e.target.value) : undefined)}>
           <option value="">全部{label}</option>
           {value && !options.some(o => o.id === value) && <option value={value}>已删除{label} #{value}</option>}
@@ -31,14 +31,13 @@ function ObjectFilter({ label, options, value, onChange }: { label: string; opti
   )
 }
 
-export function TrafficAnalyticsPanel({ onRefresh, refreshing = false }: { onRefresh: () => void; refreshing?: boolean }) {
+export function TrafficAnalyticsPanel({ onRefresh, refreshing = false, recentActivity, nodeHealth }: { onRefresh: () => void; refreshing?: boolean; recentActivity?: ReactNode; nodeHealth?: ReactNode }) {
   // Keep the selected range fixed until the administrator changes it or refreshes.
   const [range, setRange] = useState<DateSelection>(() => presetRange('7d'))
   const [dimension, setDimension] = useState<TrafficDimension>('node')
   const [direction, setDirection] = useState<TrafficDirection>('total')
   const [nodeId, setNodeId] = useState<number>()
   const [userId, setUserId] = useState<number>()
-  const [page, setPage] = useState(1)
   const query = useQuery({
     queryKey: ['traffic-analytics', range.start, range.end, dimension, nodeId, userId],
     queryFn: ({ signal }) => trafficApi.analytics({ start: range.start, end: range.end, dimension, node_id: nodeId, user_id: userId }, signal).then(r => r.data.data!),
@@ -50,12 +49,9 @@ export function TrafficAnalyticsPanel({ onRefresh, refreshing = false }: { onRef
   const isRefreshing = refreshing || query.isFetching
   const total = data ? data.up_bytes + data.down_bytes : undefined
   const ranking = data?.ranking ?? []
-  const pages = Math.max(1, Math.ceil(ranking.length / PAGE_SIZE))
-  const currentPage = Math.min(page, pages)
 
   function changeRange(value: DateSelection) {
     setRange(value)
-    setPage(1)
   }
 
   function refresh() {
@@ -71,28 +67,39 @@ export function TrafficAnalyticsPanel({ onRefresh, refreshing = false }: { onRef
   return (
     <div className="space-y-4">
       <SurfaceCard>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 md:px-5">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm" aria-label="当前运行概况">
-            <span className="font-semibold">运行概况</span>
-            <span className="text-soft">节点 <b className="ml-1 text-[var(--text)]">{data?.total_nodes ?? '—'}</b></span>
-            <span className="text-soft" title="当前健康的启用节点 / 全部启用节点">健康 <b className={`ml-1 ${data && data.healthy_nodes < data.enabled_nodes ? 'text-[var(--warning)]' : 'text-[var(--success)]'}`}>{data ? `${data.healthy_nodes} / ${data.enabled_nodes}` : '—'}</b></span>
-            <span className="text-soft" title="当前启用用户 / 全部用户">启用用户 <b className="ml-1 text-[var(--text)]">{data ? `${data.enabled_users} / ${data.total_users}` : '—'}</b></span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4" aria-label="统计筛选">
+          <DateRangePicker value={range} onChange={changeRange} />
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-3 sm:w-auto">
+            <ObjectFilter label="节点" value={nodeId} options={data?.nodes ?? []} onChange={setNodeId} />
+            <ObjectFilter label="用户" value={userId} options={data?.users ?? []} onChange={setUserId} />
+            {(nodeId || userId) && <button className="inline-flex items-center gap-1 rounded py-1 text-sm text-[var(--accent)]" onClick={() => { setNodeId(undefined); setUserId(undefined) }}><X className="h-4 w-4" />清除筛选</button>}
           </div>
-          <Btn variant="secondary" className="h-9 shrink-0" onClick={refresh} disabled={isRefreshing}>
+          <Btn variant="secondary" className="ml-auto h-9 shrink-0" onClick={refresh} disabled={isRefreshing}>
             <RefreshCcw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             {isRefreshing ? '刷新中…' : '刷新'}
           </Btn>
         </div>
-        <div className="space-y-4 p-4 md:px-5">
-          <DateRangePicker value={range} onChange={changeRange} />
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-            <ObjectFilter label="节点" value={nodeId} options={data?.nodes ?? []} onChange={id => { setNodeId(id); setPage(1) }} />
-            <ObjectFilter label="用户" value={userId} options={data?.users ?? []} onChange={id => { setUserId(id); setPage(1) }} />
-            {(nodeId || userId) && <button className="inline-flex items-center gap-1 rounded py-1 text-sm text-[var(--accent)]" onClick={() => { setNodeId(undefined); setUserId(undefined); setPage(1) }}><X className="h-4 w-4" />清除筛选</button>}
-          </div>
-        </div>
       </SurfaceCard>
 
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 min-[1800px]:grid-cols-8" aria-label="运行与区间统计" aria-busy={query.isFetching}>
+        {[
+          { title: '节点总数', value: data?.total_nodes ?? '—', hint: '当前全部节点', icon: Server },
+          { title: '健康节点', value: data ? `${data.healthy_nodes} / ${data.enabled_nodes}` : '—', hint: '当前健康 / 启用节点', icon: Activity, color: data && data.healthy_nodes < data.enabled_nodes ? 'var(--warning)' : 'var(--success)' },
+          { title: '启用用户', value: data ? `${data.enabled_users} / ${data.total_users}` : '—', hint: '当前启用 / 用户总数', icon: Users },
+          { title: '区间总用量', value: formatBytes(total), hint: '所选区间 · 上行 + 下行', icon: Database },
+          { title: '区间上行', value: formatBytes(data?.up_bytes), hint: '所选区间 · 用户上传', icon: ArrowUp },
+          { title: '区间下行', value: formatBytes(data?.down_bytes), hint: '所选区间 · 用户下载', icon: ArrowDown, color: 'var(--success)' },
+          { title: '区间活跃用户', value: data?.active_users ?? '—', hint: '所选区间 · 有流量的用户', icon: Users },
+          { title: '有用量节点', value: data?.active_nodes ?? '—', hint: '所选区间 · 含已删除节点', icon: Network },
+        ].map(({ title, value, hint, icon: Icon, color }) => <SurfaceCard key={title} className="min-w-0 p-4">
+          <div className="flex items-center justify-between gap-2"><h3 className="text-sm text-soft">{title}</h3><Icon aria-hidden="true" className="h-4 w-4 shrink-0" style={{ color: color ?? 'var(--accent)' }} /></div>
+          <p className="mt-3 break-words text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">{value}</p>
+          <p className="mt-2 text-xs leading-relaxed text-faint">{hint}</p>
+        </SurfaceCard>)}
+      </div>
+
+      <div className="grid items-start gap-4 min-[1600px]:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
+        <div className="min-w-0 space-y-4">
       {query.isError ? (
         <SurfaceCard className="p-5">
           <p role="alert" className="mb-3 text-sm text-[var(--danger)]">统计加载失败：{query.error.message}</p>
@@ -100,37 +107,14 @@ export function TrafficAnalyticsPanel({ onRefresh, refreshing = false }: { onRef
         </SurfaceCard>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4" aria-busy={query.isFetching}>
-            <SurfaceCard className="min-w-0 p-4 sm:p-5">
-              <p className="text-sm text-soft">区间总用量</p>
-              <p className="mt-3 break-words text-xl font-semibold tracking-tight tabular-nums sm:text-3xl">{formatBytes(total)}</p>
-            </SurfaceCard>
-            <SurfaceCard className="min-w-0 p-4 sm:p-5">
-              <p className="text-sm text-soft">上行 / 下行</p>
-              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-semibold tabular-nums sm:text-lg">
-                <span className="inline-flex items-center gap-1.5" aria-label={`上行 ${formatBytes(data?.up_bytes)}`}><ArrowUp className="h-4 w-4 shrink-0 text-[var(--accent)]" />{formatBytes(data?.up_bytes)}</span>
-                <span className="inline-flex items-center gap-1.5" aria-label={`下行 ${formatBytes(data?.down_bytes)}`}><ArrowDown className="h-4 w-4 shrink-0 text-[var(--success)]" />{formatBytes(data?.down_bytes)}</span>
-              </div>
-            </SurfaceCard>
-            {[
-              ['区间活跃用户', data?.active_users ?? '—'],
-              ['有用量节点', data?.active_nodes ?? '—'],
-            ].map(([title, value]) => (
-              <SurfaceCard key={title} className="min-w-0 p-4 sm:p-5">
-                <p className="text-sm text-soft">{title}</p>
-                <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">{value}</p>
-              </SurfaceCard>
-            ))}
-          </div>
-
           {data?.truncated && <p role="status" className="flex gap-2 text-sm text-[var(--warning)]"><AlertTriangle className="h-4 w-4 shrink-0" />所选范围超出明细保留期限，结果不完整。当前保留起点：{new Date(data.retention_start!).toLocaleString('zh-CN', { timeZone: TRAFFIC_TIMEZONE })}。</p>}
 
-          <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+          <div className="space-y-4">
             <SurfaceCard className="min-w-0 p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h3 className="font-semibold">用量趋势</h3>
                 <div className="flex gap-2">
-                  <select className={control} aria-label="统计维度" value={dimension} onChange={e => { setDimension(e.target.value as TrafficDimension); setPage(1) }}><option value="all">总览</option><option value="node">按节点</option><option value="user">按用户</option></select>
+                  <select className={control} aria-label="统计维度" value={dimension} onChange={e => setDimension(e.target.value as TrafficDimension)}><option value="all">总览</option><option value="node">按节点</option><option value="user">按用户</option></select>
                   <select className={control} aria-label="流量方向" value={direction} onChange={e => setDirection(e.target.value as TrafficDirection)}><option value="total">总用量</option><option value="up">上行</option><option value="down">下行</option></select>
                 </div>
               </div>
@@ -147,33 +131,22 @@ export function TrafficAnalyticsPanel({ onRefresh, refreshing = false }: { onRef
               </details>
             </SurfaceCard>
 
-            <SurfaceCard className="min-w-0 overflow-hidden">
+            <SurfaceCard className="min-w-0">
               <div className="flex min-h-18 items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
                 <h3 className="font-semibold">{dimension === 'user' ? '用户用量排名' : dimension === 'node' ? '节点用量排名' : '用量汇总'}</h3>
                 <span className="shrink-0 text-sm text-soft">{ranking.length} 项</span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[var(--panel-muted)] text-xs text-soft"><tr><th className="px-5 py-3">{dimension === 'user' ? '用户' : dimension === 'node' ? '节点' : '范围'}</th>{['上行', '下行', '总用量', '占比'].map(h => <th key={h} className="whitespace-nowrap px-3 py-3 text-right">{h}</th>)}</tr></thead>
-                  <tbody>
-                    {ranking.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map(row => (
-                      <tr key={row.id} className="border-t border-[var(--border)]">
-                        <td className="px-5 py-4">{dimension === 'all' ? row.name : <button className="block min-w-20 max-w-36 truncate text-left text-[var(--accent)] hover:underline" title={`${row.name} · ${dimension === 'node' ? '查看此节点的用户趋势' : '查看此用户的节点趋势'}`} onClick={() => { if (dimension === 'node') { setNodeId(row.id); setDimension('user') } else { setUserId(row.id); setDimension('node') }; setPage(1) }}>{row.name}</button>}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-right tabular-nums">{formatBytes(row.up_bytes)}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-right tabular-nums">{formatBytes(row.down_bytes)}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-right font-medium tabular-nums">{formatBytes(row.up_bytes + row.down_bytes)}</td>
-                        <td className="px-3 py-4 text-right tabular-nums">{total ? ((row.up_bytes + row.down_bytes) / total * 100).toFixed(1) : '0'}%</td>
-                      </tr>
-                    ))}
-                    {!ranking.length && <tr><td colSpan={5} className="p-8 text-center text-soft">{query.isFetching ? '正在加载…' : '该范围暂无流量记录'}</td></tr>}
-                  </tbody>
-                </table>
+              <div className="p-4 sm:p-5">
+                {data ? <TrafficRankingChart key={`${range.start}-${range.end}-${dimension}-${nodeId}-${userId}-${direction}`} rows={ranking} dimension={dimension} direction={direction} onSelect={id => { if (dimension === 'node') { setNodeId(id); setDimension('user') } else { setUserId(id); setDimension('node') } }} /> : <p className="flex h-80 items-center justify-center text-sm text-soft">正在加载排名…</p>}
               </div>
-              {pages > 1 && <div className="flex items-center justify-end gap-3 border-t border-[var(--border)] px-4 py-3 text-sm text-soft"><Btn variant="ghost" className="h-8 px-2" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>上一页</Btn>{currentPage} / {pages}<Btn variant="ghost" className="h-8 px-2" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>下一页</Btn></div>}
             </SurfaceCard>
           </div>
         </>
       )}
+          {recentActivity}
+        </div>
+        <aside className="min-w-0" aria-label="当前节点健康">{nodeHealth}</aside>
+      </div>
     </div>
   )
 }

@@ -30,7 +30,7 @@ function syncBadge(node: Node) {
 function NodeHealthRow({ node }: { node: Node }) {
   const ok = node.last_check_ok
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-3 last:border-b-0">
+    <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-[var(--border)] px-3 py-4">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3">
           <div role="img" aria-label={!node.last_check_at ? '尚未检查' : ok ? '健康' : '异常'} className={`h-2 w-2 shrink-0 rounded-full ${!node.last_check_at ? 'bg-[var(--border-strong)]' : ok ? 'bg-[var(--success)]' : 'bg-[var(--danger)]'}`} />
@@ -38,7 +38,7 @@ function NodeHealthRow({ node }: { node: Node }) {
         </div>
         <div className="mt-1 pl-5 text-xs text-soft">{node.online_user_count} 人在线</div>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="flex shrink-0 flex-col items-end gap-2">
         <span className="font-mono text-xs text-soft">{ok && node.last_latency_ms ? `${node.last_latency_ms}ms` : '—'}</span>
         {syncBadge(node)}
       </div>
@@ -83,39 +83,36 @@ export default function Dashboard() {
     void queryClient.refetchQueries({ queryKey: ['sync-summary'], exact: true })
   }
 
-  return (
-    <PageShell className="space-y-5">
-      <TrafficAnalyticsPanel onRefresh={refreshOverview} refreshing={nodesQuery.isFetching || logsQuery.isFetching || syncFetching} />
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SurfaceCard className="flex h-[400px] min-w-0 flex-col overflow-hidden">
+  const recentActivity = (
+        <SurfaceCard className="flex min-w-0 flex-col">
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] px-5">
             <h3 className="font-semibold">最近操作与异常</h3>
             <Link to="/logs" className="text-sm text-[var(--accent)] transition hover:opacity-80">查看全部</Link>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div className="flex-1">
             {logsQuery.isError ? (
               <p role="alert" className="px-5 py-10 text-sm text-[var(--danger)]">操作记录加载失败，请点击顶部刷新重试。</p>
             ) : logs.length === 0 ? (
               <div className="px-5 py-10 text-sm text-soft">{logsQuery.isFetching ? '正在加载…' : '暂无日志记录'}</div>
             ) : (
               logs.map((log) => (
-                <div key={log.id} className="flex items-start gap-3 border-b border-[var(--border)] px-5 py-3 last:border-b-0">
-                  <div className="min-w-0 flex items-start gap-3">
+                <div key={log.id} className="flex min-h-20 items-start gap-3 border-b border-[var(--border)] px-5 py-4 last:border-b-0">
+                  <div className="min-w-0 flex flex-1 items-start gap-3">
                     {logIcon(log)}
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm"><span className="font-medium">{log.action}</span>{log.target && <span className="break-all text-soft">{log.target}</span>}</div>
-                      <div className="mt-1 break-words text-sm text-soft">{log.message || '系统事件'}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 text-sm"><span className="break-all font-medium">{log.action}</span><time className="text-xs text-faint" dateTime={log.created_at} title={new Date(log.created_at).toLocaleString('zh-CN')}>{new Date(log.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time></div>
+                      {log.target && <p className="mt-1 break-all text-xs text-soft">{log.target}</p>}
+                      <div className="mt-1 break-words text-sm leading-relaxed text-soft [overflow-wrap:anywhere]">{log.message || '系统事件'}</div>
                     </div>
                   </div>
-                  <time className="ml-auto shrink-0 pt-0.5 text-xs text-faint" dateTime={log.created_at} title={new Date(log.created_at).toLocaleString('zh-CN')}>{new Date(log.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time>
                 </div>
               ))
             )}
           </div>
         </SurfaceCard>
-
-        <SurfaceCard className="flex h-[400px] min-w-0 flex-col overflow-hidden">
+  )
+  const nodeHealth = (
+        <SurfaceCard className="@container flex min-w-0 flex-col">
           <div className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border)] px-5">
             <h3 className="font-semibold">节点健康</h3>
             <Btn variant="ghost" className="h-8 px-2" onClick={() => void nodesQuery.refetch()} disabled={nodesQuery.isFetching}>
@@ -123,17 +120,20 @@ export default function Dashboard() {
               刷新
             </Btn>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div className="flex-1">
             {nodesQuery.isError ? (
               <p role="alert" className="px-5 py-10 text-sm text-[var(--danger)]">节点健康加载失败，请刷新重试。</p>
             ) : sortedNodes.length === 0 ? (
               <div className="px-5 py-10 text-sm text-soft">{nodesQuery.isFetching ? '正在加载…' : '暂无可用节点数据'}</div>
             ) : (
-              sortedNodes.map((node) => <NodeHealthRow key={node.id} node={node} />)
+              <div className="grid gap-3 p-4 @min-[520px]:max-[1600px]:grid-cols-2">{sortedNodes.map((node) => <NodeHealthRow key={node.id} node={node} />)}</div>
             )}
           </div>
         </SurfaceCard>
-      </div>
+  )
+  return (
+    <PageShell>
+      <TrafficAnalyticsPanel onRefresh={refreshOverview} refreshing={nodesQuery.isFetching || logsQuery.isFetching || syncFetching} recentActivity={recentActivity} nodeHealth={nodeHealth} />
     </PageShell>
   )
 }
