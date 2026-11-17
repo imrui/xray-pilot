@@ -35,7 +35,6 @@ frontend/.env.*.local
 
 # Claude Code local memory
 .claude/
-CLAUDE.md
 
 # Editor
 .vscode/

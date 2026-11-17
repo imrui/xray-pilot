@@ -1,0 +1,461 @@
+# Xray 灵活配置与路由出站策略演进方案（Schema v3 全阶段完整版）
+
+- **日期**：2026-11-17
+- **状态**：Approved（Phase 1 / Phase 2 / Phase 3 边界已全部对齐，待进入编码阶段）
+- **基线版本**：v0.7.2
+- **关联模块**：`internal/xray`、`internal/entity`、`internal/service`、`internal/handler`、`pkg/ssh`、`frontend/src/components/routing`、`frontend/src/pages/Routing.tsx`
+
+---
+
+## 1. 背景与目标
+
+### 1.1 项目现状（v0.7.2 基线）
+
+`xray-pilot` 面向小团队/自用多节点（约 12 台公网 VPS）场景，目前已具备扎实的入站与配置下发底座：
+
+1. **入站管理**：采用「协议模板（`InboundProfile`）+ 节点密钥与端口/SNI 覆盖（`NodeProfileKey`）」+ 用户授权动态生成入站，配合 SSH 落盘与 gRPC `HandlerService.AlterInbound` 即时热增删用户（`LiveSyncService`）。
+2. **版本化路由与三级继承（v0.7.0 引入）**：已建立 `RoutingTemplate`（草稿 `Draft`）→ `RoutingTemplateRevision`（不可变修订）→ `RoutingBinding`（`global` / `group` / `node` 三级继承 + 节点 `Overrides`）的数据闭环。
+3. **事务性同步与自愈回滚（v0.7.0 ~ v0.7.2 完善）**：下发流程已内置远端 `xray` 配置预检、原子替换、管理端口及真实客户端代理握手探测（`probe_url`），失败自动恢复 `LastHealthyPolicy` 且保留最新用户授权。
+
+### 1.2 现存痛点与短板
+
+随着路由与分流场景深入（如 AI 服务分流、流媒体解锁落地机、Cloudflare WARP 出口、多 IP 机器指定出口 IP、服务端解锁 DNS、多落地自动选路、广告与 BT 屏蔽），当前 `RoutingPolicy`（`SchemaVersion: 2`）存在明显限制：
+
+1. **出站（Outbounds）硬编码写死**：仅允许 `direct`、`block`、`direct-v4`、`direct-v6` 四个内置出站，无法配置外部链式落地机（SOCKS5 / HTTP / VLESS / WireGuard 等）或自定义 `freedom` 参数（如 `sendThrough`、`fragment`）。
+2. **路由匹配原语受限**：`validateDomain` 仅允许 `domain:` / `full:` / `regexp:`，拦截了高频使用的 `geosite:*`；IP 规则拦截了 `geoip:*`；不支持切换 `domainStrategy`，不支持 `quic` 协议匹配与 `balancerTag` 负载均衡。
+3. **缺少服务端 DNS 与健康观测模块**：流媒体/AI 分流常与自定义上游 DNS（按域名走解锁 DNS 或 DoH 防污染）及多落地故障切换（`balancers` + `observatory`）强相关，当前配置结构尚未覆盖。
+4. **强类型结构体吞字段，缺乏高级扩展通道**：`xray.Config`、`Outbound`、`RoutingRule` 使用固定字段 Go struct 序列化，未声明的合法 Xray 高级字段（如 `sockopt.dialerProxy`、`mux`）在反序列化/序列化过程中会被丢弃。
+5. **前端编辑与验证体验割裂**：强制 IPv4/IPv6 域名为文本框，而 `custom_rules` 仅提供折叠 `<details>` 内的原生 `<textarea>` 手写 JSON 数组，缺少规则顺序可视化调整、出站 Tag 联动选择、语法高亮，且草稿必须先发布绑定才能在远端节点验证兼容性。
+
+### 1.3 核心设计原则
+
+借鉴开源社区成熟方案的设计精华，**不推倒重来、不新建平行的“全局原始配置表”**，而是在现有 `RoutingTemplate` 版本化与三级继承底座上一次性规划 `SchemaVersion: 3` 全量模型，分三个阶段平滑交付：
+
+- **一次定型 Schema，分阶段解锁能力**：在 `SchemaVersion: 3` 中一次性规划齐 `custom_outbounds`、`custom_rules`、`dns`、`balancers`、`observatory` 字段与系统保留字，避免后续演进反复升版产生 `v4` / `v5` 迁移包袱。
+- **守住系统护栏**：托管入站、订阅生成、gRPC 热更新、流量统计与运维代理安全白名单不受自定义配置破坏。
+- **结构化表单 + JSON 双模式**：高频场景提供直观表单，复杂/冷门参数支持单条目级与策略级 Raw JSON 无损编辑。
+- **适配多节点差异**：支持「一套分流规则模板 + 节点级按出站 Tag 覆盖/重映射 + 节点级 DNS 覆盖」，避免为每台落地参数不同的节点复制多份模板。
+
+---
+
+## 2. 开源项目参考与取舍
+
+| 参考项目 | 吸收的设计思路 | 明确不照搬的部分及原因 |
+|---|---|---|
+| **bropines/xray-config-ui-editor** | 1. 路由规则按执行优先级卡片化展示与顺序调整<br>2. 同一配置单元「结构化表单 ⇄ JSON 源码」双向切换<br>3. 路由规则 `outboundTag` / `balancerTag` 与已定义出站/均衡器下拉联动 | 不照搬其“整份 `config.json` 全自由编辑”模式——那会覆盖面板动态注入的用户列表并破坏到期撤权与 gRPC 热同步 |
+| **MHSanaei/3x-ui** | 1. 将 `Routing` / `Outbounds` / `DNS` / `Balancers` 拆分为平级功能标签页<br>2. 为常用 `geosite:*` / `geoip:*` / 协议提供快捷标签输入与场景片段 | 3x-ui 为单机面板，无多节点继承概念；本项目必须保留「模板修订 + 分组/节点继承覆盖」能力 |
+| **Gozargah/Marzban** | **受保护骨架合并思想**：面板在最终合并期强制接管 `api`、`stats`、`policy` 统计位与托管 `inbounds` | Marzban 直接维护整份裸 JSON 模板，难以优雅表达多节点共享规则但各自出口参数不同的场景 |
+| **remnawave/xray-monaco-editor** | 编辑器内 JSON 语法/结构红线提示思想 | **不引入前端 Xray WASM 校验器**：WASM 体积数十 MB，会严重膨胀 `go:embed` 单二进制体积；本项目通过 SSH 远端真实节点跑只读 `xray -test` 沙箱预检，既轻量又能校验节点真实的 `geosite.dat` / `geoip.dat` 内容 |
+
+---
+
+## 3. 全局架构与已对齐的七大边界决策
+
+### 3.1 三层配置合并管线
+
+节点最终生成的 `config.json`（位于 `internal/service/sync.go::buildConfigPolicy`）严格按以下三层合并：
+
+```text
+[层 1：面板强管控底座]  +  [层 2：结构化策略模板 (v3) + 节点级覆盖]  +  [层 3：受控 JSON 扩展字段]  ==>  最终 config.json
+```
+
+1. **层 1：面板强管控底座（System Invariants，只读不可覆盖）**
+   - `api` 与 `inbounds[tag="api-inbound"]`（`127.0.0.1:10085`）：保障 `LiveSyncService` 与 `StatsService` 永久可用。
+   - `stats` 与 `policy` 流量统计开关（`statsUserUplink/Downlink`、`statsInboundUplink/Downlink` 强制为 `true`）。
+   - 托管 `inbounds`：100% 由 `InboundProfile` + `NodeProfileKey` + 有效 `User` 生成，确保订阅输出（`/sub/:token`）与运行态严格一致。
+   - 系统置顶路由保护规则：`api-inbound -> api` → `allow_private` 运维代理直连前置规则 → `geoip:private -> block` → 普通 HTTP/SOCKS 白名单规则。
+   - 基础内置出站：`direct`（默认第一出站，承接未命中兜底流量）与 `block`（`blackhole`）。
+   - **全局系统保留 Tag（自 Phase 1 起锁死）**：`direct`、`block`、`direct-v4`、`direct-v6`、`api`、`api-inbound`、`dns-out`，以及托管入站前缀（`vless-reality-*`、`vless-ws-*`、`trojan-*`、`http-proxy-*`、`socks-proxy-*`）。
+2. **层 2：策略模板与节点覆盖（User Orchestration）**
+   - 托管自定义出站（`custom_outbounds`）、分流规则（`custom_rules` + 快捷 IPv4/IPv6 域名组）、路由域名策略（`domain_strategy`）、服务端 DNS（`dns`）、负载均衡与探测（`balancers` + `observatory`）。
+   - 应用节点级 `RoutingBinding.Overrides`（含域名组覆盖、按出站 Tag 覆盖/重映射、DNS 覆盖）。
+3. **层 3：无损原始 JSON 透传（Controlled Escape Hatch）**
+   - 各配置实体保留未知字段（`Extra map[string]json.RawMessage`），用户在 JSON 模式编写的高级合法 Xray 字段（如 `streamSettings.sockopt`、`mux`）无损透传至最终配置，严禁触碰层 1 保留字段与保留 Tag。
+
+### 3.2 已确认的七大边界决策汇总
+
+| 编号 | 决策维度 | 确认方案 |
+|---|---|---|
+| **D1** | 阶段演进节奏 | 分三期推进：Phase 1（自定义出站 + 路由放开 + 双模式编辑器 + 节点 Tag 覆盖）→ Phase 2（场景片段库 + 草稿远端沙箱预检）→ Phase 3（DNS 模块 + 负载均衡与探测） |
+| **D2** | 自定义出站表单范围 | 结构化表单支持 **SOCKS5 / HTTP / Freedom（多 IP 出口） / WireGuard（WARP） / VLESS** 五类协议；其余协议或复杂流参数走单条出站 Raw JSON |
+| **D3** | 节点级覆盖粒度 | 在现有 IPv4/IPv6 域名覆盖基础上，新增 **按出站 Tag 覆盖参数 / 重映射目标 Tag**（Phase 3 同步支持节点级 DNS 覆盖） |
+| **D4** | 同步后健康探测策略 | **保持严格闭环**：自定义出站/路由/DNS 若导致 `xray_health.go` 探测 `probe_url` 失败，视为故障并自动回滚至 `LastHealthyPolicy` |
+| **D5** | 草稿远端沙箱预检权限与并发 | **仅限 `super_admin`** 调用，进程内复用 `lockNode(nodeID)` 串行执行远端只读 `xray -test`，秒级返回语法与 `geosite.dat` 校验结果，不重启线上服务、不触发失败告警 |
+| **D6** | DNS 模块管控边界 | 采用**服务端解析分流模式**（上游 DoH/DoT/UDP + 按域名指定解锁 DNS + `hosts` + `queryStrategy`），不额外生成客户端 53 端口劫持入站/出站 |
+| **D7** | 负载均衡探测范围 | 支持 **`random` / `roundRobin` / `leastPing`** 三种策略 + 轻量后台周期探测 **`observatory`**，不引入复杂的 `burstObservatory` 表单 |
+
+---
+
+## 4. `SchemaVersion: 3` 统一数据模型总览
+
+不新增数据库表或列，直接演进 `RoutingTemplate.Draft`、`RoutingTemplateRevision.Payload` 与 `NodeConfigState.LastHealthyPolicy` 的 JSON 载荷结构（完整覆盖三期字段，未启用模块省略或置空）：
+
+```json
+{
+  "schema_version": 3,
+  "domain_strategy": "IPIfNonMatch",
+  "ipv4_force_domains": ["domain:openai.com"],
+  "ipv6_force_domains": ["domain:netflix.com"],
+  "ipv6_failure_policy": "strict",
+  "custom_outbounds": [
+    {
+      "tag": "warp-egress",
+      "protocol": "wireguard",
+      "remark": "WARP 双栈解锁出口",
+      "settings": {
+        "secretKey": "enc:v1:<aes-gcm-ciphertext>",
+        "address": ["172.16.0.2/32", "2606:4700:110:8a3f::2/128"],
+        "peers": [
+          {
+            "endpoint": "engage.cloudflareclient.com:2408",
+            "publicKey": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+            "reserved": [0, 0, 0],
+            "keepAlive": 25
+          }
+        ],
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "hk-landing",
+      "protocol": "socks",
+      "remark": "香港落地机",
+      "settings": {
+        "servers": [
+          {
+            "address": "203.0.113.10",
+            "port": 1080,
+            "users": [{ "user": "ops", "pass": "enc:v1:<aes-gcm-ciphertext>" }]
+          }
+        ]
+      },
+      "streamSettings": {
+        "sockopt": { "dialerProxy": "direct-v4" }
+      }
+    }
+  ],
+  "balancers": [
+    {
+      "tag": "unlock-pool",
+      "remark": "多落地最低延迟池",
+      "selector": ["hk-landing", "warp-egress"],
+      "strategy": { "type": "leastPing" },
+      "fallbackTag": "direct-v4"
+    }
+  ],
+  "observatory": {
+    "subjectSelector": ["hk-landing", "warp-egress"],
+    "probeURL": "https://www.gstatic.com/generate_204",
+    "probeInterval": "1m",
+    "enableConcurrency": true
+  },
+  "dns": {
+    "enabled": true,
+    "queryStrategy": "UseIP",
+    "disableCache": false,
+    "disableFallback": false,
+    "disableFallbackIfMatch": true,
+    "hosts": {
+      "dns.google": ["8.8.8.8", "8.8.4.4"]
+    },
+    "servers": [
+      {
+        "address": "1.1.1.1",
+        "port": 53,
+        "domains": ["geosite:openai", "geosite:netflix"],
+        "expectIPs": [],
+        "skipFallback": true,
+        "queryStrategy": "UseIPv4"
+      },
+      "https+local://1.1.1.1/dns-query",
+      "localhost"
+    ]
+  },
+  "custom_rules": [
+    {
+      "type": "field",
+      "remark": "屏蔽 BT 流量",
+      "disabled": false,
+      "protocol": ["bittorrent"],
+      "outboundTag": "block"
+    },
+    {
+      "type": "field",
+      "remark": "AI 服务走多落地均衡池",
+      "disabled": false,
+      "domain": ["geosite:openai", "geosite:anthropic"],
+      "balancerTag": "unlock-pool"
+    }
+  ]
+}
+```
+
+### 节点级覆盖（`RoutingBinding.Overrides`）统一结构
+
+```json
+{
+  "ipv4_force_domains": null,
+  "ipv6_force_domains": ["domain:custom.example.com"],
+  "outbound_overrides": {
+    "hk-landing": {
+      "mode": "replace",
+      "outbound": {
+        "tag": "hk-landing",
+        "protocol": "socks",
+        "settings": {
+          "servers": [{ "address": "198.51.100.22", "port": 2080 }]
+        }
+      }
+    },
+    "warp-egress": {
+      "mode": "remap",
+      "target_tag": "direct-v6"
+    }
+  },
+  "dns_override": null
+}
+```
+
+---
+
+## 5. Phase 1 详细设计：自定义出站 + 路由放开 + 双模式编辑器 + 节点 Tag 覆盖
+
+### 5.1 无损编解码与历史兼容（`internal/xray`）
+
+1. **未知字段无损保留**：
+   - `CustomOutbound` 与 `RoutingRule` 实现自定义 `UnmarshalJSON` / `MarshalJSON`：除强类型字段外，其余键值存入 `Extra map[string]json.RawMessage`。用户在 JSON 模式填写的 `mux`、`streamSettings`、`sendThrough` 等字段在表单切换与后端保存时完整保留。
+   - **Phase 1 预留字段处理**：`RoutingPolicy` 结构体在 Phase 1 即声明 `DNS`、`Balancers`、`Observatory` 及 `RoutingRule.BalancerTag` 字段；Phase 1 期间若非空则由 `Validate()` 明确返回 `"DNS 与负载均衡将在后续阶段启用"`，Phase 3 只需放开校验即可，无需变更 Schema 版本。
+2. **面板元数据剥离**：
+   - `CustomOutbound.remark`、`RoutingRule.remark`、`RoutingRule.disabled` 仅存于策略 JSON 供面板 UI 使用。
+   - `ApplyRoutingPolicy` 生成最终节点 `config.json` 时剥离所有 `remark`；当 `RoutingRule.disabled == true` 时跳过该规则（不写入最终 `routing.rules`）。
+3. **`v1 / v2` 无缝兼容**：
+   - 存量已发布的 `schema_version: 1 | 2` 修订保持原字节与原配置哈希不变，绝不触发已同步节点误漂移。
+   - 前端打开 `v1 / v2` 模板编辑时，自动升维为 `schema_version: 3` 草稿（补齐 `domain_strategy: "IPIfNonMatch"`、`custom_outbounds: []`）。
+
+### 5.2 出站与路由校验护栏（`internal/xray/routing_policy.go`）
+
+#### 5.2.1 自定义出站（`custom_outbounds`）校验
+1. **容量边界**：单模板最多 32 个自定义出站，整体策略 JSON 上限 256 KiB。
+2. **Tag 唯一性与保留字保护**：
+   - 正则：`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`，模板内不可重复。
+   - 严禁等于保留字（`direct`、`block`、`direct-v4`、`direct-v6`、`api`、`api-inbound`、`dns-out`）或匹配托管入站前缀（`vless-reality-*`、`vless-ws-*`、`trojan-*`、`http-proxy-*`、`socks-proxy-*`）。
+3. **协议范围与必填校验**：
+   - 允许协议：`freedom`、`blackhole`、`socks`、`http`、`vless`、`vmess`、`trojan`、`shadowsocks`、`wireguard`、`loopback`（拦截 `dns` 出站，避免误配破坏解析）。
+   - 结构化协议校验：`socks` / `http` / `vless` 校验服务器地址非空且端口为 `1~65535`；`wireguard` 校验 `secretKey` 非空且至少含 1 个有效 `peer`（`endpoint` 含端口、`publicKey` 非空）；`freedom` 若设置 `sendThrough` 必须为合法 IPv4/IPv6 字面量。
+4. **`dialerProxy` 链式代理校验**：
+   - 若 `streamSettings.sockopt.dialerProxy` 非空，目标 Tag 必须存在于有效出站集合中（且不能指向 `block` 或 `api`）。
+   - 执行有向图环路检测，拦截自指（`A -> A`）与循环依赖（`A -> B -> A`）。
+
+#### 5.2.2 路由规则（`routing`）校验与瀑布流顺序
+1. **`domain_strategy`**：允许 `"AsIs"`、`"IPIfNonMatch"`（默认）、`"IPOnDemand"`。
+2. **匹配原语扩充**：
+   - `domain`：支持 `domain:<host>`、`full:<host>`、`regexp:<pattern>`、`keyword:<str>`、`geosite:<tag>`（`<tag>` 匹配 `^[A-Za-z0-9_@-]+$`）。
+   - `ip`：支持 IPv4/IPv6 地址、CIDR、`geoip:<tag>` 及反向匹配 `!geoip:<tag>`（`<tag>` 匹配 `^[A-Za-z0-9_-]+$`）。
+   - `protocol`：允许 `"http"`、`"tls"`、`"quic"`、`"bittorrent"`。
+   - `port` 与 `network`：保持现有端口段与 `tcp` / `udp` / `tcp,udp` 校验。
+3. **安全禁区**：
+   - 继续禁止 `custom_rules` 包含 `inboundTag` 或 `source`（防止绕过 HTTP/SOCKS 白名单或劫持 `api-inbound`）。
+   - 禁止无目标过滤的全量兜底规则（`domain`、`ip`、`port`、`protocol` 全空时拒绝保存，即使填了 `network: "tcp,udp"` 也拦截，防止吞掉后续快捷域名列表）。
+4. **引用完整性**：每条规则（含 `disabled: true`）的 `outboundTag` 必须指向内置出站（`direct` / `block` / `direct-v4` / `direct-v6`）或当前定义的 `custom_outbounds[*].tag`。
+5. **最终渲染顺序（`ApplyRoutingPolicy`）**：
+   - `routing.rules`：`[系统置顶规则 (api + allow_private + geoip:private + 代理白名单)]` → `[未禁用的 custom_rules]` → `[ipv4_force_domains -> direct-v4]` → `[ipv6_force_domains -> direct-v6]`。
+   - `outbounds`：`[direct (首项兜底), block]` → `[按需生成的 direct-v4 / direct-v6]` → `[被实际规则或 dialerProxy 引用的有效 custom_outbounds（解密凭据并剥离 remark）]`。
+
+#### 5.2.3 精细化 `RequiresIPv6()` 判定
+- 仅当有效启用规则命中了 `direct-v6`、命中了 `domainStrategy == "ForceIPv6"` 的自定义 `freedom` 出站，或被引用的自定义出站远端服务器地址本身为 IPv6 字面量（如 `[2001:db8::1]:1080`）时，`RequiresIPv6()` 返回 `true`。
+- 节点通过 IPv4 地址连接外部 WARP / 落地机出站时返回 `false`，允许纯 IPv4 VPS 借助外部隧道分流 IPv6 目标。
+
+### 5.3 节点级按出站 Tag 覆盖与重映射（`MergeRoutingPolicy`）
+
+1. **校验约束**：`Overrides.outbound_overrides` 中的每个键 `tag` 必须存在于所绑定模板版本的 `custom_outbounds` 中；若切换模板后残留不存在的 `tag`，合并期明确返回错误提示管理员清理或更新该节点覆盖。
+2. **`mode: "replace"`（本节点替换参数）**：
+   - 校验 `outbound.tag == tag`，用节点提供的 `outbound` 替换模板同名出站（允许跨协议替换，如模板定义为 `socks`，单节点替换为本机多 IP `freedom + sendThrough`）。
+3. **`mode: "remap"`（重映射目标 Tag）**：
+   - `target_tag` 必须为内置出站或模板中其他未重映射的有效自定义出站（禁止多跳链式 `remap`）。
+   - 合并后将该节点所有规则的 `outboundTag` 及其他出站的 `dialerProxy` 中等于 `tag` 的引用改写为 `target_tag`；若原 `tag` 不再被引用，从该节点最终 `outbounds` 中剔除。
+
+### 5.4 凭据加密、权限与脱敏闭环
+
+1. **AES-GCM 静态加密（`enc:v1:` 前缀）**：
+   - 自动识别并加密以下出站敏感字段：
+     - `socks` / `http`：`settings.servers[*].users[*].pass`
+     - `vless` / `vmess`：`settings.vnext[*].users[*].id`
+     - `trojan` / `shadowsocks`：`settings.servers[*].password`
+     - `wireguard`：`settings.secretKey`、`settings.peers[*].preSharedKey`
+     - `streamSettings.realitySettings.privateKey`
+   - **密文幂等防抖（防止误标节点待同步）**：保存模板或节点覆盖时，若新提交的明文与原密文解密结果一致（或回传未修改密文），直接保留原密文字串；`service/routing.go::effectiveKey` 基于解密规范化后的结构计算等价摘要，杜绝随机 Nonce 引发无关节点漂移。
+2. **角色权限边界**：
+   - `super_admin`：可完整读写模板、`custom_outbounds`、`custom_rules` 及节点 `outbound_overrides`。
+   - 普通 `admin`：仅可切换节点路由绑定与覆盖 IPv4/IPv6 域名列表；禁止修改 `custom_rules`、`custom_outbounds`、`outbound_overrides`、`ConfigPath`；所有面向普通 `admin` 的 API 响应将敏感字段替换为 `"<masked>"`。
+3. **全链路预览脱敏**：扩充 `internal/service/config_preflight.go::redactConfig`，在原脱敏键基础上新增 `"secretKey"`、`"preSharedKey"`，确保 `/preview-config` 与 `/effective-config` 安全。
+
+### 5.5 Phase 1 前端组件与交互规格
+
+1. **CodeMirror 6 编辑器组件（`frontend/src/components/ui/JsonEditor.tsx`）**：
+   - 仅引入 `@codemirror/state`、`@codemirror/view`、`@codemirror/commands`、`@codemirror/lang-json`、`@codemirror/lint`（gzip 增量约 100KB，适配 `go:embed`）。
+   - 颜色完全绑定 `index.css` CSS 变量（`--code-bg`、`--border`、`--accent`、`--danger`、`--text`），字体使用自托管 `IBM Plex Mono`，零外链请求。
+2. **路由模板编辑抽屉升级（`Templates.tsx`，宽度升为 `xl` 960px）**：
+   - 顶部栏：`[结构化视图]` ⇄ `[策略 JSON 源码]` 双向同步（预留右侧 `[节点沙箱预检]` 入口插槽供 Phase 2 接入）。
+   - 结构化视图分 Tab（Phase 1 开放 `路由规则`、`自定义出站` 两个 Tab，Phase 3 扩展 `DNS` 与 `负载均衡` Tab）：
+     - **Tab 1 · 路由规则**：`domainStrategy` 选择器 + 顶部只读折叠「系统置顶保护规则」 + 中部「自定义分流规则卡片列表（支持上下调序、启停开关、geosite/geoip 快捷输入、`outboundTag` 下拉联动、单条 JSON 切换）」 + 底部「强制 IPv4 / IPv6 快捷域名框」。
+     - **Tab 2 · 自定义出站**：内置出站说明 + 自定义出站卡片（展示引用计数，被引用时禁删） + 5 类协议（SOCKS5 / HTTP / Freedom / WireGuard / VLESS）表单与单条 Raw JSON 无损切换。
+3. **节点路由绑定覆盖扩展（`BindingFields.tsx`）**：
+   - 当有效模板包含 `custom_outbounds` 时，渲染「本节点出站覆盖」列表，每个 `tag` 支持切换 `继承模板` / `重映射到其他出站` / `自定义本节点参数`（最后一项限 `super_admin` 编辑）。
+
+---
+
+## 6. Phase 2 详细设计：场景片段库与未发布草稿远端沙箱预检
+
+### 6.1 编辑器内置场景片段库（Snippets Library）
+
+区分数据库持久化的「起始模板（Presets）」与编辑器内即插即用的「配置片段（Snippets）」。片段为前端只读常量（`frontend/src/lib/routing-snippets.ts`），点击后追加到当前草稿对应列表，不覆盖用户已有其他配置：
+
+1. **出站快捷片段（插入 `custom_outbounds`）**：
+   - `Cloudflare WARP (WireGuard)`：预填 `endpoint: "engage.cloudflareclient.com:2408"`、官方 `publicKey`、`mtu: 1280`、`keepAlive: 25`，引导填写本机分配的 `secretKey` 与双栈 `address`。
+   - `多 IP 服务器指定出口 (Freedom sendThrough)`：预填 `protocol: "freedom"`、`sendThrough`、可选 `domainStrategy`。
+   - `前置链式代理落地 (SOCKS5 + dialerProxy)`：预填服务器结构与 `streamSettings.sockopt.dialerProxy: "direct-v4"`。
+2. **分流规则片段（插入 `custom_rules`，插入时弹窗选择目标 `outboundTag`）**：
+   - `屏蔽 BT 协议下载`：`protocol: ["bittorrent"] -> block`
+   - `屏蔽常见广告域名`：`domain: ["geosite:category-ads-all"] -> block`
+   - `主流 AI 服务集合`：`domain: ["geosite:openai", "geosite:anthropic", "geosite:google-gemini"]`
+   - `主流流媒体集合`：`domain: ["geosite:netflix", "geosite:disney", "geosite:youtube"]`
+   - `Telegram 域名与 IP 集合`：两条配套规则（`geosite:telegram` + `geoip:telegram`）
+
+### 6.2 未发布草稿远端沙箱预检（Draft Sandbox Preflight）
+
+解决“编辑草稿时写了 `geosite:xxx` 或自定义出站 JSON，必须先发布版本并绑定节点才能测远端 Xray 认不认”的痛点。
+
+#### 6.2.1 接口契约
+- **路由**：`POST /api/nodes/:id/preflight-draft`
+- **鉴权**：`JWT` + `RequireSuperAdmin()`，请求体上限 `300 KiB`
+- **请求载荷**：
+  ```json
+  {
+    "policy": { "...当前编辑器内的 SchemaVersion 3 草稿 JSON..." },
+    "use_node_overrides": true,
+    "custom_overrides": null
+  }
+  ```
+  - `use_node_overrides == true` 时自动叠加目标节点当前已保存的 `RoutingBinding.Overrides`（若兼容）；传入 `custom_overrides` 时以传入覆盖为准（供节点绑定抽屉在保存覆盖前直接预检）。
+- **响应载荷**：
+  ```json
+  {
+    "valid": true,
+    "xray_version": "26.3.27",
+    "requires_ipv6": false,
+    "elapsed_ms": 780,
+    "warnings": [],
+    "redacted_config": "{\n  \"log\": ...\n}",
+    "error": ""
+  }
+  ```
+
+#### 6.2.2 执行管线与并发/告警隔离护栏
+1. **纯内存合成，零库表副作用**：
+   - 调用 `DecodeRoutingPolicy` 与 `MergeRoutingPolicy` 完成静态校验，若未通过直接毫秒级返回 `valid: false` 与具体字段错误，无需发起 SSH。
+   - 查询该节点当前激活协议密钥与激活用户，在内存中合成完整 `config.json`（保留真实解密密钥仅用于远端 stdin 传输，响应中的 `redacted_config` 走 `redactConfig` 脱敏）。
+   - **绝不改写** `RoutingTemplate`、`RoutingBinding`、`NodeConfigState` 或节点 `SyncStatus`。
+2. **并发锁策略（复用 `lockNode`，礼让线上同步）**：
+   - 先检查该节点 `NodeConfigState` 是否存在未过期的部署租约（`LeaseUntil > now`）；若线上正在部署或恢复，立即返回 `409 节点正在执行同步任务，请稍后再试`。
+   - 获取进程内 `lockNode(nodeID)`，防止与后台漂移检测或 `LiveSync` 的 SSH 操作并发冲突。
+3. **远端只读 `xray -test` 执行**：
+   - 复用 `xssh.Client.ApplyXrayConfig(content, configPath, restart=false, validateOnly=true, ...)`：通过 stdin 向远端同目录写入 `.pilot-config.<rand>.json`，调用目标节点真实的 `xray run -test -format json -config <tmp>`（当 `RequiresIPv6()` 为真时同步检查默认 IPv6 出口路由），随即立即删除临时文件。
+   - **不重启 `xray` 服务，不执行耗时 10 秒的本地 Socks 代理握手探测**，整体响应控制在 1~2 秒内，且能 100% 捕获目标节点 Xray 版本差异或 `geosite.dat` / `geoip.dat` 缺失分类问题。
+4. **告警绝对隔离**：
+   - 草稿预检失败属于管理员正常调试反馈，**严禁调用 `AlertService.ReportEvent` 或 `failNode`**，绝不触发飞书同步异常告警。
+
+---
+
+## 7. Phase 3 详细设计：服务端 DNS 分流 + 负载均衡（Balancers & Observatory）
+
+### 7.1 服务端 DNS 分流模块（`dns`）
+
+#### 7.1.1 工作边界与 Xray `freedom` 解析联动机制（关键底层细节）
+1. **边界定位**：仅管控节点服务端 Xray 的内部域名解析行为（防 DNS 污染、为特定流媒体/AI 域名指定解锁 DNS 服务器、静态 `hosts` 映射），不生成客户端 53 端口流量劫持规则。
+2. **自动打通 `freedom` 出站解析链路（防踩坑设计）**：
+   - **Xray 核心机制陷阱**：在 Xray-core 中，即便配置了顶层 `dns` 模块，如果目标流量最终命中 `protocol: "freedom"` 且其 `settings.domainStrategy` 为默认值 `"AsIs"`，`freedom` 出站在拨号时仍会直接调用 Linux 系统 `/etc/resolv.conf`，**绕过 Xray 内置 `dns` 模块**（导致用户配了解锁 DNS 或 `hosts` 却不生效）。
+   - **面板合并策略**：当有效策略中 `dns != nil && dns.enabled == true` 时，`ApplyRoutingPolicy` 生成内置默认 `direct` 出站时自动将其 `settings.domainStrategy` 设为 `"UseIP"`（若 `dns.queryStrategy` 为 `"UseIPv4"` / `"UseIPv6"` 则与之对齐；内置 `direct-v4` / `direct-v6` 本身为 `"ForceIPv4"` / `"ForceIPv6"`，天然走内置 `dns` 模块）。无需管理员手工理解底层耦合即可让解锁 DNS 立即生效。
+
+#### 7.1.2 `dns` 字段与校验规则
+- **`queryStrategy`**：`"UseIP"`（默认） | `"UseIPv4"` | `"UseIPv6"`。
+- **`disableCache` / `disableFallback` / `disableFallbackIfMatch`**：布尔开关。
+- **`hosts`**：最多 200 条映射；键支持合法域名、`domain:<host>`、`full:<host>`、`geosite:<tag>`；值支持单个 IP 字符串或 IP 数组（解析校验每个元素为合法 IPv4/IPv6 字面量）。
+- **`servers`**（启用时至少 1 项，最多 16 项）：
+  - **简写字符串模式**：支持合法 IP（如 `"1.1.1.1"`、`"8.8.8.8"`）、`"localhost"`，以及加密/TCP DNS URI（前缀限定 `https://`、`https+local://`、`tcp://`、`tcp+local://`、`quic+local://`）。
+  - **分流服务器对象模式**：
+    - `address`（必填，格式同简写字符串）
+    - `port`（可选，`1~65535`，仅 IP/TCP 模式适用）
+    - `domains`（匹配域名列表，复用 5.2.2 `validateDomain`，如 `["geosite:netflix", "domain:openai.com"]`）
+    - `expectIPs`（期望返回 IP 范围列表，复用 IP/CIDR/`geoip:` 校验）
+    - `skipFallback`（布尔值）
+    - `queryStrategy`（单服务器覆盖：`"UseIP"` | `"UseIPv4"` | `"UseIPv6"`）
+  - **端口自环防护**：若 `address` 为 `127.0.0.1` / `::1`，严禁端口等于 `10085` 或当前节点任一托管入站端口。
+- **节点级 DNS 覆盖（`Overrides.dns_override`）**：
+  - 支持三态：`null`（继承模板 DNS） | `{"enabled": false}`（本节点关闭自定义 DNS，回退系统解析） | 完整 `dns` 对象替换（供不同地区节点填入各自授权的流媒体解锁 DNS IP）。
+
+### 7.2 负载均衡与轻量探测（`balancers` + `observatory`）
+
+#### 7.2.1 `balancers` 结构与校验
+1. **容量限制**：单模板最多 16 个负载均衡器。
+2. **字段规范**：
+   - `tag`（必填）：格式同出站 Tag，**与所有内置出站及 `custom_outbounds[*].tag` 共享全局唯一命名空间**（严禁负载均衡器与出站同名，严禁使用系统保留字）。
+   - `remark`（可选）：面板展示备注，渲染最终 `config.json` 时剥离。
+   - `selector`（必填，非空字符串数组）：候选出站选择器。前端表单默认提供多选勾选当前已定义的 `custom_outbounds`（精确 Tag），JSON 模式兼容前缀匹配；**合并后强校验每个 `balancer.selector` 必须至少匹配到 1 个有效出站**，且绝不能匹配到 `block` 或 `api`。
+   - `strategy.type`：限定 `"random"`（默认） | `"roundRobin"` | `"leastPing"`。
+   - `fallbackTag`（可选）：所有候选出站均探活失败时的兜底出站 Tag，非空时必须指向有效内置或自定义出站（如 `"direct"` 或 `"direct-v4"`）。
+
+#### 7.2.2 `observatory` 自动联动与 SSRF 防护
+1. **Xray 依赖自动补齐（防启动报错）**：
+   - 在 Xray-core 中，一旦任一 `balancer` 使用了 `strategy.type == "leastPing"` 或配置了 `fallbackTag`，顶层必须存在 `observatory` 且其 `subjectSelector` 必须覆盖对应候选出站，否则 Xray 进程启动直接失败。
+   - **面板智能联动**：当策略中存在 `leastPing` 或 `fallbackTag` 的均衡器时：
+     - 若 `observatory == nil`，`ApplyRoutingPolicy` 自动生成默认 `observatory`：`subjectSelector` 自动汇总相关 `balancer.selector` 去重集合，`probeURL` 取面板系统设置 `xray.probe_url`（未设则用默认 `https://www.gstatic.com/generate_204`），`probeInterval` 默认 `"1m"`，`enableConcurrency: true`。
+     - 若管理员显式配置了 `observatory`，校验其 `subjectSelector` 必须完整覆盖所有依赖健康状态的 `balancer.selector` 集合。
+2. **`observatory` 参数安全校验**：
+   - `probeURL`：非空时直接调用 `pkg/ssh.ValidateProbeURL` 校验——强制要求公网 HTTPS（443 端口）、无账号参数、严禁私网/回环 IP，彻底阻断通过 `observatory` 探测面板或节点内网服务的 SSRF 风险。
+   - `probeInterval`：校验为合法 Go/Xray 时间段字符串（如 `"30s"`、`"1m"`、`"5m"`），且下限不低于 `10s`、上限不超过 `1h`，防止高频探测打满落地机连接数。
+
+#### 7.2.3 路由规则与节点覆盖的跨模块协同
+1. **`RoutingRule` 目标互斥校验**：
+   - Phase 3 放开 `RoutingRule.BalancerTag` 后，每条规则严格执行二选一校验：`(outboundTag != "") != (balancerTag != "")`（必须且只能填写其中一个）。
+   - 若填写 `balancerTag`，必须存在于当前策略的 `balancers[*].tag` 中。
+2. **与节点 `outbound_overrides` 的合并顺序**：
+   - 在 `MergeRoutingPolicy` 中，先执行 `outbound_overrides`（替换或重映射出站），再对 `balancers` 执行候选集非空重验：
+     - 若某节点将某出站 `remap` 到了 `direct`，自动从该节点的 `balancer.selector` 与 `observatory.subjectSelector` 中将原失效 Tag 调整或剔除；若导致某被启用规则引用的 `balancer` 候选集变为空集，则在保存节点绑定（`PreviewBinding` / `SaveBinding`）时明确报错拦截。
+
+### 7.3 Phase 3 前端交互扩展
+
+在 960px 模板编辑抽屉的结构化视图中，新增两个平级 Tab（总计四个子面板：`路由规则` | `自定义出站` | `负载均衡` | `DNS 设置`）：
+1. **Tab 3 · 负载均衡**：
+   - 均衡器卡片列表：配置 `tag`、备注、勾选候选自定义出站、选择策略（随机 / 轮询 / 最低延迟 `leastPing`）、可选故障回退 `fallbackTag`。
+   - 当任一均衡器选用 `leastPing` 或设置了 `fallbackTag` 时，下方自动展开「健康探测（Observatory）设置」折叠区（默认填入推荐参数，无需手工拼装 `subjectSelector`）。
+   - `Tab 1 · 路由规则` 的目标下拉框自动以分组形式同时列出「出站（Outbounds）」与「负载均衡组（Balancers）」，选中均衡组时自动写入 `balancerTag` 并清空 `outboundTag`。
+2. **Tab 4 · DNS 设置**：
+   - 顶栏启用开关 `Switch`（关闭时不生成 `dns` 段，完全走节点系统默认解析）。
+   - 开启后展示：全局解析策略（`UseIP` / `UseIPv4` / `UseIPv6`）+ 缓存/回退开关 + 上游 DNS 服务器可排序列表（支持「快速添加公共 DoH/UDP」与「添加分域名解锁 DNS 规则」）+ 静态 `hosts` 键值表。
+   - 底部常驻一行清晰说明：「启用自定义 DNS 后，默认直连出站将自动使用 Xray 内置解析结果以使分流 DNS 与 Hosts 生效」。
+
+---
+
+## 8. 分阶段验收清单（Implementation Checklist）
+
+### Phase 1：自定义出站 + 路由升级 + 双模式编辑器 + 节点 Tag 覆盖
+- [ ] **Step 1（后端引擎与单测）**
+  - [ ] `internal/xray`：落地 `SchemaVersion: 3` 全量结构体定义（含 Phase 3 预留字段）、`CustomOutbound` / `RoutingRule` 未知字段无损 `Extra` 编解码、面板元数据（`remark` / `disabled`）剥离
+  - [ ] `internal/xray`：实现保留 Tag 锁死、5 类出站校验、`dialerProxy` 环路检测、`geosite:` / `geoip:` / `quic` / `domain_strategy` 校验、引用完整性校验及精细化 `RequiresIPv6()`
+  - [ ] `internal/xray`：升级 `MergeRoutingPolicy` 支持节点 `outbound_overrides`（`replace` / `remap`）
+  - [ ] `internal/xray` & `internal/service`：实现出站敏感字段 `enc:v1:` AES-GCM 加密、密文未改幂等保留、`admin` 角色权限拦截及 `redactConfig` 扩展脱敏
+  - [ ] 通过全部 Go 单元测试与回归测试（`go test ./...`）
+- [ ] **Step 2（前端双模式编辑器与联调）**
+  - [ ] `frontend`：引入 `@codemirror/*` 封装适配主题变量的 `JsonEditor`
+  - [ ] `frontend`：重构 `TemplateEditor` 为 `xl` 宽抽屉，完成「结构化视图 ⇄ 策略 JSON」双向同步、路由瀑布流卡片排序与 5 类自定义出站表单 + 单条 JSON 切换
+  - [ ] `frontend`：扩展 `BindingFields` 支持节点按出站 Tag 覆盖/重映射，补齐前端测试与构建（`npm run lint && npm test && npm run build`）
+
+### Phase 2：场景片段库 + 未发布草稿远端沙箱预检
+- [ ] 后端新增 `POST /api/nodes/:id/preflight-draft`（限 `super_admin`，复用 `lockNode`，礼让活跃部署租约，跑只读 `xray -test`，隔离飞书告警）及接口单测
+- [ ] 前端新增 `routing-snippets.ts`（WARP / 多 IP / 链式落地出站片段 + AI / 流媒体 / Telegram / BT / 广告规则片段）并接入编辑器快捷插入菜单
+- [ ] 前端在 `TemplateEditor` 与 `BindingEditor` 接入「选节点预览合并配置 + 一键远端沙箱预检」面板
+
+### Phase 3：服务端 DNS 分流 + 负载均衡与探测
+- [ ] 后端放开 `SchemaVersion: 3` 中的 `dns`、`balancers`、`observatory` 与 `RoutingRule.BalancerTag` 校验及合并渲染
+- [ ] 实现启用 `dns` 时内置 `direct` 出站 `UseIP` 自动联动、`leastPing` / `fallbackTag` 与 `observatory` 自动补齐、`probeURL` SSRF 校验及节点 `dns_override` 合并
+- [ ] 前端抽屉扩展 `负载均衡` 与 `DNS 设置` 两个结构化面板、路由规则目标分组下拉框（Outbounds + Balancers）及节点级 DNS 覆盖控件，完成全量回归测试
