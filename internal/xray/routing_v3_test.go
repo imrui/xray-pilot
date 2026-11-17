@@ -128,16 +128,14 @@ func TestSchemaV3LosslessExtraAndMetadataStripping(t *testing.T) {
 }
 
 func TestSchemaV3GuardrailsAndProtocols(t *testing.T) {
-	// 1. Phase 3 预留字段拦截
-	for _, reservedCase := range []string{
-		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[],"dns":{"enabled":true},"custom_rules":[]}`,
-		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[],"balancers":[{"tag":"b1","selector":["direct"]}],"custom_rules":[]}`,
-		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[],"observatory":{"subjectSelector":["direct"]},"custom_rules":[]}`,
-		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[],"custom_rules":[{"type":"field","port":"443","balancerTag":"b1"}]}`,
+	// 1. SchemaVersion < 3 禁止携带 v3 专属字段
+	for _, legacyBad := range []string{
+		`{"schema_version":2,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","dns":{"enabled":true,"servers":["1.1.1.1"]},"custom_rules":[]}`,
+		`{"schema_version":2,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","balancers":[{"tag":"b1","selector":["direct"]}],"custom_rules":[]}`,
+		`{"schema_version":2,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_rules":[{"type":"field","port":"443","balancerTag":"b1"}]}`,
 	} {
-		_, err := DecodeRoutingPolicy(reservedCase)
-		if err == nil || !strings.Contains(err.Error(), "DNS 与负载均衡将在后续阶段启用") {
-			t.Fatalf("expected Phase 3 guard error, got %v for %s", err, reservedCase)
+		if _, err := DecodeRoutingPolicy(legacyBad); err == nil {
+			t.Fatalf("expected schema_version < 3 rejection for %s", legacyBad)
 		}
 	}
 
@@ -413,5 +411,179 @@ func TestOutboundSecretEncryptionIdempotencyAndMasking(t *testing.T) {
 	}
 	if _, err := DecodeRoutingPolicy(maskedJSON); err == nil {
 		t.Fatal("DecodeRoutingPolicy must reject <masked> placeholder as secret")
+	}
+}
+
+func TestPhase3DNSBalancersObservatoryAndCrossModuleMerge(t *testing.T) {
+	fullPolicyRaw := `{
+		"schema_version": 3,
+		"domain_strategy": "IPIfNonMatch",
+		"ipv4_force_domains": [],
+		"ipv6_force_domains": [],
+		"ipv6_failure_policy": "strict",
+		"custom_outbounds": [
+			{"tag": "hk-landing", "protocol": "socks", "settings": {"servers": [{"address": "203.0.113.10", "port": 1080}]}},
+			{"tag": "sg-landing", "protocol": "socks", "settings": {"servers": [{"address": "203.0.113.20", "port": 1080}]}}
+		],
+		"balancers": [
+			{
+				"tag": "unlock-pool",
+				"remark": "多落地最低延迟池",
+				"selector": ["hk-landing", "sg-landing"],
+				"strategy": {"type": "leastPing"},
+				"fallbackTag": "direct-v4"
+			}
+		],
+		"dns": {
+			"enabled": true,
+			"queryStrategy": "UseIPv4",
+			"disableFallbackIfMatch": true,
+			"hosts": {
+				"dns.google": ["8.8.8.8", "8.8.4.4"],
+				"domain:internal.example.com": "198.51.100.5"
+			},
+			"servers": [
+				{
+					"address": "1.1.1.1",
+					"port": 53,
+					"domains": ["geosite:openai", "geosite:netflix"],
+					"expectIPs": ["!geoip:cn"],
+					"skipFallback": true,
+					"queryStrategy": "UseIPv4"
+				},
+				"https+local://1.1.1.1/dns-query",
+				"localhost"
+			]
+		},
+		"custom_rules": [
+			{
+				"type": "field",
+				"remark": "AI 走负载均衡池",
+				"domain": ["geosite:openai"],
+				"balancerTag": "unlock-pool"
+			}
+		]
+	}`
+
+	p, err := DecodeRoutingPolicy(fullPolicyRaw)
+	if err != nil {
+		t.Fatalf("DecodeRoutingPolicy Phase 3 failed: %v", err)
+	}
+
+	baseCfg := `{
+		"log": {"loglevel": "warning"},
+		"routing": {"domainStrategy": "IPIfNonMatch", "rules": [{"inboundTag": ["api-inbound"], "outboundTag": "api"}]},
+		"inbounds": [
+			{"listen": "0.0.0.0", "port": 24443, "protocol": "vless", "tag": "vless-reality-1", "settings": {"clients": [], "decryption": "none"}},
+			{"listen": "127.0.0.1", "port": 10085, "protocol": "dokodemo-door", "tag": "api-inbound", "settings": {"address": "127.0.0.1"}}
+		],
+		"outbounds": [{"protocol": "freedom", "tag": "direct"}]
+	}`
+
+	rendered, err := ApplyRoutingPolicyWithOptions(baseCfg, p, RenderOptions{
+		DefaultProbeURL: "https://cp.cloudflare.com/generate_204",
+	})
+	if err != nil {
+		t.Fatalf("ApplyRoutingPolicyWithOptions failed: %v", err)
+	}
+
+	// 1. 验证启用 DNS 时内置 direct 自动切换为 UseIPv4（对齐 dns.queryStrategy），且剥离面板 enabled/remark 字段
+	if strings.Contains(rendered, `"enabled": true`) && strings.Contains(rendered, `"dns"`) {
+		var rawMap map[string]any
+		_ = json.Unmarshal([]byte(rendered), &rawMap)
+		if dnsMap, ok := rawMap["dns"].(map[string]any); ok && dnsMap["enabled"] != nil {
+			t.Fatalf("panel dns.enabled leaked into Xray config:\n%s", rendered)
+		}
+	}
+	if strings.Contains(rendered, "多落地最低延迟池") {
+		t.Fatalf("balancer remark leaked into Xray config:\n%s", rendered)
+	}
+	// 2. 验证 leastPing 自动补齐 observatory，使用系统探针 URL，并拉入候选出站及 fallbackTag (direct-v4)
+	for _, want := range []string{
+		`"observatory"`,
+		`"https://cp.cloudflare.com/generate_204"`,
+		`"probeInterval": "1m"`,
+		`"balancerTag": "unlock-pool"`,
+		`"hk-landing"`,
+		`"sg-landing"`,
+		`"direct-v4"`,
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered Phase 3 config missing %s:\n%s", want, rendered)
+		}
+	}
+	var parsedCfg Config
+	if err := json.Unmarshal([]byte(rendered), &parsedCfg); err != nil {
+		t.Fatal(err)
+	}
+	directSettings, _ := json.Marshal(parsedCfg.Outbounds[0].Settings)
+	if !strings.Contains(string(directSettings), `"UseIPv4"`) {
+		t.Fatalf("expected built-in direct outbound domainStrategy=UseIPv4 when DNS enabled, got %s", directSettings)
+	}
+
+	// 3. 节点级 dns_override 关闭 DNS 时：回退系统解析（不输出 dns 段，direct 恢复无 domainStrategy）
+	mergedDisableDNS, err := MergeRoutingPolicy(fullPolicyRaw, `{"dns_override":{"enabled":false}}`)
+	if err != nil {
+		t.Fatalf("MergeRoutingPolicy disable dns failed: %v", err)
+	}
+	renderedNoDNS, err := ApplyRoutingPolicy(baseCfg, mergedDisableDNS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var noDNSCfg Config
+	_ = json.Unmarshal([]byte(renderedNoDNS), &noDNSCfg)
+	if noDNSCfg.DNS != nil || noDNSCfg.Outbounds[0].Settings != nil {
+		t.Fatalf("expected DNS disabled and direct settings nil, got dns=%+v settings=%+v", noDNSCfg.DNS, noDNSCfg.Outbounds[0].Settings)
+	}
+
+	// 4. 节点级 outbound_overrides 与负载均衡联动：remap 掉一个出站保留另一个成功；全部 remap 掉导致候选集为空则报错拦截
+	partialRemap, err := MergeRoutingPolicy(fullPolicyRaw, `{"outbound_overrides":{"sg-landing":{"mode":"remap","target_tag":"direct"}}}`)
+	if err != nil || len(partialRemap.Balancers) != 1 || len(partialRemap.Balancers[0].Selector) != 1 || partialRemap.Balancers[0].Selector[0] != "hk-landing" {
+		t.Fatalf("expected partial remap to shrink balancer selector to [hk-landing], got %+v err=%v", partialRemap.Balancers, err)
+	}
+	if _, err := MergeRoutingPolicy(fullPolicyRaw, `{
+		"outbound_overrides":{
+			"hk-landing":{"mode":"remap","target_tag":"direct"},
+			"sg-landing":{"mode":"remap","target_tag":"direct"}
+		}
+	}`); err == nil {
+		t.Fatal("expected error when all candidates of an active balancer are remapped away")
+	}
+
+	// 5. 安全护栏：SSRF probeURL 拦截、本机回环 DNS 端口与托管入站/10085 自环冲突拦截、balancer 与出站重名拦截、规则目标互斥拦截
+	invalidPhase3 := []string{
+		// observatory SSRF 内网地址拦截
+		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"s1","protocol":"socks","settings":{"servers":[{"address":"1.1.1.1","port":1080}]}}],"balancers":[{"tag":"b1","selector":["s1"],"strategy":{"type":"leastPing"}}],"observatory":{"subjectSelector":["s1"],"probeURL":"https://127.0.0.1/health","probeInterval":"30s"},"custom_rules":[]}`,
+		// observatory probeInterval 过短拦截
+		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"s1","protocol":"socks","settings":{"servers":[{"address":"1.1.1.1","port":1080}]}}],"observatory":{"subjectSelector":["s1"],"probeInterval":"2s"},"custom_rules":[]}`,
+		// observatory 未覆盖 leastPing 候选出站拦截
+		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"s1","protocol":"socks","settings":{"servers":[{"address":"1.1.1.1","port":1080}]}},{"tag":"s2","protocol":"socks","settings":{"servers":[{"address":"1.1.1.2","port":1080}]}}],"balancers":[{"tag":"b1","selector":["s1","s2"],"strategy":{"type":"leastPing"}}],"observatory":{"subjectSelector":["s1"]},"custom_rules":[]}`,
+		// balancer 与 custom_outbound 同名拦截
+		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"dup","protocol":"freedom"}],"balancers":[{"tag":"dup","selector":["direct"]}],"custom_rules":[]}`,
+		// balancer selector 匹配 block 拦截
+		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[],"balancers":[{"tag":"b1","selector":["blo"]}],"custom_rules":[]}`,
+		// 规则同时填写 outboundTag 和 balancerTag 拦截
+		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[],"balancers":[{"tag":"b1","selector":["direct"]}],"custom_rules":[{"type":"field","port":"443","outboundTag":"direct","balancerTag":"b1"}]}`,
+		// DNS 指向 127.0.0.1:10085 拦截
+		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[],"dns":{"enabled":true,"servers":[{"address":"127.0.0.1","port":10085}]},"custom_rules":[]}`,
+	}
+	for _, raw := range invalidPhase3 {
+		if _, err := DecodeRoutingPolicy(raw); err == nil {
+			t.Fatalf("expected invalid Phase 3 policy to be rejected: %s", raw)
+		}
+	}
+
+	// DNS 指向当前节点托管入站端口（127.0.0.1:24443）在渲染期拦截自环
+	loopbackInboundDNS, err := DecodeRoutingPolicy(`{
+		"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict",
+		"custom_outbounds":[],
+		"dns":{"enabled":true,"servers":[{"address":"127.0.0.1","port":24443}]},
+		"custom_rules":[]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyRoutingPolicy(baseCfg, loopbackInboundDNS); err == nil {
+		t.Fatal("expected DNS loopback port conflict with node inbound port 24443 to be rejected")
 	}
 }

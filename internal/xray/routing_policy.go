@@ -31,6 +31,10 @@ type RoutingPolicy struct {
 	CustomRules       []RoutingRule    `json:"custom_rules"`
 }
 
+type RenderOptions struct {
+	DefaultProbeURL string
+}
+
 type routingPolicyLegacyWire struct {
 	SchemaVersion     uint          `json:"schema_version"`
 	EnableIPv6        bool          `json:"enable_ipv6_outbound,omitempty"`
@@ -124,8 +128,8 @@ func DecodeRoutingPolicy(raw string) (RoutingPolicy, error) {
 	if p.SchemaVersion >= 2 && fields["enable_ipv6_outbound"] != nil {
 		return p, fmt.Errorf("新版策略不再使用 IPv6 开关，请分别填写强制 IPv4、IPv6 域名")
 	}
-	if p.SchemaVersion < 3 && (fields["custom_outbounds"] != nil || fields["domain_strategy"] != nil) {
-		return p, fmt.Errorf("自定义出站与域名解析策略需使用 schema_version 3")
+	if p.SchemaVersion < 3 && (fields["custom_outbounds"] != nil || fields["domain_strategy"] != nil || fields["dns"] != nil || fields["balancers"] != nil || fields["observatory"] != nil) {
+		return p, fmt.Errorf("自定义出站、DNS 与负载均衡需使用 schema_version 3")
 	}
 	if p.SchemaVersion >= 3 {
 		if p.DomainStrategy == "" {
@@ -160,16 +164,8 @@ func (p RoutingPolicy) Validate() error {
 	if p.SchemaVersion == 0 || p.SchemaVersion > 3 {
 		return fmt.Errorf("不支持的路由策略版本")
 	}
-	if p.DNS != nil || len(p.Balancers) > 0 || p.Observatory != nil {
-		return fmt.Errorf("DNS 与负载均衡将在后续阶段启用")
-	}
-	for _, r := range p.CustomRules {
-		if r.BalancerTag != "" {
-			return fmt.Errorf("DNS 与负载均衡将在后续阶段启用")
-		}
-	}
-	if p.SchemaVersion < 3 && (p.DomainStrategy != "" || len(p.CustomOutbounds) > 0) {
-		return fmt.Errorf("自定义出站与域名解析策略需使用 schema_version 3")
+	if p.SchemaVersion < 3 && (p.DomainStrategy != "" || len(p.CustomOutbounds) > 0 || p.DNS != nil || len(p.Balancers) > 0 || p.Observatory != nil) {
+		return fmt.Errorf("自定义出站、DNS 与负载均衡需使用 schema_version 3")
 	}
 	if p.SchemaVersion >= 3 {
 		ds := p.DomainStrategy
@@ -193,19 +189,34 @@ func (p RoutingPolicy) Validate() error {
 			}
 		}
 	}
+	if err := validateDNSConfig(p.DNS); err != nil {
+		return err
+	}
 	if err := validateCustomOutbounds(p.CustomOutbounds); err != nil {
 		return err
 	}
+	allowDirectV6 := p.SchemaVersion >= 2 || p.EnableIPv6
+	if err := validateBalancersAndObservatory(p.Balancers, p.Observatory, p.CustomOutbounds, allowDirectV6); err != nil {
+		return err
+	}
+
 	customTags := make(map[string]bool, len(p.CustomOutbounds))
 	for _, co := range p.CustomOutbounds {
 		customTags[co.Tag] = true
 	}
+	balancerTags := make(map[string]bool, len(p.Balancers))
+	for _, bal := range p.Balancers {
+		balancerTags[bal.Tag] = true
+	}
+
 	if len(p.CustomRules) > 200 {
 		return fmt.Errorf("自定义规则最多 200 条")
 	}
-	allowDirectV6 := p.SchemaVersion >= 2 || p.EnableIPv6
 	for i, r := range p.CustomRules {
-		if err := validateRoutingRuleFields(r, customTags, false); err != nil {
+		if p.SchemaVersion < 3 && r.BalancerTag != "" {
+			return fmt.Errorf("custom_rules[%d]: balancerTag 需使用 schema_version 3", i)
+		}
+		if err := validateRoutingRuleFields(r, customTags, balancerTags, false); err != nil {
 			return fmt.Errorf("custom_rules[%d]: %s", i, err.Error())
 		}
 		if r.OutboundTag == "direct-v6" && !allowDirectV6 {
@@ -215,23 +226,38 @@ func (p RoutingPolicy) Validate() error {
 	return nil
 }
 
-func validateRoutingRuleFields(r RoutingRule, customTags map[string]bool, skipOutboundLookup bool) error {
-	if r.BalancerTag != "" {
-		return fmt.Errorf("DNS 与负载均衡将在后续阶段启用")
-	}
+func validateRoutingRuleFields(
+	r RoutingRule,
+	customTags map[string]bool,
+	balancerTags map[string]bool,
+	skipOutboundLookup bool,
+) error {
 	if r.Type != "field" {
 		return fmt.Errorf("type 必须为 field")
 	}
 	if len(r.InboundTag) > 0 || len(r.Source) > 0 {
 		return fmt.Errorf("不允许修改系统入站或来源保护规则")
 	}
-	if r.OutboundTag == "" {
+	hasOutbound := r.OutboundTag != ""
+	hasBalancer := r.BalancerTag != ""
+	if hasOutbound && hasBalancer {
+		return fmt.Errorf("outboundTag 与 balancerTag 互斥，只能填写其中一个")
+	}
+	if !hasOutbound && !hasBalancer {
 		return fmt.Errorf("引用了未知或未启用的出站")
 	}
 	if !skipOutboundLookup {
-		isBuiltin := r.OutboundTag == "direct" || r.OutboundTag == "block" || r.OutboundTag == "direct-v4" || r.OutboundTag == "direct-v6"
-		if !isBuiltin && !customTags[r.OutboundTag] {
-			return fmt.Errorf("引用了未知或未启用的出站")
+		if hasOutbound {
+			isBuiltin := r.OutboundTag == "direct" || r.OutboundTag == "block" || r.OutboundTag == "direct-v4" || r.OutboundTag == "direct-v6"
+			if !isBuiltin && !customTags[r.OutboundTag] {
+				return fmt.Errorf("引用了未知或未启用的出站")
+			}
+		} else if hasBalancer && !balancerTags[r.BalancerTag] {
+			return fmt.Errorf("引用了未知的负载均衡组 %q", r.BalancerTag)
+		}
+	} else if hasBalancer {
+		if err := validateOutboundTagFormat(r.BalancerTag); err != nil {
+			return err
 		}
 	}
 	if len(r.Domain) == 0 && len(r.IP) == 0 && r.Port == "" && len(r.Protocol) == 0 {
@@ -341,7 +367,7 @@ func validateIPRule(v string) error {
 	return nil
 }
 
-// MergeRoutingPolicy 合并基础模板策略与节点级覆盖（含按出站 Tag 的 replace / remap）。
+// MergeRoutingPolicy 合并基础模板策略与节点级覆盖（含按出站 Tag 的 replace / remap 及节点级 DNS 覆盖）。
 func MergeRoutingPolicy(base, overrides string) (RoutingPolicy, error) {
 	if overrides == "" || overrides == "{}" {
 		return DecodeRoutingPolicy(base)
@@ -369,6 +395,7 @@ func MergeRoutingPolicy(base, overrides string) (RoutingPolicy, error) {
 	}
 
 	var rawOutboundOverrides json.RawMessage
+	var rawDNSOverride json.RawMessage
 	for k, v := range o {
 		trimmed := bytes.TrimSpace(v)
 		switch k {
@@ -385,7 +412,10 @@ func MergeRoutingPolicy(base, overrides string) (RoutingPolicy, error) {
 			}
 		case "dns_override":
 			if !bytes.Equal(trimmed, []byte("null")) {
-				return RoutingPolicy{}, fmt.Errorf("DNS 与负载均衡将在后续阶段启用")
+				if basePolicy.SchemaVersion < 3 {
+					return RoutingPolicy{}, fmt.Errorf("DNS 覆盖需先将所绑定模板升级为 schema_version 3")
+				}
+				rawDNSOverride = trimmed
 			}
 		default:
 			return RoutingPolicy{}, fmt.Errorf("未知覆盖字段 %s", k)
@@ -400,87 +430,95 @@ func MergeRoutingPolicy(base, overrides string) (RoutingPolicy, error) {
 	if err != nil {
 		return RoutingPolicy{}, err
 	}
-	if len(rawOutboundOverrides) == 0 {
-		return p, nil
-	}
 
-	ovMap, err := decodeOutboundOverridesMap(rawOutboundOverrides)
-	if err != nil {
-		return RoutingPolicy{}, err
-	}
-	if len(ovMap) == 0 {
-		return p, nil
-	}
-
-	baseTagIdx := make(map[string]int, len(p.CustomOutbounds))
-	for i, co := range p.CustomOutbounds {
-		baseTagIdx[co.Tag] = i
-	}
-
-	keys := make([]string, 0, len(ovMap))
-	for tag := range ovMap {
-		keys = append(keys, tag)
-	}
-	sort.Strings(keys)
-
-	allowDirectV6 := p.SchemaVersion >= 2 || p.EnableIPv6
-	remaps := make(map[string]string)
-	for _, tag := range keys {
-		ov := ovMap[tag]
-		if _, exists := baseTagIdx[tag]; !exists {
-			return RoutingPolicy{}, fmt.Errorf("outbound_overrides[%s]: 当前绑定模板版本不存在该出站，请清理或更新节点覆盖", tag)
+	if len(rawOutboundOverrides) > 0 {
+		ovMap, ovErr := decodeOutboundOverridesMap(rawOutboundOverrides)
+		if ovErr != nil {
+			return RoutingPolicy{}, ovErr
 		}
-		if err := validateSingleOutboundOverrideShape(tag, ov); err != nil {
-			return RoutingPolicy{}, err
-		}
-		if ov.Mode == "remap" {
-			target := ov.TargetTag
-			if target == "direct-v6" && !allowDirectV6 {
-				return RoutingPolicy{}, fmt.Errorf("outbound_overrides[%s]: target_tag 引用了未启用的 direct-v6", tag)
+		if len(ovMap) > 0 {
+			baseTagIdx := make(map[string]int, len(p.CustomOutbounds))
+			for i, co := range p.CustomOutbounds {
+				baseTagIdx[co.Tag] = i
 			}
-			isBuiltin := target == "direct" || target == "block" || target == "direct-v4" || target == "direct-v6"
-			if !isBuiltin {
-				if _, exists := baseTagIdx[target]; !exists {
-					return RoutingPolicy{}, fmt.Errorf("outbound_overrides[%s]: target_tag 引用了不存在的自定义出站 %q", tag, target)
+
+			keys := make([]string, 0, len(ovMap))
+			for tag := range ovMap {
+				keys = append(keys, tag)
+			}
+			sort.Strings(keys)
+
+			allowDirectV6 := p.SchemaVersion >= 2 || p.EnableIPv6
+			remaps := make(map[string]string)
+			for _, tag := range keys {
+				ov := ovMap[tag]
+				if _, exists := baseTagIdx[tag]; !exists {
+					return RoutingPolicy{}, fmt.Errorf("outbound_overrides[%s]: 当前绑定模板版本不存在该出站，请清理或更新节点覆盖", tag)
 				}
-				if targetOv, hasOv := ovMap[target]; hasOv && targetOv.Mode == "remap" {
-					return RoutingPolicy{}, fmt.Errorf("outbound_overrides[%s]: 禁止多跳链式 remap (%s -> %s)", tag, tag, target)
+				if err := validateSingleOutboundOverrideShape(tag, ov); err != nil {
+					return RoutingPolicy{}, err
 				}
-			}
-			remaps[tag] = target
-		}
-	}
-
-	for _, tag := range keys {
-		ov := ovMap[tag]
-		if ov.Mode == "replace" && ov.Outbound != nil {
-			p.CustomOutbounds[baseTagIdx[tag]] = *ov.Outbound
-		}
-	}
-
-	if len(remaps) > 0 {
-		for i := range p.CustomRules {
-			if target, ok := remaps[p.CustomRules[i].OutboundTag]; ok {
-				p.CustomRules[i].OutboundTag = target
-			}
-		}
-		kept := make([]CustomOutbound, 0, len(p.CustomOutbounds))
-		for _, co := range p.CustomOutbounds {
-			if _, isRemapped := remaps[co.Tag]; isRemapped {
-				continue
-			}
-			if dp, err := extractDialerProxy(co.StreamSettings); err == nil && dp != "" {
-				if target, ok := remaps[dp]; ok {
-					rewritten, rwErr := rewriteDialerProxy(co.StreamSettings, target)
-					if rwErr != nil {
-						return RoutingPolicy{}, rwErr
+				if ov.Mode == "remap" {
+					target := ov.TargetTag
+					if target == "direct-v6" && !allowDirectV6 {
+						return RoutingPolicy{}, fmt.Errorf("outbound_overrides[%s]: target_tag 引用了未启用的 direct-v6", tag)
 					}
-					co.StreamSettings = rewritten
+					isBuiltin := target == "direct" || target == "block" || target == "direct-v4" || target == "direct-v6"
+					if !isBuiltin {
+						if _, exists := baseTagIdx[target]; !exists {
+							return RoutingPolicy{}, fmt.Errorf("outbound_overrides[%s]: target_tag 引用了不存在的自定义出站 %q", tag, target)
+						}
+						if targetOv, hasOv := ovMap[target]; hasOv && targetOv.Mode == "remap" {
+							return RoutingPolicy{}, fmt.Errorf("outbound_overrides[%s]: 禁止多跳链式 remap (%s -> %s)", tag, tag, target)
+						}
+					}
+					remaps[tag] = target
 				}
 			}
-			kept = append(kept, co)
+
+			for _, tag := range keys {
+				ov := ovMap[tag]
+				if ov.Mode == "replace" && ov.Outbound != nil {
+					p.CustomOutbounds[baseTagIdx[tag]] = *ov.Outbound
+				}
+			}
+
+			if len(remaps) > 0 {
+				for i := range p.CustomRules {
+					if target, ok := remaps[p.CustomRules[i].OutboundTag]; ok {
+						p.CustomRules[i].OutboundTag = target
+					}
+				}
+				kept := make([]CustomOutbound, 0, len(p.CustomOutbounds))
+				for _, co := range p.CustomOutbounds {
+					if _, isRemapped := remaps[co.Tag]; isRemapped {
+						continue
+					}
+					if dp, err := extractDialerProxy(co.StreamSettings); err == nil && dp != "" {
+						if target, ok := remaps[dp]; ok {
+							rewritten, rwErr := rewriteDialerProxy(co.StreamSettings, target)
+							if rwErr != nil {
+								return RoutingPolicy{}, rwErr
+							}
+							co.StreamSettings = rewritten
+						}
+					}
+					kept = append(kept, co)
+				}
+				p.CustomOutbounds = kept
+				if err := adjustBalancersAfterRemap(&p, remaps); err != nil {
+					return RoutingPolicy{}, err
+				}
+			}
 		}
-		p.CustomOutbounds = kept
+	}
+
+	if len(rawDNSOverride) > 0 {
+		dnsOv, dnsErr := decodeDNSOverride(rawDNSOverride)
+		if dnsErr != nil {
+			return RoutingPolicy{}, dnsErr
+		}
+		p.DNS = dnsOv
 	}
 
 	if err := p.Validate(); err != nil {
@@ -507,6 +545,10 @@ func (p RoutingPolicy) RequiresIPv6() bool {
 }
 
 func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
+	return ApplyRoutingPolicyWithOptions(content, p, RenderOptions{})
+}
+
+func ApplyRoutingPolicyWithOptions(content string, p RoutingPolicy, opts RenderOptions) (string, error) {
 	if err := p.Validate(); err != nil {
 		return "", err
 	}
@@ -523,6 +565,9 @@ func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 	if cfg.Routing == nil {
 		return "", fmt.Errorf("缺少系统路由")
 	}
+	if err := checkDNSInboundPortConflict(p.DNS, cfg.Inbounds); err != nil {
+		return "", err
+	}
 	if p.SchemaVersion >= 3 {
 		ds := p.DomainStrategy
 		if ds == "" {
@@ -530,10 +575,15 @@ func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 		}
 		cfg.Routing.DomainStrategy = ds
 	}
+
+	activeBalancerTags := make(map[string]bool)
 	// Retain API and existing proxy allowlists, including explicit allow_private.
 	for _, r := range p.CustomRules {
 		if r.Disabled {
 			continue
+		}
+		if r.BalancerTag != "" {
+			activeBalancerTags[r.BalancerTag] = true
 		}
 		r.Remark = ""
 		r.Disabled = false
@@ -549,6 +599,7 @@ func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 		}
 		cfg.Routing.Rules = append(cfg.Routing.Rules, RoutingRule{Type: "field", Domain: p.IPv6Domains, OutboundTag: tag})
 	}
+
 	if p.SchemaVersion < 2 {
 		cfg.Routing.Rules = append(cfg.Routing.Rules, RoutingRule{Type: "field", Network: "tcp,udp", OutboundTag: "direct-v4"})
 		// Historical snapshots must retain their exact rendering and hashes.
@@ -561,10 +612,22 @@ func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 			cfg.Outbounds = append(cfg.Outbounds, Outbound{Protocol: "freedom", Tag: "direct-v6", Settings: map[string]string{"domainStrategy": "ForceIPv6"}})
 		}
 	} else {
-		// No catch-all in schema >= 2: unmatched traffic uses the first (normal direct) outbound.
 		refs := p.referencedOutboundTags()
+		directOutbound := Outbound{Protocol: "freedom", Tag: "direct"}
+		if p.DNS != nil && p.DNS.Enabled {
+			cfg.DNS = renderRuntimeDNS(p.DNS)
+			// 自动打通内置 freedom direct 解析链路，使服务端自定义 DNS 与 hosts 即时生效
+			directStrategy := "UseIP"
+			if p.DNS.QueryStrategy == "UseIPv4" || p.DNS.QueryStrategy == "UseIPv6" {
+				directStrategy = p.DNS.QueryStrategy
+			}
+			directOutbound.Settings = map[string]string{"domainStrategy": directStrategy}
+		} else {
+			cfg.DNS = nil
+		}
+
 		cfg.Outbounds = []Outbound{
-			{Protocol: "freedom", Tag: "direct"},
+			directOutbound,
 			{Protocol: "blackhole", Tag: "block"},
 		}
 		if refs["direct-v4"] {
@@ -577,6 +640,14 @@ func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
 			if refs[co.Tag] {
 				cfg.Outbounds = append(cfg.Outbounds, co.toRuntimeOutbound())
 			}
+		}
+
+		balancers, obs := renderRuntimeBalancersAndObservatory(p, activeBalancerTags, opts.DefaultProbeURL)
+		cfg.Routing.Balancers = balancers
+		if obs != nil {
+			cfg.Observatory = obs
+		} else {
+			cfg.Observatory = nil
 		}
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")

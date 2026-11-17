@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -20,7 +20,90 @@ import {
   domainLines,
   parseSingleObject,
 } from '@/lib/routing-model'
-import type { CustomOutbound, DomainStrategy, RoutingRuleItem } from '@/lib/routing-model'
+import type {
+  BalancerItem,
+  CustomOutbound,
+  DomainStrategy,
+  RoutingRuleItem,
+} from '@/lib/routing-model'
+
+const BALANCER_VALUE_PREFIX = 'balancer:'
+
+function RuleTargetSelect({
+  label,
+  value,
+  outbounds,
+  balancers,
+  disabled,
+  onChange,
+}: {
+  label: string
+  value: string
+  outbounds: CustomOutbound[]
+  balancers: BalancerItem[]
+  disabled?: boolean
+  onChange: (nextVal: string) => void
+}) {
+  const id = useId()
+  const outboundOptions = [
+    ...BUILTIN_OUTBOUNDS.map((b) => ({ value: b.tag, label: b.label })),
+    ...outbounds
+      .filter((o) => o.tag)
+      .map((o) => ({
+        value: o.tag,
+        label: `${o.tag}（${o.protocol}${o.remark ? ` · ${o.remark}` : ''}）`,
+      })),
+  ]
+  const balancerOptions = balancers
+    .filter((b) => b.tag)
+    .map((b) => ({
+      value: `${BALANCER_VALUE_PREFIX}${b.tag}`,
+      label: `${b.tag}（${b.strategy?.type ?? 'random'}${b.remark ? ` · ${b.remark}` : ''}）`,
+    }))
+
+  const isBalancerVal = value.startsWith(BALANCER_VALUE_PREFIX)
+  const rawTag = isBalancerVal ? value.slice(BALANCER_VALUE_PREFIX.length) : value
+  const isKnown = isBalancerVal
+    ? balancerOptions.some((b) => b.value === value)
+    : outboundOptions.some((o) => o.value === value)
+
+  return (
+    <div className="flex flex-col space-y-1.5">
+      <label htmlFor={id} className="text-[12px] font-medium text-soft">
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] transition-all duration-200 focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+      >
+        {!isKnown && (
+          <option value={value}>
+            {rawTag || '未选择'}（{isBalancerVal ? '未定义均衡组' : '未定义出站'}）
+          </option>
+        )}
+        <optgroup label="出站（Outbounds）">
+          {outboundOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </optgroup>
+        {balancerOptions.length > 0 && (
+          <optgroup label="负载均衡组（Balancers）">
+            {balancerOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+    </div>
+  )
+}
 
 const controlTextarea =
   'w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-2.5 text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]'
@@ -42,6 +125,7 @@ function SingleRuleCard({
   index,
   total,
   outbounds,
+  balancers,
   disabled,
   onMove,
   onDelete,
@@ -52,6 +136,7 @@ function SingleRuleCard({
   index: number
   total: number
   outbounds: CustomOutbound[]
+  balancers: BalancerItem[]
   disabled?: boolean
   onMove: (delta: -1 | 1) => void
   onDelete: () => void
@@ -71,23 +156,9 @@ function SingleRuleCard({
     !!rule.port?.trim() ||
     (rule.protocol?.length ?? 0) > 0
 
-  const outboundOptions = [
-    ...BUILTIN_OUTBOUNDS.map((b) => ({ value: b.tag, label: b.label })),
-    ...outbounds
-      .filter((o) => o.tag)
-      .map((o) => ({
-        value: o.tag,
-        label: `${o.tag}（${o.protocol}${o.remark ? ` · ${o.remark}` : ''}）`,
-      })),
-  ]
-
-  const currentTagKnown = outboundOptions.some((o) => o.value === rule.outboundTag)
-  const effectiveOutboundOptions = currentTagKnown
-    ? outboundOptions
-    : [
-        { value: rule.outboundTag ?? '', label: `${rule.outboundTag || '未选择'}（未定义出站）` },
-        ...outboundOptions,
-      ]
+  const selectedTargetValue = rule.balancerTag
+    ? `${BALANCER_VALUE_PREFIX}${rule.balancerTag}`
+    : (rule.outboundTag ?? 'direct')
 
   const switchMode = (target: 'form' | 'json') => {
     if (target === 'json') {
@@ -237,11 +308,23 @@ function SingleRuleCard({
       {mode === 'form' ? (
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-3">
-            <SelectField
-              label="目标出站（outboundTag） *"
-              value={rule.outboundTag ?? 'direct'}
-              onChange={(tag) => onChange({ ...rule, type: 'field', outboundTag: tag })}
-              options={effectiveOutboundOptions}
+            <RuleTargetSelect
+              label="目标出站 / 均衡组 *"
+              value={selectedTargetValue}
+              outbounds={outbounds}
+              balancers={balancers}
+              disabled={disabled}
+              onChange={(nextVal) => {
+                const next = { ...rule, type: 'field' }
+                if (nextVal.startsWith(BALANCER_VALUE_PREFIX)) {
+                  next.balancerTag = nextVal.slice(BALANCER_VALUE_PREFIX.length)
+                  delete next.outboundTag
+                } else {
+                  next.outboundTag = nextVal
+                  delete next.balancerTag
+                }
+                onChange(next)
+              }}
             />
             <SelectField
               label="传输协议（network）"
@@ -405,6 +488,7 @@ export function RuleWaterfallEditor({
   rules,
   onRulesChange,
   outbounds,
+  balancers = [],
   v4Text,
   onV4Change,
   v6Text,
@@ -421,6 +505,7 @@ export function RuleWaterfallEditor({
   rules: RoutingRuleItem[]
   onRulesChange: (next: RoutingRuleItem[]) => void
   outbounds: CustomOutbound[]
+  balancers?: BalancerItem[]
   v4Text: string
   onV4Change: (next: string) => void
   v6Text: string
@@ -564,6 +649,7 @@ export function RuleWaterfallEditor({
                 index={idx}
                 total={rules.length}
                 outbounds={outbounds}
+                balancers={balancers}
                 disabled={disabled}
                 onMove={(delta) => moveRule(idx, delta)}
                 onDelete={() => {
@@ -671,7 +757,17 @@ export function RuleWaterfallEditor({
             <Btn
               onClick={() => {
                 if (!pendingSnippet) return
-                onRulesChange([...rules, ...pendingSnippet.build(snippetTargetTag)])
+                const isBalancerTarget = snippetTargetTag.startsWith(BALANCER_VALUE_PREFIX)
+                const rawTarget = isBalancerTarget
+                  ? snippetTargetTag.slice(BALANCER_VALUE_PREFIX.length)
+                  : snippetTargetTag
+                const builtRules = pendingSnippet.build(rawTarget).map((r) => {
+                  if (!isBalancerTarget) return r
+                  const copy = { ...r, balancerTag: rawTarget }
+                  delete copy.outboundTag
+                  return copy
+                })
+                onRulesChange([...rules, ...builtRules])
                 setPendingSnippet(null)
                 setSnippetsOpen(false)
               }}
@@ -683,19 +779,12 @@ export function RuleWaterfallEditor({
       >
         <div className="space-y-3">
           <p className="text-xs leading-5 text-soft">{pendingSnippet?.description}</p>
-          <SelectField
-            label="选择片段命中的目标出站（outboundTag）"
+          <RuleTargetSelect
+            label="选择片段命中的目标出站 / 均衡组"
             value={snippetTargetTag}
+            outbounds={outbounds}
+            balancers={balancers}
             onChange={setSnippetTargetTag}
-            options={[
-              ...BUILTIN_OUTBOUNDS.map((b) => ({ value: b.tag, label: b.label })),
-              ...outbounds
-                .filter((o) => o.tag)
-                .map((o) => ({
-                  value: o.tag,
-                  label: `${o.tag}（${o.protocol}${o.remark ? ` · ${o.remark}` : ''}）`,
-                })),
-            ]}
           />
         </div>
       </Modal>

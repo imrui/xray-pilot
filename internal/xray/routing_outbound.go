@@ -766,11 +766,31 @@ func (p RoutingPolicy) referencedOutboundTags() map[string]bool {
 			enqueue("direct-v4")
 		}
 	}
+	balancerByTag := make(map[string]Balancer, len(p.Balancers))
+	for _, b := range p.Balancers {
+		balancerByTag[b.Tag] = b
+	}
+	candidates := selectableOutboundTags(p.CustomOutbounds, p.SchemaVersion >= 2 || p.EnableIPv6)
+
 	for _, r := range p.CustomRules {
 		if r.Disabled {
 			continue
 		}
-		enqueue(r.OutboundTag)
+		if r.OutboundTag != "" {
+			enqueue(r.OutboundTag)
+		}
+		if r.BalancerTag != "" {
+			if bal, ok := balancerByTag[r.BalancerTag]; ok {
+				if matched, err := matchSelectorCandidates(bal.Selector, candidates); err == nil {
+					for _, tag := range matched {
+						enqueue(tag)
+					}
+				}
+				if bal.FallbackTag != "" {
+					enqueue(bal.FallbackTag)
+				}
+			}
+		}
 	}
 
 	byTag := make(map[string]CustomOutbound, len(p.CustomOutbounds))
@@ -1273,7 +1293,7 @@ func ValidateRoutingOverrides(overrides string) error {
 					return fmt.Errorf("自定义规则最多 200 条")
 				}
 				for i, r := range rules {
-					if err := validateRoutingRuleFields(r, nil, true); err != nil {
+					if err := validateRoutingRuleFields(r, nil, nil, true); err != nil {
 						return fmt.Errorf("custom_rules[%d]: %w", i, err)
 					}
 					if r.OutboundTag == "api" || r.OutboundTag == "api-inbound" || r.OutboundTag == "dns-out" {
@@ -1300,7 +1320,9 @@ func ValidateRoutingOverrides(overrides string) error {
 			}
 		case "dns_override":
 			if !bytes.Equal(trimmed, []byte("null")) {
-				return fmt.Errorf("DNS 与负载均衡将在后续阶段启用")
+				if _, err := decodeDNSOverride(trimmed); err != nil {
+					return err
+				}
 			}
 		default:
 			return fmt.Errorf("未知覆盖字段 %s", k)
@@ -1475,6 +1497,15 @@ func BuildOverridesForTarget(baseRaw, targetRaw string) (string, error) {
 		}
 		if len(outOverrides) > 0 {
 			ov["outbound_overrides"] = outOverrides
+		}
+	}
+	baseDNS, _ := json.Marshal(base.DNS)
+	targetDNS, _ := json.Marshal(target.DNS)
+	if crypto.HashConfig(string(baseDNS)) != crypto.HashConfig(string(targetDNS)) {
+		if target.DNS == nil {
+			ov["dns_override"] = DNSConfig{Enabled: false}
+		} else {
+			ov["dns_override"] = target.DNS
 		}
 	}
 	data, err := json.Marshal(ov)

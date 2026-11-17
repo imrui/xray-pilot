@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Code2, FlaskConical, Network, Route, SlidersHorizontal } from 'lucide-react'
+import { Code2, FlaskConical, Globe, Network, Route, Scale, SlidersHorizontal } from 'lucide-react'
 import { Drawer } from '@/components/ui/Drawer'
 import { Btn, Field, FieldGroup, SelectField } from '@/components/ui/Form'
 import { JsonEditor } from '@/components/ui/JsonEditor'
@@ -18,8 +18,11 @@ import {
   upgradeRoutingPolicy,
 } from '@/lib/routing-model'
 import type {
+  BalancerItem,
   CustomOutbound,
+  DNSConfigModel,
   DomainStrategy,
+  ObservatoryConfig,
   RoutingPolicy,
   RoutingRuleItem,
   RoutingTemplate,
@@ -34,6 +37,8 @@ import {
 } from '@/lib/routing'
 import request from '@/lib/axios'
 import { PreviewConfigModal } from '@/components/nodes/ConfigPreview'
+import { BalancerListEditor } from './BalancerListEditor'
+import { DnsEditor } from './DnsEditor'
 import { NodeRoutingPreview } from './NodeRoutingPreview'
 import { OutboundListEditor } from './OutboundListEditor'
 import { RuleWaterfallEditor } from './RuleWaterfallEditor'
@@ -71,10 +76,15 @@ export function TemplateEditor({
   const [customOutbounds, setCustomOutbounds] = useState<CustomOutbound[]>(
     initial.custom_outbounds ?? [],
   )
+  const [balancers, setBalancers] = useState<BalancerItem[]>(initial.balancers ?? [])
+  const [observatory, setObservatory] = useState<ObservatoryConfig | null>(
+    initial.observatory ?? null,
+  )
+  const [dns, setDns] = useState<DNSConfigModel | null>(initial.dns ?? null)
   const [customRules, setCustomRules] = useState<RoutingRuleItem[]>(initial.custom_rules ?? [])
 
   const [viewMode, setViewMode] = useState<'structured' | 'json'>('structured')
-  const [activeTab, setActiveTab] = useState<'rules' | 'outbounds'>('rules')
+  const [activeTab, setActiveTab] = useState<'rules' | 'outbounds' | 'balancers' | 'dns'>('rules')
   const [policyJsonText, setPolicyJsonText] = useState(() => JSON.stringify(initial, null, 2))
   const [hasRuleCardError, setHasRuleCardError] = useState(false)
   const [hasOutboundCardError, setHasOutboundCardError] = useState(false)
@@ -91,6 +101,9 @@ export function TemplateEditor({
     ipv6_force_domains: domainLines(v6),
     ipv6_failure_policy: 'strict',
     custom_outbounds: customOutbounds,
+    ...(balancers.length > 0 ? { balancers } : {}),
+    ...(observatory ? { observatory } : {}),
+    ...(dns ? { dns } : {}),
     custom_rules: customRules.map((r) => ({ type: 'field', ...r })),
   })
 
@@ -111,6 +124,9 @@ export function TemplateEditor({
     setV4(p.ipv4_force_domains.join('\n'))
     setV6(p.ipv6_force_domains.join('\n'))
     setCustomOutbounds(p.custom_outbounds ?? [])
+    setBalancers(p.balancers ?? [])
+    setObservatory(p.observatory ?? null)
+    setDns(p.dns ?? null)
     setCustomRules(p.custom_rules ?? [])
   }
 
@@ -161,13 +177,12 @@ export function TemplateEditor({
         if (!rawObj || typeof rawObj !== 'object' || Array.isArray(rawObj)) {
           throw new Error('路由策略必须是 JSON 对象。')
         }
-        // 保留用户在 JSON 源码视图中编写的原样字段（含用于校验测试的预留字段），仅补齐 schema_version: 3 默认项
         policy = {
           ...upgradeRoutingPolicy(policyJsonText),
-          ...(rawObj.dns !== undefined ? { dns: rawObj.dns as Record<string, unknown> | null } : {}),
-          ...(rawObj.balancers !== undefined ? { balancers: rawObj.balancers as unknown[] } : {}),
+          ...(rawObj.dns !== undefined ? { dns: rawObj.dns as DNSConfigModel | null } : {}),
+          ...(rawObj.balancers !== undefined ? { balancers: rawObj.balancers as BalancerItem[] } : {}),
           ...(rawObj.observatory !== undefined
-            ? { observatory: rawObj.observatory as Record<string, unknown> | null }
+            ? { observatory: rawObj.observatory as ObservatoryConfig | null }
             : {}),
         }
       } else {
@@ -313,7 +328,7 @@ export function TemplateEditor({
             <div
               role="tablist"
               aria-label="策略功能分区"
-              className="flex gap-2 border-b border-[var(--border)] pb-2"
+              className="flex flex-wrap gap-2 border-b border-[var(--border)] pb-2"
             >
               <button
                 type="button"
@@ -343,15 +358,44 @@ export function TemplateEditor({
                 <Network className="h-4 w-4" />
                 自定义出站（{customOutbounds.length}）
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'balancers'}
+                onClick={() => setActiveTab('balancers')}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium transition ${
+                  activeTab === 'balancers'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                    : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                <Scale className="h-4 w-4" />
+                负载均衡（{balancers.length}）
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'dns'}
+                onClick={() => setActiveTab('dns')}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium transition ${
+                  activeTab === 'dns'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                    : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                <Globe className="h-4 w-4" />
+                DNS 设置（{dns?.enabled ? `${dns.servers?.length ?? 0}` : '关'}）
+              </button>
             </div>
 
-            {activeTab === 'rules' ? (
+            {activeTab === 'rules' && (
               <RuleWaterfallEditor
                 domainStrategy={domainStrategy}
                 onDomainStrategyChange={setDomainStrategy}
                 rules={customRules}
                 onRulesChange={setCustomRules}
                 outbounds={customOutbounds}
+                balancers={balancers}
                 v4Text={v4}
                 onV4Change={setV4}
                 v6Text={v6}
@@ -363,14 +407,30 @@ export function TemplateEditor({
                 disabled={!writable || busy}
                 onPendingErrorChange={setHasRuleCardError}
               />
-            ) : (
+            )}
+            {activeTab === 'outbounds' && (
               <OutboundListEditor
                 outbounds={customOutbounds}
                 rules={customRules}
+                balancers={balancers}
                 disabled={!writable || busy}
                 onChange={setCustomOutbounds}
                 onPendingErrorChange={setHasOutboundCardError}
               />
+            )}
+            {activeTab === 'balancers' && (
+              <BalancerListEditor
+                balancers={balancers}
+                observatory={observatory}
+                outbounds={customOutbounds}
+                rules={customRules}
+                disabled={!writable || busy}
+                onBalancersChange={setBalancers}
+                onObservatoryChange={setObservatory}
+              />
+            )}
+            {activeTab === 'dns' && (
+              <DnsEditor dns={dns} disabled={!writable || busy} onChange={setDns} />
             )}
           </div>
         ) : (

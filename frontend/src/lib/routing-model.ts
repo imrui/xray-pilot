@@ -31,6 +31,51 @@ export type OutboundOverride = {
   target_tag?: string
 }
 
+export type BalancerStrategyType = 'random' | 'roundRobin' | 'leastPing'
+
+export type BalancerItem = {
+  tag: string
+  remark?: string
+  selector: string[]
+  strategy?: { type?: BalancerStrategyType }
+  fallbackTag?: string
+  [extra: string]: unknown
+}
+
+export type ObservatoryConfig = {
+  subjectSelector: string[]
+  probeURL?: string
+  probeInterval?: string
+  enableConcurrency?: boolean
+  [extra: string]: unknown
+}
+
+export type DNSQueryStrategy = 'UseIP' | 'UseIPv4' | 'UseIPv6'
+
+export type DNSServerObjectItem = {
+  address: string
+  port?: number
+  domains?: string[]
+  expectIPs?: string[]
+  skipFallback?: boolean
+  queryStrategy?: DNSQueryStrategy
+  [extra: string]: unknown
+}
+
+export type DNSServerEntry = string | DNSServerObjectItem
+export type DNSHostValue = string | string[]
+
+export type DNSConfigModel = {
+  enabled: boolean
+  queryStrategy?: DNSQueryStrategy
+  disableCache?: boolean
+  disableFallback?: boolean
+  disableFallbackIfMatch?: boolean
+  hosts?: Record<string, DNSHostValue>
+  servers?: DNSServerEntry[]
+  [extra: string]: unknown
+}
+
 export type RoutingPolicy = {
   schema_version?: number
   domain_strategy?: DomainStrategy
@@ -39,9 +84,9 @@ export type RoutingPolicy = {
   ipv6_force_domains: string[]
   ipv6_failure_policy: string
   custom_outbounds?: CustomOutbound[]
-  balancers?: unknown[]
-  observatory?: Record<string, unknown> | null
-  dns?: Record<string, unknown> | null
+  balancers?: BalancerItem[]
+  observatory?: ObservatoryConfig | null
+  dns?: DNSConfigModel | null
   custom_rules: RoutingRuleItem[]
 }
 
@@ -282,10 +327,19 @@ export function createDefaultOutbound(protocol: string, index: number): CustomOu
   }
 }
 
+export function createDefaultDNSConfig(): DNSConfigModel {
+  return {
+    enabled: true,
+    queryStrategy: 'UseIP',
+    servers: ['https://1.1.1.1/dns-query'],
+  }
+}
+
 export function countOutboundReferences(
   tag: string,
   rules: RoutingRuleItem[],
   outbounds: CustomOutbound[],
+  balancers: BalancerItem[] = [],
 ): number {
   let count = 0
   for (const r of rules) {
@@ -293,6 +347,19 @@ export function countOutboundReferences(
   }
   for (const o of outbounds) {
     if (o.tag !== tag && extractDialerProxy(o) === tag) count += 1
+  }
+  for (const b of balancers) {
+    if (b.fallbackTag === tag || (b.selector ?? []).some((sel) => sel && tag.startsWith(sel))) {
+      count += 1
+    }
+  }
+  return count
+}
+
+export function countBalancerReferences(tag: string, rules: RoutingRuleItem[]): number {
+  let count = 0
+  for (const r of rules) {
+    if (r.balancerTag === tag) count += 1
   }
   return count
 }
@@ -345,13 +412,13 @@ export function upgradeRoutingPolicy(raw: string): RoutingPolicy {
     ipv6_force_domains: moveToV4 ? [] : p.ipv6_force_domains,
     ipv6_failure_policy: p.ipv6_failure_policy || 'strict',
     custom_outbounds: Array.isArray(p.custom_outbounds) ? p.custom_outbounds : [],
+    ...(p.balancers && p.balancers.length > 0 ? { balancers: p.balancers } : {}),
+    ...(p.observatory ? { observatory: p.observatory } : {}),
+    ...(p.dns ? { dns: p.dns } : {}),
     custom_rules: Array.isArray(p.custom_rules)
       ? p.custom_rules.map((r) => ({ type: 'field', ...r }))
       : [],
   }
-  if (p.balancers && p.balancers.length > 0) next.balancers = p.balancers
-  if (p.observatory) next.observatory = p.observatory
-  if (p.dns) next.dns = p.dns
   return next
 }
 
@@ -402,7 +469,10 @@ export function requiresIPv6(policy: RoutingPolicy): boolean {
   if ((policy.ipv6_force_domains ?? []).length > 0) return true
 
   const outbounds = policy.custom_outbounds ?? []
+  const balancers = policy.balancers ?? []
   const byTag = new Map(outbounds.map((o) => [o.tag, o]))
+  const balancerByTag = new Map(balancers.map((b) => [b.tag, b]))
+  const allCandidateTags = ['direct', 'direct-v4', 'direct-v6', ...outbounds.map((o) => o.tag)]
   const visited = new Set<string>()
   const queue: string[] = []
   const enqueue = (tag?: string) => {
@@ -415,6 +485,18 @@ export function requiresIPv6(policy: RoutingPolicy): boolean {
   for (const r of policy.custom_rules ?? []) {
     if (r.disabled) continue
     enqueue(r.outboundTag)
+    if (r.balancerTag) {
+      const bal = balancerByTag.get(r.balancerTag)
+      if (bal) {
+        if (bal.fallbackTag) enqueue(bal.fallbackTag)
+        for (const sel of bal.selector ?? []) {
+          if (!sel) continue
+          for (const candidate of allCandidateTags) {
+            if (candidate && candidate.startsWith(sel)) enqueue(candidate)
+          }
+        }
+      }
+    }
   }
 
   while (queue.length > 0) {
@@ -434,9 +516,13 @@ export function revisionSummaryLabel(payload: string): string {
   const p = readPolicy(payload)
   const ver = p.schema_version ?? 1
   if (ver < 2) return '旧版 IPv4 兜底'
+  const parts = ['默认直连']
   const outCount = p.custom_outbounds?.length ?? 0
-  if (outCount > 0) return `默认直连 · ${outCount} 个自定义出站`
-  return '默认直连'
+  const balCount = p.balancers?.length ?? 0
+  if (outCount > 0) parts.push(`${outCount} 个自定义出站`)
+  if (balCount > 0) parts.push(`${balCount} 个负载均衡`)
+  if (p.dns?.enabled) parts.push('自定义 DNS')
+  return parts.join(' · ')
 }
 
 export function configConfirmed(
@@ -565,6 +651,22 @@ export function normalizeBinding(binding: RoutingBinding): RoutingBinding {
       overrides.outbound_overrides = cleaned
     } else {
       delete overrides.outbound_overrides
+    }
+  }
+  if (overrides.dns_override != null) {
+    if (typeof overrides.dns_override !== 'object' || Array.isArray(overrides.dns_override)) {
+      throw new Error('节点 DNS 覆盖格式无效。')
+    }
+    const dnsOv = overrides.dns_override as DNSConfigModel
+    if (dnsOv.enabled === false) {
+      overrides.dns_override = { enabled: false }
+    } else if (dnsOv.enabled === true) {
+      if (!Array.isArray(dnsOv.servers) || dnsOv.servers.length === 0) {
+        throw new Error('启用本节点自定义 DNS 时请至少配置 1 个上游 DNS 服务器。')
+      }
+      overrides.dns_override = dnsOv
+    } else {
+      delete overrides.dns_override
     }
   }
   return { ...binding, overrides: JSON.stringify(overrides) }

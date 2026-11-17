@@ -154,6 +154,8 @@ export default function Routing() {
                 const p = readPolicy(t.draft)
                 const isModern = (p.schema_version ?? 1) >= 2
                 const outCount = p.custom_outbounds?.length ?? 0
+                const balCount = p.balancers?.length ?? 0
+                const hasDns = !!p.dns?.enabled
                 return (
                   <div className="space-y-1 text-xs">
                     <p>
@@ -162,8 +164,10 @@ export default function Routing() {
                       {p.ipv6_force_domains.length}
                     </p>
                     <p>
-                      {isModern ? '默认直连' : '旧版：默认 IPv4'} · 自定义出站 {outCount} · 自定义规则{' '}
+                      {isModern ? '默认直连' : '旧版：默认 IPv4'} · 自定义出站 {outCount}
+                      {balCount > 0 ? ` · 负载均衡 ${balCount}` : ''} · 自定义规则{' '}
                       {p.custom_rules.length}
+                      {hasDns ? ' · 自定义 DNS' : ''}
                     </p>
                     {requiresIPv6(p) && <p className="text-[var(--warning)]">需要可用 IPv6 出口</p>}
                   </div>

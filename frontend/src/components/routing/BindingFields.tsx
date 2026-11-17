@@ -9,16 +9,19 @@ import {
   basicRoutingDescription,
   basicRoutingLabel,
   bindingMode,
+  createDefaultDNSConfig,
   domainLines,
   parseRules,
   revisionSummaryLabel,
 } from '@/lib/routing-model'
 import type {
   CustomOutbound,
+  DNSConfigModel,
   OutboundOverride,
   RoutingBinding,
   RoutingTemplate,
 } from '@/lib/routing-model'
+import { DnsEditor } from './DnsEditor'
 import { SingleOutboundFields } from './OutboundListEditor'
 
 export const routingControl =
@@ -369,6 +372,14 @@ export function BindingFields({
               onChange={(v) => override(key, v)}
             />
           ))}
+
+          <DnsOverrideSection
+            value={overrides.dns_override as DNSConfigModel | null | undefined}
+            inherited={templatePreview.error ? undefined : base?.policy?.dns}
+            superAdmin={superAdmin}
+            onChange={(v) => override('dns_override', v)}
+          />
+
           {superAdmin && (
             <details>
               <summary className="cursor-pointer text-sm">高级自定义规则</summary>
@@ -525,5 +536,87 @@ function RulesOverride({ value, onChange }: { value: unknown; onChange: (v: unkn
         </p>
       )}
     </div>
+  )
+}
+
+function DnsOverrideSection({
+  value,
+  inherited,
+  superAdmin,
+  onChange,
+}: {
+  value: DNSConfigModel | null | undefined
+  inherited: DNSConfigModel | null | undefined
+  superAdmin: boolean
+  onChange: (next: DNSConfigModel | undefined) => void
+}) {
+  const mode: 'inherit' | 'disable' | 'custom' =
+    value == null ? 'inherit' : value.enabled === false ? 'disable' : 'custom'
+
+  return (
+    <fieldset
+      disabled={!superAdmin}
+      className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 disabled:opacity-75"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h5 className="text-xs font-semibold text-[var(--text)]">本节点服务端 DNS 覆盖</h5>
+          <p className="mt-0.5 text-xs text-soft">
+            可针对不同地区节点单独关闭自定义 DNS，或替换为当前节点授权的流媒体解锁 DNS IP。
+          </p>
+        </div>
+        {!superAdmin && <Badge label="仅超级管理员可修改" variant="gray" />}
+      </div>
+
+      <SelectField
+        label="本节点 DNS 模式"
+        value={mode}
+        onChange={(nextMode) => {
+          if (nextMode === 'inherit') {
+            onChange(undefined)
+          } else if (nextMode === 'disable') {
+            onChange({ enabled: false })
+          } else {
+            const seed =
+              inherited && inherited.enabled
+                ? (JSON.parse(JSON.stringify(inherited)) as DNSConfigModel)
+                : createDefaultDNSConfig()
+            onChange({ ...seed, enabled: true })
+          }
+        }}
+        options={[
+          { value: 'inherit', label: '继承模板 DNS' },
+          { value: 'disable', label: '本节点关闭自定义 DNS（回退系统解析）' },
+          { value: 'custom', label: '自定义本节点 DNS（独立替换）' },
+        ]}
+      />
+
+      {mode === 'inherit' && (
+        <p className="text-xs text-soft">
+          {inherited?.enabled
+            ? `当前继承模板已启用的自定义 DNS（共 ${inherited.servers?.length ?? 0} 个上游服务器，策略 ${inherited.queryStrategy ?? 'UseIP'}）。`
+            : '当前继承模板未启用自定义 DNS，本节点使用系统默认解析。'}
+        </p>
+      )}
+
+      {mode === 'disable' && (
+        <p className="text-xs text-soft">
+          已为本节点显式关闭服务端自定义 DNS，将回退使用节点系统默认解析，不影响模板与其他节点。
+        </p>
+      )}
+
+      {mode === 'custom' && value && (
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-3">
+          <DnsEditor
+            dns={value}
+            disabled={!superAdmin}
+            hideEnableToggle
+            onChange={(nextDns) => {
+              if (nextDns) onChange({ ...nextDns, enabled: true })
+            }}
+          />
+        </div>
+      )}
+    </fieldset>
   )
 }

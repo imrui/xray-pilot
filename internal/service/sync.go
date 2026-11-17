@@ -385,20 +385,21 @@ func (s *SyncService) buildConfigPolicy(node *entity.Node, policy string) (strin
 	if len(warnings) > 0 {
 		return "", warnings, fmt.Errorf("协议配置不完整，拒绝覆盖: %s", strings.Join(warnings, "; "))
 	}
+	renderOpts := xray.RenderOptions{DefaultProbeURL: s.settingSvc.Get(KeyXrayProbeURL)}
 	if policy == "desired" {
 		effective, e := NewRoutingService().Effective(node.ID)
 		if e != nil {
 			return "", nil, e
 		}
 		if effective.Policy != nil {
-			content, err = xray.ApplyRoutingPolicy(content, *effective.Policy)
+			content, err = xray.ApplyRoutingPolicyWithOptions(content, *effective.Policy, renderOpts)
 		}
 	} else if policy != "" && policy != "legacy" {
 		p, e := xray.DecodeRoutingPolicy(policy)
 		if e != nil {
 			return "", nil, e
 		}
-		content, err = xray.ApplyRoutingPolicy(content, p)
+		content, err = xray.ApplyRoutingPolicyWithOptions(content, p, renderOpts)
 	}
 	return content, warnings, err
 }

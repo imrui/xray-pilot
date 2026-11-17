@@ -456,6 +456,6 @@
 - [x] 前端在 `TemplateEditor` 与 `BindingEditor` 接入「选节点预览合并配置 + 一键远端沙箱预检」面板
 
 ### Phase 3：服务端 DNS 分流 + 负载均衡与探测
-- [ ] 后端放开 `SchemaVersion: 3` 中的 `dns`、`balancers`、`observatory` 与 `RoutingRule.BalancerTag` 校验及合并渲染
-- [ ] 实现启用 `dns` 时内置 `direct` 出站 `UseIP` 自动联动、`leastPing` / `fallbackTag` 与 `observatory` 自动补齐、`probeURL` SSRF 校验及节点 `dns_override` 合并
-- [ ] 前端抽屉扩展 `负载均衡` 与 `DNS 设置` 两个结构化面板、路由规则目标分组下拉框（Outbounds + Balancers）及节点级 DNS 覆盖控件，完成全量回归测试
+- [x] 后端放开 `SchemaVersion: 3` 中的 `dns`、`balancers`、`observatory` 与 `RoutingRule.BalancerTag` 校验及合并渲染
+- [x] 实现启用 `dns` 时内置 `direct` 出站 `UseIP` 自动联动、`leastPing` / `fallbackTag` 与 `observatory` 自动补齐、`probeURL` SSRF 校验及节点 `dns_override` 合并
+- [x] 前端抽屉扩展 `负载均衡` 与 `DNS 设置` 两个结构化面板、路由规则目标分组下拉框（Outbounds + Balancers）及节点级 DNS 覆盖控件，完成全量回归测试

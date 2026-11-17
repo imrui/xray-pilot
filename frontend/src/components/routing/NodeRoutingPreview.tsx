@@ -49,8 +49,12 @@ export function NodeRoutingPreview({
             强制 IPv4 {(policy.ipv4_force_domains ?? []).length} 条 ·{' '}
             {(policy.schema_version ?? 1) >= 2 ? '强制 IPv6' : '旧版 IPv6 列表'}{' '}
             {(policy.ipv6_force_domains ?? []).length} 条 · 自定义出站{' '}
-            {(policy.custom_outbounds ?? []).length} 个 · 自定义规则{' '}
-            {(policy.custom_rules ?? []).length} 条
+            {(policy.custom_outbounds ?? []).length} 个
+            {(policy.balancers ?? []).length > 0
+              ? ` · 负载均衡 ${(policy.balancers ?? []).length} 组`
+              : ''}{' '}
+            · 自定义规则 {(policy.custom_rules ?? []).length} 条
+            {policy.dns?.enabled ? ' · 自定义 DNS 已启用' : ''}
           </p>
           {Object.entries(node.routing?.sources ?? {}).filter(([, source]) => source === '节点覆盖')
             .length > 0 && <p>包含本节点单独设置的覆盖项；更换模板时仍会保留。</p>}
@@ -69,7 +73,16 @@ export function NodeRoutingPreview({
         <details open>
           <summary className="cursor-pointer text-xs font-medium">路由与出站 JSON</summary>
           <pre className="mt-2 max-h-64 overflow-auto rounded border border-[var(--border)] bg-[var(--code-bg)] p-3 font-mono text-xs leading-5 text-[var(--code-text)]">
-            {JSON.stringify({ outbounds: config.outbounds, routing: config.routing }, null, 2)}
+            {JSON.stringify(
+              {
+                ...(config.dns ? { dns: config.dns } : {}),
+                ...(config.observatory ? { observatory: config.observatory } : {}),
+                outbounds: config.outbounds,
+                routing: config.routing,
+              },
+              null,
+              2,
+            )}
           </pre>
         </details>
       )}

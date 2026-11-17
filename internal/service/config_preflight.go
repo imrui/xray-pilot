@@ -170,7 +170,9 @@ func (s *SyncService) PreflightDraft(nodeID uint, req PreflightDraftRequest) (*P
 		return out, nil
 	}
 
-	rendered, err := xray.ApplyRoutingPolicy(baseConfig, effectivePolicy)
+	rendered, err := xray.ApplyRoutingPolicyWithOptions(baseConfig, effectivePolicy, xray.RenderOptions{
+		DefaultProbeURL: s.settingSvc.Get(KeyXrayProbeURL),
+	})
 	if err != nil {
 		out.ElapsedMs = time.Since(start).Milliseconds()
 		out.Error = err.Error()

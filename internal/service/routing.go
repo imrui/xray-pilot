@@ -132,6 +132,10 @@ func resolveRoutingBinding(db *gorm.DB, nodeID uint, b entity.RoutingBinding) (*
 		out.Sources["outbound_overrides"] = "节点覆盖"
 		out.Sources["custom_outbounds"] = "节点覆盖"
 	}
+	if v, ok := overrides["dns_override"]; ok && !isEmptyJSONObjectOrNull(v) {
+		out.Sources["dns_override"] = "节点覆盖"
+		out.Sources["dns"] = "节点覆盖"
+	}
 	return out, nil
 }
 func (s *RoutingService) Effective(nodeID uint) (*EffectiveRouting, error) {
@@ -437,8 +441,21 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 			if !reflect.DeepEqual(prevOutOv, nextOutOv) && !reflect.DeepEqual(rawPrevOutOv, nextOutOv) {
 				return fmt.Errorf("节点出站覆盖仅超级管理员可修改")
 			}
+			prevDNSOv := normalizeOptionalMapJSON(prev["dns_override"])
+			nextDNSOv := normalizeOptionalMapJSON(next["dns_override"])
+			if !reflect.DeepEqual(prevDNSOv, nextDNSOv) {
+				return fmt.Errorf("节点 DNS 覆盖仅超级管理员可修改")
+			}
+			restoredChanged := false
 			if !isEmptyJSONObjectOrNull(prev["outbound_overrides"]) {
 				next["outbound_overrides"] = prev["outbound_overrides"]
+				restoredChanged = true
+			}
+			if !isEmptyJSONObjectOrNull(prev["dns_override"]) {
+				next["dns_override"] = prev["dns_override"]
+				restoredChanged = true
+			}
+			if restoredChanged {
 				restored, marshalErr := json.Marshal(next)
 				if marshalErr != nil {
 					return marshalErr

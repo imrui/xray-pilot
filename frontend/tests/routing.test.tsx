@@ -928,3 +928,147 @@ test('节点路由绑定抽屉支持在保存覆盖前直接对本节点执行�
   assert.ok(within(pfModal).getByText(/geosite\.dat missing entry/))
   assert.equal(calls.filter((c) => c.method === 'put').length, 0)
 })
+
+test('Phase 3 模板编辑器支持负载均衡组、Observatory 探测、服务端 DNS 分流与规则均衡组目标联动', async () => {
+  api((_method, _url, body) =>
+    body.draft ? { ...template, draft: JSON.stringify(body.draft), version: 5 } : undefined,
+  )
+  mount(<TemplateEditor template={template} onClose={() => {}} onConfigure={() => {}} />)
+
+  // 1. 先创建两个候选自定义出站 hk-1 与 hk-2
+  fireEvent.click(screen.getByRole('tab', { name: /自定义出站/ }))
+  fireEvent.click(screen.getByRole('button', { name: /添加自定义出站/ }))
+  fireEvent.change(screen.getByLabelText('出站 Tag *'), { target: { value: 'hk-1' } })
+  fireEvent.change(screen.getByLabelText('落地服务器地址 *'), { target: { value: '203.0.113.11' } })
+
+  fireEvent.click(screen.getByRole('button', { name: /添加自定义出站/ }))
+  fireEvent.change(screen.getAllByLabelText('出站 Tag *')[1], { target: { value: 'hk-2' } })
+  fireEvent.change(screen.getAllByLabelText('落地服务器地址 *')[1], {
+    target: { value: '203.0.113.12' },
+  })
+
+  // 2. 切换到「负载均衡」标签页，创建 hk-pool 并勾选 hk-2，验证 Observatory 自动展开与自定义模式
+  fireEvent.click(screen.getByRole('tab', { name: /负载均衡/ }))
+  fireEvent.click(screen.getByRole('button', { name: /添加负载均衡组/ }))
+  fireEvent.change(screen.getByLabelText('均衡组 Tag *'), { target: { value: 'hk-pool' } })
+  fireEvent.click(screen.getByRole('button', { name: /hk-2/ }))
+  fireEvent.change(screen.getByLabelText('故障回退兜底出站（fallbackTag，可选）'), {
+    target: { value: 'direct' },
+  })
+
+  // leastPing 默认自动展开健康探测（Observatory）设置
+  assert.ok(screen.getByText('健康探测（Observatory）设置'))
+  fireEvent.change(screen.getByLabelText('探测参数模式'), { target: { value: 'custom' } })
+  fireEvent.change(screen.getByLabelText(/探测周期/), { target: { value: '30s' } })
+
+  // 3. 切换到「DNS 设置」标签页，启用自定义 DNS，添加分域名解锁规则与静态 Hosts
+  fireEvent.click(screen.getByRole('tab', { name: /DNS 设置/ }))
+  assert.ok(
+    screen.getByText(
+      '启用自定义 DNS 后，默认直连出站将自动使用 Xray 内置解析结果以使分流 DNS 与 Hosts 生效。',
+    ),
+  )
+  fireEvent.click(screen.getByRole('switch'))
+  fireEvent.click(screen.getByRole('button', { name: /添加分域名解锁 DNS 规则/ }))
+  fireEvent.change(screen.getByLabelText('上游 DNS 地址 #2 *'), {
+    target: { value: '8.8.8.8' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: /添加静态 Hosts 映射/ }))
+  fireEvent.change(screen.getByLabelText('Hosts 域名键 #1'), {
+    target: { value: 'domain:internal.example' },
+  })
+  fireEvent.change(screen.getByLabelText('映射目标 IP #1'), {
+    target: { value: '10.0.0.8' },
+  })
+
+  // 4. 切回「路由规则」标签页，添加规则并将目标选为负载均衡组 hk-pool
+  fireEvent.click(screen.getByRole('tab', { name: /路由规则/ }))
+  fireEvent.click(screen.getByRole('button', { name: '添加分流规则' }))
+  fireEvent.change(screen.getByLabelText('目标出站 / 均衡组 *'), {
+    target: { value: 'balancer:hk-pool' },
+  })
+
+  // 5. 保存草稿并验证提交的 Schema v3 完整载荷
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText('草稿已保存。')
+  const savedDraft = (
+    calls.find((c) => c.method === 'patch')!.data as {
+      draft: {
+        balancers: {
+          tag: string
+          selector: string[]
+          strategy: { type: string }
+          fallbackTag: string
+        }[]
+        observatory: { probeInterval: string; subjectSelector: string[] }
+        dns: {
+          enabled: boolean
+          servers: (string | { address: string; domains: string[] })[]
+          hosts: Record<string, string>
+        }
+        custom_rules: { outboundTag?: string; balancerTag?: string }[]
+      }
+    }
+  ).draft
+
+  assert.equal(savedDraft.balancers.length, 1)
+  assert.equal(savedDraft.balancers[0].tag, 'hk-pool')
+  assert.deepEqual(savedDraft.balancers[0].selector, ['hk-1', 'hk-2'])
+  assert.equal(savedDraft.balancers[0].fallbackTag, 'direct')
+  assert.equal(savedDraft.observatory.probeInterval, '30s')
+  assert.deepEqual(savedDraft.observatory.subjectSelector, ['hk-1', 'hk-2'])
+  assert.equal(savedDraft.dns.enabled, true)
+  assert.equal(savedDraft.dns.servers.length, 2)
+  assert.equal(savedDraft.dns.hosts['domain:internal.example'], '10.0.0.8')
+  assert.equal(savedDraft.custom_rules[0].balancerTag, 'hk-pool')
+  assert.equal(savedDraft.custom_rules[0].outboundTag, undefined)
+})
+
+test('节点路由绑定抽屉支持本节点服务端 DNS 三态覆盖（继承 / 关闭 / 自定义替换）', async () => {
+  const v3DnsPolicy = {
+    schema_version: 3,
+    domain_strategy: 'IPIfNonMatch',
+    ipv4_force_domains: [],
+    ipv6_force_domains: [],
+    ipv6_failure_policy: 'strict',
+    custom_outbounds: [],
+    dns: {
+      enabled: true,
+      queryStrategy: 'UseIPv4',
+      servers: ['https://1.1.1.1/dns-query'],
+    },
+    custom_rules: [],
+  }
+  api((method, url) => {
+    if (method === 'get' && url.endsWith('/routing')) {
+      return { ...binding, overrides: '{}' }
+    }
+    if (url.endsWith('/routing/template-preview')) {
+      return { ...overview.nodes[0].routing, policy: v3DnsPolicy }
+    }
+  })
+
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  await screen.findByText(/当前继承模板已启用的自定义 DNS/)
+
+  // 切换为单节点关闭自定义 DNS
+  fireEvent.change(screen.getByLabelText('本节点 DNS 模式'), { target: { value: 'disable' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await screen.findByText(/已保存：1 个节点/)
+  const firstSaved = JSON.parse(
+    (calls.filter((c) => c.method === 'put')[0].data as RoutingBinding).overrides,
+  )
+  assert.deepEqual(firstSaved.dns_override, { enabled: false })
+
+  // 切换为自定义本节点解锁 DNS IP
+  fireEvent.change(screen.getByLabelText('本节点 DNS 模式'), { target: { value: 'custom' } })
+  fireEvent.change(screen.getByLabelText('上游 DNS 地址 #1 *'), {
+    target: { value: '9.9.9.9' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await screen.findByText(/已保存：1 个节点/)
+  const putCalls = calls.filter((c) => c.method === 'put')
+  const secondSaved = JSON.parse((putCalls[putCalls.length - 1].data as RoutingBinding).overrides)
+  assert.equal(secondSaved.dns_override.enabled, true)
+  assert.deepEqual(secondSaved.dns_override.servers, ['9.9.9.9'])
+})

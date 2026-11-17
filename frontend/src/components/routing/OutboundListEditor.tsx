@@ -16,7 +16,7 @@ import {
   patchDialerProxy,
   validateOutboundTag,
 } from '@/lib/routing-model'
-import type { CustomOutbound, RoutingRuleItem } from '@/lib/routing-model'
+import type { BalancerItem, CustomOutbound, RoutingRuleItem } from '@/lib/routing-model'
 
 const ALL_PROTOCOL_OPTIONS = [
   ...STRUCTURED_OUTBOUND_PROTOCOLS,
@@ -652,12 +652,14 @@ export function SingleOutboundFields({
 export function OutboundListEditor({
   outbounds,
   rules,
+  balancers = [],
   disabled = false,
   onChange,
   onPendingErrorChange,
 }: {
   outbounds: CustomOutbound[]
   rules: RoutingRuleItem[]
+  balancers?: BalancerItem[]
   disabled?: boolean
   onChange: (next: CustomOutbound[]) => void
   onPendingErrorChange?: (hasError: boolean) => void
@@ -676,7 +678,7 @@ export function OutboundListEditor({
 
   const addOutbound = () => {
     let idx = outbounds.length + 1
-    const existingTags = new Set(outbounds.map((o) => o.tag))
+    const existingTags = new Set([...outbounds.map((o) => o.tag), ...balancers.map((b) => b.tag)])
     let candidate = createDefaultOutbound(newProtocol, idx)
     while (existingTags.has(candidate.tag)) {
       idx += 1
@@ -769,7 +771,7 @@ export function OutboundListEditor({
       ) : (
         <div className="space-y-4">
           {outbounds.map((item, idx) => {
-            const refCount = countOutboundReferences(item.tag, rules, outbounds)
+            const refCount = countOutboundReferences(item.tag, rules, outbounds, balancers)
             const duplicateCount = outbounds.filter((o) => o.tag && o.tag === item.tag).length
             return (
               <div

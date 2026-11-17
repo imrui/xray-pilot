@@ -310,3 +310,125 @@ func TestPreflightDraftSandboxConcurrencyAndAlertIsolation(t *testing.T) {
 		t.Fatalf("draft preflight caused side effects! status=%s logs=%d->%d alerts=%d->%d", afterNode.SyncStatus, logsBefore, logsAfter, alertsBefore, alertsAfter)
 	}
 }
+
+func TestPhase3ServiceDNSOverrideObservatoryAndBalancerGuardrails(t *testing.T) {
+	node, _ := routingFixture(t)
+	routingSvc := NewRoutingService()
+	syncSvc := NewSyncService()
+	settingSvc := NewSettingService()
+
+	// 配置系统默认健康探测 URL，验证 leastPing 均衡器自动生成的 observatory 能继承该设置
+	if err := settingSvc.BatchUpdate(map[string]string{KeyXrayProbeURL: "https://cp.cloudflare.com/generate_204"}); err != nil {
+		t.Fatal(err)
+	}
+
+	phase3Draft := `{
+		"schema_version": 3,
+		"domain_strategy": "IPIfNonMatch",
+		"ipv4_force_domains": [],
+		"ipv6_force_domains": [],
+		"ipv6_failure_policy": "strict",
+		"custom_outbounds": [
+			{"tag": "hk-1", "protocol": "socks", "settings": {"servers": [{"address": "203.0.113.11", "port": 1080}]}},
+			{"tag": "hk-2", "protocol": "socks", "settings": {"servers": [{"address": "203.0.113.12", "port": 1080}]}}
+		],
+		"balancers": [
+			{
+				"tag": "hk-pool",
+				"remark": "香港自动择优组",
+				"selector": ["hk-1", "hk-2"],
+				"strategy": {"type": "leastPing"},
+				"fallbackTag": "direct"
+			}
+		],
+		"dns": {
+			"enabled": true,
+			"queryStrategy": "UseIPv4",
+			"servers": [
+				"https://1.1.1.1/dns-query",
+				{"address": "8.8.8.8", "domains": ["geosite:netflix"]}
+			],
+			"hosts": {
+				"domain:internal.example": "10.0.0.8"
+			}
+		},
+		"custom_rules": [
+			{"type": "field", "domain": ["geosite:netflix"], "balancerTag": "hk-pool"}
+		]
+	}`
+
+	rev := publishRouting(t, "phase3-full", phase3Draft)
+	b, err := routingSvc.Binding("node", node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Mode, b.TemplateID, b.Revision = "template", rev.TemplateID, rev.Revision
+	if err := routingSvc.SaveBinding(b, b.Version, "admin:root", true); err != nil {
+		t.Fatalf("SaveBinding phase3 failed: %v", err)
+	}
+
+	// 1. 预览节点最终配置：包含 dns、balancers、自动生成的 observatory（继承系统 probeURL）以及 direct 出站 UseIPv4
+	previewCfg, _, err := syncSvc.PreviewConfig(node.ID)
+	if err != nil {
+		t.Fatalf("PreviewConfig phase3 failed: %v", err)
+	}
+	for _, must := range []string{
+		`"balancerTag": "hk-pool"`,
+		`"probeURL": "https://cp.cloudflare.com/generate_204"`,
+		`"domainStrategy": "UseIPv4"`,
+		`"https://1.1.1.1/dns-query"`,
+	} {
+		if !strings.Contains(previewCfg, must) {
+			t.Fatalf("PreviewConfig missing %s:\n%s", must, previewCfg)
+		}
+	}
+	if strings.Contains(previewCfg, "香港自动择优组") {
+		t.Fatalf("balancer remark was not stripped from runtime config:\n%s", previewCfg)
+	}
+
+	// 2. 超级管理员设置节点级 dns_override（自定义本节点解锁 DNS IP）
+	b, _ = routingSvc.Binding("node", node.ID)
+	b.Overrides = `{"dns_override":{"enabled":true,"queryStrategy":"UseIP","servers":["9.9.9.9"]}}`
+	if err := routingSvc.SaveBinding(b, b.Version, "admin:root", true); err != nil {
+		t.Fatalf("super_admin SaveBinding dns_override failed: %v", err)
+	}
+	eff, err := routingSvc.Effective(node.ID)
+	if err != nil || eff.Sources["dns"] != "节点覆盖" || eff.Sources["dns_override"] != "节点覆盖" {
+		t.Fatalf("expected dns source=节点覆盖, got eff=%+v err=%v", eff, err)
+	}
+	previewOv, _, err := syncSvc.PreviewConfig(node.ID)
+	if err != nil || !strings.Contains(previewOv, `"9.9.9.9"`) || strings.Contains(previewOv, `"1.1.1.1/dns-query"`) {
+		t.Fatalf("expected node dns_override to replace template dns:\n%s (err=%v)", previewOv, err)
+	}
+
+	// 3. 普通管理员篡改 dns_override 被拦截；仅改域名分流时无损保留原 dns_override
+	bAdminBad, _ := routingSvc.Binding("node", node.ID)
+	bAdminBad.Overrides = `{"dns_override":{"enabled":false}}`
+	if err := routingSvc.SaveBinding(bAdminBad, bAdminBad.Version, "admin:ops", false); err == nil || !strings.Contains(err.Error(), "仅超级管理员可修改") {
+		t.Fatalf("expected admin dns_override change to be rejected, got %v", err)
+	}
+
+	bAdminOK, _ := routingSvc.Binding("node", node.ID)
+	bAdminOK.Overrides = `{"ipv4_force_domains":["domain:claude.ai"],"dns_override":{"enabled":true,"queryStrategy":"UseIP","servers":["9.9.9.9"]}}`
+	if err := routingSvc.SaveBinding(bAdminOK, bAdminOK.Version, "admin:ops", false); err != nil {
+		t.Fatalf("expected admin domain edit preserving dns_override to succeed, got %v", err)
+	}
+
+	// 4. 超级管理员通过 dns_override: {"enabled": false} 在单节点关闭自定义 DNS（direct 恢复无 UseIPv4）
+	bDisable, _ := routingSvc.Binding("node", node.ID)
+	bDisable.Overrides = `{"dns_override":{"enabled":false}}`
+	if err := routingSvc.SaveBinding(bDisable, bDisable.Version, "admin:root", true); err != nil {
+		t.Fatalf("super_admin disable dns_override failed: %v", err)
+	}
+	previewDisabledDNS, _, err := syncSvc.PreviewConfig(node.ID)
+	if err != nil || strings.Contains(previewDisabledDNS, `"servers": [`) && strings.Contains(previewDisabledDNS, `"9.9.9.9"`) {
+		t.Fatalf("expected dns section omitted when enabled=false:\n%s", previewDisabledDNS)
+	}
+
+	// 5. 若节点出站覆盖将均衡器所有候选出站均 remap 为 direct，导致活跃规则引用的 hk-pool 候选集归零，SaveBinding 明确拦截
+	bEmptyPool, _ := routingSvc.Binding("node", node.ID)
+	bEmptyPool.Overrides = `{"outbound_overrides":{"hk-1":{"mode":"remap","target_tag":"direct"},"hk-2":{"mode":"remap","target_tag":"direct"}}}`
+	if err := routingSvc.SaveBinding(bEmptyPool, bEmptyPool.Version, "admin:root", true); err == nil || !strings.Contains(err.Error(), "hk-pool") {
+		t.Fatalf("expected SaveBinding to reject empty balancer candidate pool after remap, got %v", err)
+	}
+}
