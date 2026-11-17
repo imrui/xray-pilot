@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { formatBytes } from '@/lib/utils'
-import { TRAFFIC_TIMEZONE } from '@/lib/trafficDates'
+import { toDateInput } from '@/lib/trafficDates'
 import type { TrafficDirection, TrafficPoint, TrafficSeries } from '@/types/traffic'
+import { useChartWidth } from './useChartWidth'
 
 const colors = ['var(--accent)', 'var(--success)', 'var(--warning)', 'var(--danger)', 'var(--text-soft)', 'var(--text-faint)']
 function pointValue(point: TrafficPoint, direction: TrafficDirection): number | null {
@@ -9,34 +10,31 @@ function pointValue(point: TrafficPoint, direction: TrafficDirection): number | 
   return direction === 'up' ? point.up_bytes : direction === 'down' ? point.down_bytes : point.up_bytes + point.down_bytes
 }
 function timeLabel(value: string, hourly: boolean) {
-  return new Date(value).toLocaleString('zh-CN', { timeZone: TRAFFIC_TIMEZONE, month: '2-digit', day: '2-digit', ...(hourly ? { hour: '2-digit', minute: '2-digit' } : {}) })
+  const formatted = toDateInput(new Date(value))
+  return hourly ? formatted.replace('T', ' ') : formatted.slice(0, 10)
 }
 export function TrafficChart({ series, direction, interval }: { series: TrafficSeries[]; direction: TrafficDirection; interval: 'hour' | 'day' }) {
-  const container = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(600)
+  const { container, width } = useChartWidth()
   const [selected, setSelected] = useState<number | null>(null)
   const [hidden, setHidden] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    const el = container.current
-    if (!el) return
-    const observer = new ResizeObserver(entries => setWidth(Math.max(260, entries[0].contentRect.width)))
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
   const visible = series.filter(s => !hidden.has(s.id))
   const count = series[0]?.points.length ?? 0
-  const left = 70, right = width - 18, top = 20, bottom = 230
+  const left = 70, right = width - 18, top = 20, bottom = 280
   const max = Math.max(1, ...visible.flatMap(s => s.points.map(p => pointValue(p, direction) ?? 0))) * 1.1
   const x = (index: number) => count <= 1 ? (left + right) / 2 : left + index / (count - 1) * (right - left)
   const y = (value: number) => bottom - value / max * (bottom - top)
   const selectedIndex = selected === null ? null : Math.min(selected, Math.max(0, count - 1))
-  const ticks = [...new Set(width < 500 ? [0, count - 1] : [0, Math.floor((count - 1) / 2), count - 1])].filter(i => i >= 0 && i < count)
+  const tickCount = Math.min(count, Math.max(2, Math.floor((right - left) / 130)))
+  const ticks = [...new Set(Array.from({ length: tickCount }, (_, i) => Math.round(i * (count - 1) / Math.max(1, tickCount - 1))))].filter(i => i >= 0 && i < count)
   const hasValues = series.some(s => s.points.some(p => p.up_bytes !== null))
   return <div ref={container} className="min-w-0">
     <div className="relative">
-      <svg width="100%" height="270" role="img" aria-label="所选区间的用量趋势，缺少采集依据的时段断开显示；可使用下方时间滑块查看数值。" onPointerMove={e => { const pos = e.clientX - e.currentTarget.getBoundingClientRect().left; setSelected(Math.max(0, Math.min(count - 1, Math.round((pos - left) / (right - left) * (count - 1))))) }} onPointerLeave={() => setSelected(null)}>
+      <svg width="100%" height={interval === 'hour' ? 340 : 320} role="img" aria-label="所选区间的用量趋势，缺少采集依据的时段断开显示；可使用下方时间滑块查看数值。" onPointerMove={e => { const pos = e.clientX - e.currentTarget.getBoundingClientRect().left; setSelected(Math.max(0, Math.min(count - 1, Math.round((pos - left) / (right - left) * (count - 1))))) }} onPointerLeave={() => setSelected(null)}>
         {[0, 1, 2, 3].map(i => <g key={i}><line x1={left} x2={right} y1={y(max * i / 3)} y2={y(max * i / 3)} stroke="var(--border)" /><text x={left - 8} y={y(max * i / 3) + 4} textAnchor="end" fontSize="11" fill="var(--text-soft)">{formatBytes(max * i / 3)}</text></g>)}
-        {ticks.map((i, n) => <text key={i} x={x(i)} y={255} textAnchor={n === 0 ? 'start' : n === ticks.length - 1 ? 'end' : 'middle'} fontSize="11" fill="var(--text-soft)">{timeLabel(series[0].points[i].time, interval === 'hour')}</text>)}
+        {ticks.map((i, n) => <text key={i} x={x(i)} y={305} textAnchor={n === 0 ? 'start' : n === ticks.length - 1 ? 'end' : 'middle'} fontSize="11" fill="var(--text-soft)">
+          <tspan x={x(i)}>{timeLabel(series[0].points[i].time, false)}</tspan>
+          {interval === 'hour' && <tspan x={x(i)} dy="16">{timeLabel(series[0].points[i].time, true).slice(11)}</tspan>}
+        </text>)}
         {series.map((s, index) => {
           if (hidden.has(s.id)) return null
           let drawing = false
