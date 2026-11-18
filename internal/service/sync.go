@@ -103,6 +103,7 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	}
 
 	params := s.sshParams(node)
+	params.RequiresIPv6 = snapshot.Policy != nil && snapshot.Policy.RequiresIPv6WithOptions(xray.RenderOptions{DefaultProbeURL: params.ProbeURL})
 	if state.VerifiedAt != nil && state.RuntimeHash == xray.ConfigHash(configContent) && state.DiskHash == state.RuntimeHash {
 		params.ConfirmedProcess = state.ProcessID
 	}
@@ -384,20 +385,21 @@ func (s *SyncService) buildConfigPolicy(node *entity.Node, policy string) (strin
 	if len(warnings) > 0 {
 		return "", warnings, fmt.Errorf("协议配置不完整，拒绝覆盖: %s", strings.Join(warnings, "; "))
 	}
+	renderOpts := xray.RenderOptions{DefaultProbeURL: s.settingSvc.Get(KeyXrayProbeURL)}
 	if policy == "desired" {
 		effective, e := NewRoutingService().Effective(node.ID)
 		if e != nil {
 			return "", nil, e
 		}
 		if effective.Policy != nil {
-			content, err = xray.ApplyRoutingPolicy(content, *effective.Policy)
+			content, err = xray.ApplyRoutingPolicyWithOptions(content, *effective.Policy, renderOpts)
 		}
 	} else if policy != "" && policy != "legacy" {
 		p, e := xray.DecodeRoutingPolicy(policy)
 		if e != nil {
 			return "", nil, e
 		}
-		content, err = xray.ApplyRoutingPolicy(content, p)
+		content, err = xray.ApplyRoutingPolicyWithOptions(content, p, renderOpts)
 	}
 	return content, warnings, err
 }
@@ -411,6 +413,9 @@ func (s *SyncService) PreviewConfig(nodeID uint) (string, []string, error) {
 	content, warnings, err := s.buildConfig(node)
 	if err != nil {
 		return "", warnings, err
+	}
+	if eff, effErr := NewRoutingService().Effective(nodeID); effErr == nil && eff != nil && eff.Policy != nil {
+		warnings = append(warnings, xray.DiagnoseRenderedDNSSelfLoop(content, *eff.Policy, xray.RenderOptions{})...)
 	}
 	// 脱敏：将生成配置中的 privateKey 替换为占位符（避免通过 API 暴露）
 	masked := redactConfig(content)

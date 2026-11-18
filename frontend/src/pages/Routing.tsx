@@ -152,16 +152,22 @@ export default function Routing() {
               label: '草稿规则摘要',
               render: (t) => {
                 const p = readPolicy(t.draft)
+                const isModern = (p.schema_version ?? 1) >= 2
+                const outCount = p.custom_outbounds?.length ?? 0
+                const balCount = p.balancers?.length ?? 0
+                const hasDns = !!p.dns?.enabled
                 return (
                   <div className="space-y-1 text-xs">
                     <p>
                       强制 IPv4 {p.ipv4_force_domains.length} ·{' '}
-                      {p.schema_version === 2 ? '强制 IPv6' : '旧版 IPv6 列表'}{' '}
+                      {isModern ? '强制 IPv6' : '旧版 IPv6 列表'}{' '}
                       {p.ipv6_force_domains.length}
                     </p>
                     <p>
-                      {p.schema_version === 2 ? '默认直连' : '旧版：默认 IPv4'} · 自定义规则{' '}
+                      {isModern ? '默认直连' : '旧版：默认 IPv4'} · 自定义出站 {outCount}
+                      {balCount > 0 ? ` · 负载均衡 ${balCount}` : ''} · 自定义规则{' '}
                       {p.custom_rules.length}
+                      {hasDns ? ' · 自定义 DNS' : ''}
                     </p>
                     {requiresIPv6(p) && <p className="text-[var(--warning)]">需要可用 IPv6 出口</p>}
                   </div>

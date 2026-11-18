@@ -1,11 +1,9 @@
 package service
 
 import (
-	"encoding/json"
-	"reflect"
-
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
+	"github.com/imrui/xray-pilot/internal/xray"
 )
 
 type RoutingTemplateSummary struct {
@@ -94,10 +92,7 @@ func (s *RoutingService) Overview() (*RoutingOverview, error) {
 	}
 	for _, t := range templates {
 		r := latest[t.ID]
-		var draft, published any
-		_ = json.Unmarshal([]byte(t.Draft), &draft)
-		_ = json.Unmarshal([]byte(r.Payload), &published)
-		out.Templates = append(out.Templates, RoutingTemplateSummary{RoutingTemplate: t, LatestRevision: r.Revision, DraftChanged: r.Revision == 0 || !reflect.DeepEqual(draft, published), BindingCount: counts[t.ID], NodeCount: uses[t.ID]})
+		out.Templates = append(out.Templates, RoutingTemplateSummary{RoutingTemplate: t, LatestRevision: r.Revision, DraftChanged: r.Revision == 0 || !xray.PoliciesSemanticallyEqual(t.Draft, r.Payload), BindingCount: counts[t.ID], NodeCount: uses[t.ID]})
 	}
 	settings := NewSettingService()
 	out.AutoSync = settings.GetInt(KeySchedulerDriftInterval) > 0 || settings.Get(KeyXrayLiveApply) == "true"

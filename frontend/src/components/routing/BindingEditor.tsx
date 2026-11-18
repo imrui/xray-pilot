@@ -1,16 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { FlaskConical } from 'lucide-react'
 import { Btn } from '@/components/ui/Form'
 import { Drawer } from '@/components/ui/Drawer'
 import { useConfirm } from '@/lib/confirm-context'
 import { useAuthStore } from '@/store/auth'
 import { BindingFields } from './BindingFields'
+import { DraftPreflightModal } from './DraftPreflightModal'
 import {
   getBinding,
   invalidateRouting,
   previewBinding,
+  previewTemplate,
   saveBinding,
   useRoutingOverview,
 } from '@/lib/routing'
@@ -41,17 +44,28 @@ export function BindingEditor({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [impact, setImpact] = useState<{ result: BindingImpact; saved: boolean } | null>(null)
+  const [sandboxOpen, setSandboxOpen] = useState(false)
+  const [hasPendingError, setHasPendingError] = useState(false)
+  const [fieldsEpoch, setFieldsEpoch] = useState(0)
   const value = draft ?? query.data
-  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(query.data)
+  const dirty = hasPendingError || (!!draft && JSON.stringify(draft) !== JSON.stringify(query.data))
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  const resetFields = () => {
+    setHasPendingError(false)
+    setFieldsEpoch((epoch) => epoch + 1)
+  }
   const editable = superAdmin || scope === 'node'
   const change = (b: RoutingBinding) => {
     setDraft(b)
     setImpact(null)
     setError('')
-    onDirtyChange?.(JSON.stringify(b) !== JSON.stringify(query.data))
   }
   const run = async (save: boolean) => {
     if (!value) return
+    if (hasPendingError) {
+      setError('请先修正节点出站中未完成或无效的输入。')
+      return
+    }
     setBusy(true)
     onBusyChange?.(true)
     setError('')
@@ -64,7 +78,7 @@ export function BindingEditor({
         const next = { ...payload, version: payload.version + 1 }
         qc.setQueryData(['routing-binding', scope, id], next)
         setDraft(null)
-        onDirtyChange?.(false)
+        resetFields()
         await invalidateRouting(qc)
       }
       setImpact({ result, saved: save })
@@ -94,6 +108,11 @@ export function BindingEditor({
     )
   const source = scope === 'node' ? overview.data?.nodes.find((n) => n.id === id) : null
   const ids = impact ? affectedIDs(impact.result) : []
+  const canSandboxNode =
+    scope === 'node' &&
+    superAdmin &&
+    value.mode !== 'legacy' &&
+    (value.mode === 'inherit' || (value.template_id > 0 && value.revision > 0))
   const actions = editable ? (
     <div className="flex flex-wrap justify-end gap-2">
       {dirty && (
@@ -104,16 +123,22 @@ export function BindingEditor({
             setDraft(null)
             setImpact(null)
             setError('')
-            onDirtyChange?.(false)
+            resetFields()
           }}
         >
           放弃本节修改
         </Btn>
       )}
-      <Btn variant="secondary" loading={busy} onClick={() => void run(false)}>
+      {canSandboxNode && (
+        <Btn variant="accent" disabled={busy || hasPendingError} onClick={() => setSandboxOpen(true)}>
+          <FlaskConical className="h-4 w-4" />
+          沙箱预检
+        </Btn>
+      )}
+      <Btn variant="secondary" loading={busy} disabled={hasPendingError} onClick={() => void run(false)}>
         查看影响范围
       </Btn>
-      <Btn loading={busy} disabled={!dirty} onClick={() => void run(true)}>
+      <Btn loading={busy} disabled={!dirty || hasPendingError} onClick={() => void run(true)}>
         保存路由
       </Btn>
     </div>
@@ -128,9 +153,12 @@ export function BindingEditor({
       )}
       <fieldset disabled={busy || !editable} className="space-y-4 disabled:opacity-70">
         <BindingFields
+          key={fieldsEpoch}
           value={value}
           templates={overview.data?.templates ?? []}
           onChange={change}
+          disabled={busy || !editable}
+          onPendingErrorChange={setHasPendingError}
         />
       </fieldset>
       {scope === 'group' && (
@@ -164,7 +192,7 @@ export function BindingEditor({
                 onClick={() => {
                   setDraft(null)
                   setError('')
-                  onDirtyChange?.(false)
+                  resetFields()
                 }}
               >
                 放弃草稿，使用服务器配置
@@ -206,6 +234,31 @@ export function BindingEditor({
         </div>
       )}
       {footerElement ? createPortal(actions, footerElement) : actions}
+      {sandboxOpen && scope === 'node' && (
+        <DraftPreflightModal
+          open={sandboxOpen}
+          onClose={() => setSandboxOpen(false)}
+          nodes={overview.data?.nodes ?? []}
+          lockedNodeID={id}
+          draftIdentity={JSON.stringify(value)}
+          customOverrides={(() => {
+            try {
+              return normalizeBinding(value).overrides
+            } catch {
+              return value.overrides
+            }
+          })()}
+          getDraftPolicy={async () => {
+            if (hasPendingError) throw new Error('请先修正节点出站中未完成或无效的输入。')
+            const normalized = normalizeBinding(value)
+            const resolved = await previewTemplate(normalized)
+            if (!resolved.policy) {
+              throw new Error('未能解析所选模板策略。')
+            }
+            return resolved.policy
+          }}
+        />
+      )}
     </div>
   )
 }

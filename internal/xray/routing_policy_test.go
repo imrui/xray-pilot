@@ -121,7 +121,7 @@ func TestActualXrayRoutingFixtures(t *testing.T) {
 		ips  []string
 	}{{"ipv4-only", false, nil}, {"ipv6-strict", true, nil}, {"custom-target-ips", false, []string{"1.1.1.1", "203.0.113.0/24", "2001:db8::/32"}}} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := RoutingPolicy{EnableIPv6: tc.ipv6, IPv6FailurePolicy: "strict", IPv4Domains: []string{"domain:example.com"}, IPv6Domains: []string{"domain:example.net"}}
+			p := RoutingPolicy{SchemaVersion: 1, EnableIPv6: tc.ipv6, IPv6FailurePolicy: "strict", IPv4Domains: []string{"domain:example.com"}, IPv6Domains: []string{"domain:example.net"}}
 			if len(tc.ips) > 0 {
 				p.CustomRules = []RoutingRule{{Type: "field", IP: tc.ips, OutboundTag: "direct-v4"}}
 			}
@@ -133,6 +133,32 @@ func TestActualXrayRoutingFixtures(t *testing.T) {
 			t.Logf("Xray %s passed", tc.name)
 		})
 	}
+	t.Run("schema-v3-custom-outbounds", func(t *testing.T) {
+		p, err := DecodeRoutingPolicy(`{
+			"schema_version": 3,
+			"domain_strategy": "IPIfNonMatch",
+			"ipv4_force_domains": ["domain:example.com"],
+			"ipv6_force_domains": [],
+			"ipv6_failure_policy": "strict",
+			"custom_outbounds": [
+				{"tag": "socks-out", "protocol": "socks", "remark": "test", "settings": {"servers": [{"address": "203.0.113.10", "port": 1080}]}, "streamSettings": {"sockopt": {"dialerProxy": "direct-v4"}}},
+				{"tag": "multi-ip", "protocol": "freedom", "sendThrough": "127.0.0.1"}
+			],
+			"custom_rules": [
+				{"type": "field", "remark": "bt", "protocol": ["bittorrent", "quic"], "outboundTag": "block"},
+				{"type": "field", "domain": ["keyword:openai", "full:api.openai.com"], "outboundTag": "socks-out"},
+				{"type": "field", "ip": ["198.51.100.0/24"], "outboundTag": "multi-ip"}
+			]
+		}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := ApplyRoutingPolicy(base, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, data)
+	})
 }
 
 func TestRoutingPreservesOperationalDirect(t *testing.T) {

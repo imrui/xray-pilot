@@ -73,11 +73,31 @@ func (s *SyncService) recordApplied(state *entity.NodeConfigState, content, proc
 		updates["last_healthy_revision"] = state.DesiredRevision
 		effective := healthy
 		raw := "legacy"
+		var encryptedPolicy *xray.RoutingPolicy
 		if effective.Policy != nil {
-			data, _ := json.Marshal(effective.Policy)
+			// 历史库可能含旧版遗漏的简写凭据，健康快照同样必须执行静态加密。
+			policy, err := xray.EncryptPolicySecrets(*effective.Policy, effective.Policy)
+			if err != nil {
+				return fmt.Errorf("保存健康策略凭据失败: %w", err)
+			}
+			encryptedPolicy = &policy
+			data, err := json.Marshal(policy)
+			if err != nil {
+				return err
+			}
 			raw = string(data)
 		}
 		updates["last_healthy_policy"] = raw
+		// 保留原覆盖图，合并策略已丢失 remap 来源，不能再从缺失出站猜测。
+		overrides := effective.Binding.Overrides
+		if overrides == "" {
+			overrides = "{}"
+		}
+		encryptedOverrides, err := xray.EncryptOverridesSecrets(overrides, overrides, encryptedPolicy)
+		if err != nil {
+			return fmt.Errorf("保存健康节点覆盖凭据失败: %w", err)
+		}
+		updates["last_healthy_overrides"] = encryptedOverrides
 		updates["last_healthy_template_id"] = effective.TemplateID
 		updates["last_healthy_template_revision"] = effective.Revision
 	}
@@ -173,10 +193,31 @@ func (s *SyncService) RestorePolicy(nodeID uint, expected uint, actor string) er
 		b.Overrides = "{}"
 	} else {
 		// Store only routing policy; current users and keys are regenerated on execution.
+		var rev entity.RoutingTemplateRevision
+		if err := repository.DB.Where("template_id = ? AND revision = ?", state.LastHealthyTemplateID, state.LastHealthyTemplateRevision).First(&rev).Error; err != nil {
+			return fmt.Errorf("历史模板修订不存在: %w", err)
+		}
+		overrides := state.LastHealthyOverrides
+		var ovErr error
+		if overrides == "" {
+			// 旧库快照没有原覆盖，重建后仍必须验证完全等价。
+			overrides, ovErr = xray.BuildOverridesForTarget(rev.Payload, state.LastHealthyPolicy)
+		}
+		if ovErr != nil {
+			return ovErr
+		}
+		merged, mergeErr := xray.MergeRoutingPolicy(rev.Payload, overrides)
+		if mergeErr != nil {
+			return fmt.Errorf("历史节点覆盖无法恢复: %w", mergeErr)
+		}
+		mergedJSON, marshalErr := json.Marshal(merged)
+		if marshalErr != nil || !xray.PoliciesSemanticallyEqual(string(mergedJSON), state.LastHealthyPolicy) {
+			return fmt.Errorf("历史节点覆盖与已验证策略不一致，拒绝恢复")
+		}
 		b.Mode = "template"
 		b.TemplateID = state.LastHealthyTemplateID
 		b.Revision = state.LastHealthyTemplateRevision
-		b.Overrides = state.LastHealthyPolicy
+		b.Overrides = overrides
 	}
 	return NewRoutingService().SaveBinding(b, expected, actor, true)
 }

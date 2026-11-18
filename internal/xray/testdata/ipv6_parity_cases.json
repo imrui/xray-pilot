@@ -1,0 +1,299 @@
+[
+  {
+    "name": "domain-via-direct-v6",
+    "want": true,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "custom_outbounds": [
+        {
+          "tag": "egress",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "proxy.example", "port": 1080 }] },
+          "streamSettings": { "sockopt": { "dialerProxy": "direct-v6" } }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "port": "443", "outboundTag": "egress" }]
+    }
+  },
+  {
+    "name": "ipv6-literal-via-direct",
+    "want": true,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "custom_outbounds": [
+        {
+          "tag": "egress",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "2001:db8::1", "port": 1080 }] },
+          "streamSettings": { "sockopt": { "dialerProxy": "direct" } }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "port": "443", "outboundTag": "egress" }]
+    }
+  },
+  {
+    "name": "ipv4-literal-with-forceipv6",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "custom_outbounds": [
+        {
+          "tag": "egress",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] },
+          "streamSettings": { "sockopt": { "domainStrategy": "ForceIPv6" } }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "port": "443", "outboundTag": "egress" }]
+    }
+  },
+  {
+    "name": "dns-v6-through-v4-proxy",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "servers": ["2001:db8::53"] },
+      "custom_outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "ip": ["2001:db8::53"], "port": "53", "outboundTag": "proxy" }]
+    }
+  },
+  {
+    "name": "dns-v6-cidr-through-v4-proxy",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "servers": ["2001:db8::53"] },
+      "custom_outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "ip": ["2001:db8::/32"], "port": "53", "outboundTag": "proxy" }]
+    }
+  },
+  {
+    "name": "observatory-v6-through-v4-proxy",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "custom_outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "observatory": {
+        "subjectSelector": ["proxy"],
+        "probeURL": "https://[2606:4700:4700::1111]/"
+      },
+      "custom_rules": []
+    }
+  },
+  {
+    "name": "observatory-v6-through-direct-v4",
+    "want": true,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "balancers": [{ "tag": "idle", "selector": ["direct-v4"] }],
+      "observatory": {
+        "subjectSelector": ["direct-v4"],
+        "probeURL": "https://[2606:4700:4700::1111]/"
+      },
+      "custom_rules": []
+    }
+  },
+  {
+    "name": "strategy-precedence-freedom-overrides-sockopt",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "custom_outbounds": [
+        {
+          "tag": "egress",
+          "protocol": "freedom",
+          "settings": { "targetStrategy": "UseIPv4" },
+          "streamSettings": { "sockopt": { "domainStrategy": "ForceIPv6" } }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "port": "443", "outboundTag": "egress" }]
+    }
+  },
+  {
+    "name": "strategy-precedence-outer-targetStrategy-wins",
+    "want": true,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "custom_outbounds": [
+        {
+          "tag": "egress",
+          "protocol": "freedom",
+          "targetStrategy": "ForceIPv6",
+          "settings": { "targetStrategy": "UseIPv4" }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "port": "443", "outboundTag": "egress" }]
+    }
+  },
+  {
+    "name": "ipv6-target-over-ipv4-proxy-chain",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "custom_outbounds": [
+        {
+          "tag": "landing",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "2001:db8::1", "port": 1080 }] },
+          "streamSettings": { "sockopt": { "dialerProxy": "underlay" } }
+        },
+        {
+          "tag": "underlay",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "port": "443", "outboundTag": "landing" }]
+    }
+  },
+  {
+    "name": "dns-useipv6-affects-default-direct",
+    "want": true,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "queryStrategy": "UseIPv6", "servers": ["1.1.1.1"] },
+      "custom_rules": []
+    }
+  },
+  {
+    "name": "dns-loopback-v6-does-not-require-default-route",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "servers": ["tcp+local://[::1]"] },
+      "custom_rules": []
+    }
+  },
+  {
+    "name": "mapped-v4-cidr-slash0-does-not-swallow-v6-dns",
+    "want": true,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "servers": ["2606:4700:4700::1111"] },
+      "custom_outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "ip": ["::ffff:0:0/0"], "port": "53", "outboundTag": "proxy" }]
+    }
+  },
+  {
+    "name": "mapped-v4-cidr-slash1-does-not-swallow-v6-dns",
+    "want": true,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "servers": ["2606:4700:4700::1111"] },
+      "custom_outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "ip": ["::ffff:0:0/1"], "port": "53", "outboundTag": "proxy" }]
+    }
+  },
+  {
+    "name": "empty-source-and-null-inboundTag-normalized",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "servers": ["2001:db8::53"] },
+      "custom_outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "custom_rules": [
+        {
+          "type": "field",
+          "source": [],
+          "inboundTag": null,
+          "ip": ["2001:db8::53"],
+          "port": "53",
+          "outboundTag": "proxy"
+        }
+      ]
+    }
+  },
+  {
+    "name": "ordinary-v6-cidr-slash0-matches-v6-dns",
+    "want": false,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "servers": ["2606:4700:4700::1111"] },
+      "custom_outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "custom_rules": [{ "type": "field", "ip": ["::/0"], "port": "53", "outboundTag": "proxy" }]
+    }
+  },
+  {
+    "name": "unknown-extra-null-does-not-assume-dns-match",
+    "want": true,
+    "policy": {
+      "schema_version": 3,
+      "ipv6_failure_policy": "strict",
+      "dns": { "enabled": true, "servers": ["2001:db8::53"] },
+      "custom_outbounds": [
+        {
+          "tag": "proxy",
+          "protocol": "socks",
+          "settings": { "servers": [{ "address": "192.0.2.1", "port": 1080 }] }
+        }
+      ],
+      "custom_rules": [
+        {
+          "type": "field",
+          "future": null,
+          "ip": ["2001:db8::53"],
+          "port": "53",
+          "outboundTag": "proxy"
+        }
+      ]
+    }
+  }
+]

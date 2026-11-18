@@ -1,15 +1,28 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Badge } from '@/components/ui/Badge'
 import { Btn, Field, FieldGroup, SelectField } from '@/components/ui/Form'
 import { useAuthStore } from '@/store/auth'
 import { getRevisions, previewTemplate } from '@/lib/routing'
 import {
+  BUILTIN_OUTBOUNDS,
   basicRoutingDescription,
   basicRoutingLabel,
   bindingMode,
+  createDefaultDNSConfig,
   domainLines,
-  readPolicy,
+  parseRules,
+  revisionSummaryLabel,
 } from '@/lib/routing-model'
-import type { RoutingBinding, RoutingTemplate } from '@/lib/routing-model'
+import type {
+  CustomOutbound,
+  DNSConfigModel,
+  OutboundOverride,
+  RoutingBinding,
+  RoutingTemplate,
+} from '@/lib/routing-model'
+import { DnsEditor } from './DnsEditor'
+import { SingleOutboundFields } from './OutboundListEditor'
 
 export const routingControl =
   'w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]'
@@ -18,12 +31,25 @@ export function BindingFields({
   value,
   onChange,
   templates,
+  disabled = false,
+  onPendingErrorChange,
 }: {
   value: RoutingBinding
   onChange: (b: RoutingBinding) => void
   templates: RoutingTemplate[]
+  disabled?: boolean
+  onPendingErrorChange?: (hasError: boolean) => void
 }) {
   const superAdmin = useAuthStore((s) => s.role) === 'super_admin'
+  const [outboundErrors, setOutboundErrors] = useState<Record<string, string>>({})
+  const hasPendingError = Object.keys(outboundErrors).length > 0
+  const updateOutboundError = (tag: string, error: string) => {
+    const next = { ...outboundErrors }
+    if (error) next[tag] = error
+    else delete next[tag]
+    setOutboundErrors(next)
+    onPendingErrorChange?.(Object.keys(next).length > 0)
+  }
   const revisions = useQuery({
     queryKey: ['routing-revisions', value.template_id],
     queryFn: () => getRevisions(value.template_id),
@@ -35,7 +61,11 @@ export function BindingFields({
       (value.mode === 'template' && value.template_id > 0 && value.revision > 0))
   const templatePreview = useQuery({
     queryKey: [
-      'routing-template-preview', value.target_id, value.mode, value.template_id, value.revision,
+      'routing-template-preview',
+      value.target_id,
+      value.mode,
+      value.template_id,
+      value.revision,
     ],
     queryFn: () => previewTemplate(value),
     enabled: canPreview,
@@ -50,8 +80,37 @@ export function BindingFields({
     else next[key] = field
     onChange({ ...value, overrides: JSON.stringify(next) })
   }
+
+  const inheritedOutbounds: CustomOutbound[] | undefined = templatePreview.error
+    ? undefined
+    : base?.policy
+      ? (base.policy.custom_outbounds ?? [])
+      : undefined
+
+  const outboundOverridesMap = (
+    overrides.outbound_overrides &&
+    typeof overrides.outbound_overrides === 'object' &&
+    !Array.isArray(overrides.outbound_overrides)
+      ? overrides.outbound_overrides
+      : {}
+  ) as Record<string, OutboundOverride>
+
+  const updateOutboundOverride = (tag: string, nextEntry: OutboundOverride | undefined) => {
+    const nextMap = { ...outboundOverridesMap }
+    if (!nextEntry) delete nextMap[tag]
+    else nextMap[tag] = nextEntry
+    override('outbound_overrides', Object.keys(nextMap).length > 0 ? nextMap : undefined)
+  }
+
+  const staleOutboundTags = inheritedOutbounds
+    ? Object.keys(outboundOverridesMap).filter(
+        (tag) => !inheritedOutbounds.some((o) => o.tag === tag),
+      )
+    : []
+
   return (
     <div className="space-y-4">
+      <fieldset disabled={hasPendingError} className="space-y-4">
       <SelectField
         label="路由来源"
         value={value.mode}
@@ -101,7 +160,7 @@ export function BindingFields({
               { value: 0, label: revisions.isLoading ? '加载版本…' : '请选择版本' },
               ...(revisions.data ?? []).map((r) => ({
                 value: r.revision,
-                label: `v${r.revision}${readPolicy(r.payload).schema_version === 2 ? ' · 默认直连' : ' · 旧版 IPv4 兜底'}`,
+                label: `v${r.revision} · ${revisionSummaryLabel(r.payload)}`,
               })),
             ]}
           />
@@ -117,6 +176,12 @@ export function BindingFields({
           )}
         </div>
       )}
+      </fieldset>
+      {hasPendingError && (
+        <p role="alert" className="text-xs text-[var(--danger)]">
+          节点出站仍有未完成或无效的输入，请修正或放弃修改后再切换来源、保存或预检。
+        </p>
+      )}
       {value.scope === 'node' && value.mode !== 'legacy' && (
         <FieldGroup
           title="本节点覆盖"
@@ -127,7 +192,7 @@ export function BindingFields({
             aria-live="polite"
           >
             {!canPreview ? (
-              '请选择模板及固定版本，查看可继承的域名。'
+              '请选择模板及固定版本，查看可继承的域名与出站。'
             ) : templatePreview.error ? (
               <div role="alert" className="space-y-2 text-[var(--danger)]">
                 <p>模板内容加载失败：{(templatePreview.error as Error).message}</p>
@@ -138,16 +203,22 @@ export function BindingFields({
             ) : base ? (
               <p>
                 当前模板：{templateName} v{base.revision} ·{' '}
-                {value.mode === 'template' ? '节点指定' : base.groups.length
-                  ? `继承分组：${base.groups.map((g) => g.split(' [')[0]).join('、')}`
-                  : '继承全局默认'}
+                {value.mode === 'template'
+                  ? '节点指定'
+                  : base.groups.length
+                    ? `继承分组：${base.groups.map((g) => g.split(' [')[0]).join('、')}`
+                    : '继承全局默认'}
               </p>
-            ) : '正在读取模板域名…'}
+            ) : (
+              '正在读取模板域名…'
+            )}
           </div>
-          {base?.policy && base.policy.schema_version !== 2 && (
+          {base?.policy && (base.policy.schema_version ?? 1) < 2 && (
             <p className="text-xs text-soft">
               当前继承旧版策略，未命中仍使用 IPv4 兜底。
-              {base.policy.enable_ipv6_outbound ? '' : '旧版 IPv6 开关已关闭，IPv6 列表中的域名实际使用 IPv4。'}
+              {base.policy.enable_ipv6_outbound
+                ? ''
+                : '旧版 IPv6 开关已关闭，IPv6 列表中的域名实际使用 IPv4。'}
             </p>
           )}
           <p className="text-xs text-soft">
@@ -165,6 +236,159 @@ export function BindingFields({
               </Btn>
             </div>
           )}
+
+          {staleOutboundTags.length > 0 && (
+            <div className="space-y-2 rounded border border-[var(--warning-border)] bg-[var(--warning-soft)] p-3 text-xs">
+              <p className="text-[var(--warning)]">
+                检测到失效的节点出站覆盖：{staleOutboundTags.join('、')} 在当前模板版本中已不存在，保存前请清理。
+              </p>
+              {superAdmin && (
+                <Btn
+                  variant="secondary"
+                  onClick={() => {
+                    const cleaned = { ...outboundOverridesMap }
+                    for (const t of staleOutboundTags) delete cleaned[t]
+                    const remainingErrors = { ...outboundErrors }
+                    for (const t of staleOutboundTags) delete remainingErrors[t]
+                    setOutboundErrors(remainingErrors)
+                    onPendingErrorChange?.(Object.keys(remainingErrors).length > 0)
+                    override('outbound_overrides', Object.keys(cleaned).length ? cleaned : undefined)
+                  }}
+                >
+                  清理失效出站覆盖
+                </Btn>
+              )}
+            </div>
+          )}
+
+          {inheritedOutbounds && inheritedOutbounds.length > 0 && (
+            <div className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h5 className="text-xs font-semibold text-[var(--text)]">
+                    本节点自定义出站覆盖（{inheritedOutbounds.length} 个模板出站）
+                  </h5>
+                  <p className="mt-0.5 text-xs text-soft">
+                    可按出站 Tag 为当前节点单独替换落地地址/协议参数，或将规则重映射到其他出站。
+                  </p>
+                </div>
+                {!superAdmin && <Badge label="仅超级管理员可修改" variant="gray" />}
+              </div>
+
+              <div className="space-y-3">
+                {inheritedOutbounds.map((tmplOutbound) => {
+                  const currentOv = outboundOverridesMap[tmplOutbound.tag] as OutboundOverride | undefined
+                  const ovMode: 'inherit' | 'replace' | 'remap' = currentOv?.mode ?? 'inherit'
+                  const peerTags = inheritedOutbounds
+                    .map((o) => o.tag)
+                    .filter((t) => outboundOverridesMap[t]?.mode !== 'remap')
+
+                  const remapOptions = [
+                    ...BUILTIN_OUTBOUNDS.map((b) => ({ value: b.tag, label: b.label })),
+                    ...inheritedOutbounds
+                      .filter(
+                        (o) =>
+                          o.tag !== tmplOutbound.tag &&
+                          outboundOverridesMap[o.tag]?.mode !== 'remap',
+                      )
+                      .map((o) => ({
+                        value: o.tag,
+                        label: `${o.tag}（模板自定义出站 · ${o.protocol}）`,
+                      })),
+                  ]
+
+                  return (
+                    <fieldset
+                      key={tmplOutbound.tag}
+                      disabled={!superAdmin}
+                      className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-3 disabled:opacity-75"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="font-mono font-semibold text-[var(--text)]">
+                            {tmplOutbound.tag}
+                          </span>
+                          <Badge label={tmplOutbound.protocol.toUpperCase()} variant="blue" />
+                          {tmplOutbound.remark && (
+                            <span className="text-soft">{tmplOutbound.remark}</span>
+                          )}
+                        </div>
+                        <Badge
+                          label={
+                            ovMode === 'inherit'
+                              ? '继承模板'
+                              : ovMode === 'remap'
+                                ? `重映射 → ${currentOv?.target_tag || ''}`
+                                : '本节点参数替换'
+                          }
+                          variant={ovMode === 'inherit' ? 'gray' : 'yellow'}
+                        />
+                      </div>
+
+                      <SelectField
+                        label={`出站覆盖模式 · ${tmplOutbound.tag}`}
+                        value={ovMode}
+                        onChange={(nextMode) => {
+                          updateOutboundError(tmplOutbound.tag, '')
+                          if (nextMode === 'inherit') {
+                            updateOutboundOverride(tmplOutbound.tag, undefined)
+                          } else if (nextMode === 'remap') {
+                            updateOutboundOverride(tmplOutbound.tag, {
+                              mode: 'remap',
+                              target_tag: 'direct',
+                            })
+                          } else {
+                            updateOutboundOverride(tmplOutbound.tag, {
+                              mode: 'replace',
+                              outbound: { ...tmplOutbound, tag: tmplOutbound.tag },
+                            })
+                          }
+                        }}
+                        options={[
+                          { value: 'inherit', label: '继承模板参数' },
+                          { value: 'remap', label: '重映射到其他出站（remap）' },
+                          { value: 'replace', label: '自定义本节点参数（replace）' },
+                        ]}
+                      />
+
+                      {ovMode === 'remap' && (
+                        <SelectField
+                          label={`重映射目标出站 · ${tmplOutbound.tag}`}
+                          value={currentOv?.target_tag ?? 'direct'}
+                          onChange={(targetTag) =>
+                            updateOutboundOverride(tmplOutbound.tag, {
+                              mode: 'remap',
+                              target_tag: targetTag,
+                            })
+                          }
+                          options={remapOptions}
+                        />
+                      )}
+
+                      {ovMode === 'replace' && (
+                        <div className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3">
+                          <SingleOutboundFields
+                            outbound={currentOv?.outbound ?? { ...tmplOutbound }}
+                            lockedTag={tmplOutbound.tag}
+                            peerOutboundTags={peerTags}
+                            disabled={disabled || !superAdmin}
+                            onRawErrorChange={(error) => updateOutboundError(tmplOutbound.tag, error)}
+                            onChange={(updatedOutbound) =>
+                              updateOutboundOverride(tmplOutbound.tag, {
+                                mode: 'replace',
+                                outbound: { ...updatedOutbound, tag: tmplOutbound.tag },
+                              })
+                            }
+                          />
+                        </div>
+                      )}
+                    </fieldset>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {(['ipv4_force_domains', 'ipv6_force_domains'] as const).map((key, index) => (
             <DomainOverride
               key={key}
@@ -174,6 +398,14 @@ export function BindingFields({
               onChange={(v) => override(key, v)}
             />
           ))}
+
+          <DnsOverrideSection
+            value={overrides.dns_override as DNSConfigModel | null | undefined}
+            inherited={templatePreview.error ? undefined : base?.policy?.dns}
+            superAdmin={superAdmin}
+            onChange={(v) => override('dns_override', v)}
+          />
+
           {superAdmin && (
             <details>
               <summary className="cursor-pointer text-sm">高级自定义规则</summary>
@@ -202,9 +434,12 @@ export function BindingFields({
   )
 }
 
-import { useState } from 'react'
-import { parseRules } from '@/lib/routing-model'
-function DomainOverride({ family, value, inherited, onChange }: {
+function DomainOverride({
+  family,
+  value,
+  inherited,
+  onChange,
+}: {
   family: string
   value: string[] | null | undefined
   inherited: string[] | undefined
@@ -217,36 +452,55 @@ function DomainOverride({ family, value, inherited, onChange }: {
       <SelectField
         label={`强制 ${family} 域名`}
         value={mode}
-        onChange={(v) => onChange(
-          v === 'inherit' ? undefined : v === 'clear' ? [] : inherited?.length ? [...inherited] : [''],
-        )}
+        onChange={(v) =>
+          onChange(
+            v === 'inherit'
+              ? undefined
+              : v === 'clear'
+                ? []
+                : inherited?.length
+                  ? [...inherited]
+                  : [''],
+          )
+        }
         options={[
           { value: 'inherit', label: '继承模板' },
           { value: 'custom', label: '自定义列表' },
           { value: 'clear', label: '清空规则' },
         ]}
       />
-      {mode === 'inherit' && (inherited ? inherited.length ? (
-        <>
-          <p className="text-xs text-soft">
-            继承模板中的 {inherited.length} 条域名（只读）。需要调整时选择“自定义列表”。
-          </p>
-          <textarea
-            aria-label={`${family} 模板域名`} readOnly rows={Math.min(6, inherited.length)}
-            className={routingControl + ' bg-[var(--panel-muted)]'} value={inherited.join('\n')}
-          />
-        </>
-      ) : (
-        <p className="text-xs text-soft">模板未配置强制 {family} 域名，无需额外设置。</p>
-      ) : (
-        <p className="text-xs text-soft">模板域名尚未加载，请先确认上方的路由来源。</p>
-      ))}
+      {mode === 'inherit' &&
+        (inherited ? (
+          inherited.length ? (
+            <>
+              <p className="text-xs text-soft">
+                继承模板中的 {inherited.length} 条域名（只读）。需要调整时选择“自定义列表”。
+              </p>
+              <textarea
+                aria-label={`${family} 模板域名`}
+                readOnly
+                rows={Math.min(6, inherited.length)}
+                className={routingControl + ' bg-[var(--panel-muted)]'}
+                value={inherited.join('\n')}
+              />
+            </>
+          ) : (
+            <p className="text-xs text-soft">模板未配置强制 {family} 域名，无需额外设置。</p>
+          )
+        ) : (
+          <p className="text-xs text-soft">模板域名尚未加载，请先确认上方的路由来源。</p>
+        ))}
       {mode === 'custom' && (
         <>
-          <p className="text-xs text-soft">仅用于本节点，替换模板中的整组列表；每行一条域名规则。</p>
+          <p className="text-xs text-soft">
+            仅用于本节点，替换模板中的整组列表；每行一条域名规则。
+          </p>
           <textarea
-            aria-label={`${family} 覆盖域名`} aria-invalid={emptyCustom}
-            rows={4} className={routingControl} value={value!.join('\n')}
+            aria-label={`${family} 覆盖域名`}
+            aria-invalid={emptyCustom}
+            rows={4}
+            className={routingControl}
+            value={value!.join('\n')}
             onChange={(e) => onChange(e.target.value.split('\n'))}
           />
           {emptyCustom && (
@@ -265,6 +519,7 @@ function DomainOverride({ family, value, inherited, onChange }: {
     </div>
   )
 }
+
 function RulesOverride({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
   const [raw, setRaw] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -307,5 +562,87 @@ function RulesOverride({ value, onChange }: { value: unknown; onChange: (v: unkn
         </p>
       )}
     </div>
+  )
+}
+
+function DnsOverrideSection({
+  value,
+  inherited,
+  superAdmin,
+  onChange,
+}: {
+  value: DNSConfigModel | null | undefined
+  inherited: DNSConfigModel | null | undefined
+  superAdmin: boolean
+  onChange: (next: DNSConfigModel | undefined) => void
+}) {
+  const mode: 'inherit' | 'disable' | 'custom' =
+    value == null ? 'inherit' : value.enabled === false ? 'disable' : 'custom'
+
+  return (
+    <fieldset
+      disabled={!superAdmin}
+      className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 disabled:opacity-75"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h5 className="text-xs font-semibold text-[var(--text)]">本节点服务端 DNS 覆盖</h5>
+          <p className="mt-0.5 text-xs text-soft">
+            可针对不同地区节点单独关闭自定义 DNS，或替换为当前节点授权的流媒体解锁 DNS IP。
+          </p>
+        </div>
+        {!superAdmin && <Badge label="仅超级管理员可修改" variant="gray" />}
+      </div>
+
+      <SelectField
+        label="本节点 DNS 模式"
+        value={mode}
+        onChange={(nextMode) => {
+          if (nextMode === 'inherit') {
+            onChange(undefined)
+          } else if (nextMode === 'disable') {
+            onChange({ enabled: false })
+          } else {
+            const seed =
+              inherited && inherited.enabled
+                ? (JSON.parse(JSON.stringify(inherited)) as DNSConfigModel)
+                : createDefaultDNSConfig()
+            onChange({ ...seed, enabled: true })
+          }
+        }}
+        options={[
+          { value: 'inherit', label: '继承模板 DNS' },
+          { value: 'disable', label: '本节点关闭自定义 DNS（回退系统解析）' },
+          { value: 'custom', label: '自定义本节点 DNS（独立替换）' },
+        ]}
+      />
+
+      {mode === 'inherit' && (
+        <p className="text-xs text-soft">
+          {inherited?.enabled
+            ? `当前继承模板已启用的自定义 DNS（共 ${inherited.servers?.length ?? 0} 个上游服务器，策略 ${inherited.queryStrategy ?? 'UseIP'}）。`
+            : '当前继承模板未启用自定义 DNS，本节点使用系统默认解析。'}
+        </p>
+      )}
+
+      {mode === 'disable' && (
+        <p className="text-xs text-soft">
+          已为本节点显式关闭服务端自定义 DNS，将回退使用节点系统默认解析，不影响模板与其他节点。
+        </p>
+      )}
+
+      {mode === 'custom' && value && (
+        <div className="rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-3">
+          <DnsEditor
+            dns={value}
+            disabled={!superAdmin}
+            hideEnableToggle
+            onChange={(nextDns) => {
+              if (nextDns) onChange({ ...nextDns, enabled: true })
+            }}
+          />
+        </div>
+      )}
+    </fieldset>
   )
 }

@@ -240,8 +240,8 @@
    - 正则：`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`，模板内不可重复。
    - 严禁等于保留字（`direct`、`block`、`direct-v4`、`direct-v6`、`api`、`api-inbound`、`dns-out`）或匹配托管入站前缀（`vless-reality-*`、`vless-ws-*`、`trojan-*`、`http-proxy-*`、`socks-proxy-*`）。
 3. **协议范围与必填校验**：
-   - 允许协议：`freedom`、`blackhole`、`socks`、`http`、`vless`、`vmess`、`trojan`、`shadowsocks`、`wireguard`、`loopback`（拦截 `dns` 出站，避免误配破坏解析）。
-   - 结构化协议校验：`socks` / `http` / `vless` 校验服务器地址非空且端口为 `1~65535`；`wireguard` 校验 `secretKey` 非空且至少含 1 个有效 `peer`（`endpoint` 含端口、`publicKey` 非空）；`freedom` 若设置 `sendThrough` 必须为合法 IPv4/IPv6 字面量。
+   - 允许协议：`freedom`、`blackhole`、`socks`、`http`、`vless`、`vmess`、`trojan`、`shadowsocks`、`wireguard`（拦截 `dns` 出站以及可绕过受控路由重入管理入站的 `loopback` 出站；同时禁止注入 `redirect`、旧式 `proxySettings` 与 `reverse` 字段）。
+   - 结构化协议校验：`socks` / `http` / `vless` 校验服务器地址非空且端口为 `1~65535`；`wireguard` 校验 `secretKey` 非空、`settings.reserved` 为空或 3 个字节整数，且至少含 1 个有效 `peer`（`endpoint` 含端口、`publicKey` 非空）；`freedom` 若设置 `sendThrough` 必须为合法 IPv4/IPv6 字面量。
 4. **`dialerProxy` 链式代理校验**：
    - 若 `streamSettings.sockopt.dialerProxy` 非空，目标 Tag 必须存在于有效出站集合中（且不能指向 `block` 或 `api`）。
    - 执行有向图环路检测，拦截自指（`A -> A`）与循环依赖（`A -> B -> A`）。
@@ -408,10 +408,10 @@
 1. **Xray 依赖自动补齐（防启动报错）**：
    - 在 Xray-core 中，一旦任一 `balancer` 使用了 `strategy.type == "leastPing"` 或配置了 `fallbackTag`，顶层必须存在 `observatory` 且其 `subjectSelector` 必须覆盖对应候选出站，否则 Xray 进程启动直接失败。
    - **面板智能联动**：当策略中存在 `leastPing` 或 `fallbackTag` 的均衡器时：
-     - 若 `observatory == nil`，`ApplyRoutingPolicy` 自动生成默认 `observatory`：`subjectSelector` 自动汇总相关 `balancer.selector` 去重集合，`probeURL` 取面板系统设置 `xray.probe_url`（未设则用默认 `https://www.gstatic.com/generate_204`），`probeInterval` 默认 `"1m"`，`enableConcurrency: true`。
+     - 若 `observatory == nil`，`ApplyRoutingPolicy` 自动生成默认 `observatory`：`subjectSelector` 自动汇总相关 `balancer.selector` 去重集合，`probeURL` 若面板系统设置 `xray.probe_url` 为合规公网 IP HTTPS URL 则复用，否则默认回退为 `https://1.1.1.1/`，`probeInterval` 默认 `"1m"`，`enableConcurrency: true`。
      - 若管理员显式配置了 `observatory`，校验其 `subjectSelector` 必须完整覆盖所有依赖健康状态的 `balancer.selector` 集合。
 2. **`observatory` 参数安全校验**：
-   - `probeURL`：非空时直接调用 `pkg/ssh.ValidateProbeURL` 校验——强制要求公网 HTTPS（443 端口）、无账号参数、严禁私网/回环 IP，彻底阻断通过 `observatory` 探测面板或节点内网服务的 SSRF 风险。
+   - `probeURL`：调用 `ValidateObservatoryProbeURL`（基于 `pkg/ssh.ValidateProbeURL` 并进一步限定为全球单播公网 IP 字面量的 HTTPS 443 URL）校验——无账号参数、严禁私网/回环/保留 IP 与域名重绑定，彻底阻断通过 `observatory` 或结合 `dns.hosts` 探测面板及节点内网服务的 SSRF 风险。
    - `probeInterval`：校验为合法 Go/Xray 时间段字符串（如 `"30s"`、`"1m"`、`"5m"`），且下限不低于 `10s`、上限不超过 `1h`，防止高频探测打满落地机连接数。
 
 #### 7.2.3 路由规则与节点覆盖的跨模块协同
@@ -439,23 +439,23 @@
 ## 8. 分阶段验收清单（Implementation Checklist）
 
 ### Phase 1：自定义出站 + 路由升级 + 双模式编辑器 + 节点 Tag 覆盖
-- [ ] **Step 1（后端引擎与单测）**
-  - [ ] `internal/xray`：落地 `SchemaVersion: 3` 全量结构体定义（含 Phase 3 预留字段）、`CustomOutbound` / `RoutingRule` 未知字段无损 `Extra` 编解码、面板元数据（`remark` / `disabled`）剥离
-  - [ ] `internal/xray`：实现保留 Tag 锁死、5 类出站校验、`dialerProxy` 环路检测、`geosite:` / `geoip:` / `quic` / `domain_strategy` 校验、引用完整性校验及精细化 `RequiresIPv6()`
-  - [ ] `internal/xray`：升级 `MergeRoutingPolicy` 支持节点 `outbound_overrides`（`replace` / `remap`）
-  - [ ] `internal/xray` & `internal/service`：实现出站敏感字段 `enc:v1:` AES-GCM 加密、密文未改幂等保留、`admin` 角色权限拦截及 `redactConfig` 扩展脱敏
-  - [ ] 通过全部 Go 单元测试与回归测试（`go test ./...`）
-- [ ] **Step 2（前端双模式编辑器与联调）**
-  - [ ] `frontend`：引入 `@codemirror/*` 封装适配主题变量的 `JsonEditor`
-  - [ ] `frontend`：重构 `TemplateEditor` 为 `xl` 宽抽屉，完成「结构化视图 ⇄ 策略 JSON」双向同步、路由瀑布流卡片排序与 5 类自定义出站表单 + 单条 JSON 切换
-  - [ ] `frontend`：扩展 `BindingFields` 支持节点按出站 Tag 覆盖/重映射，补齐前端测试与构建（`npm run lint && npm test && npm run build`）
+- [x] **Step 1（后端引擎与单测）**
+  - [x] `internal/xray`：落地 `SchemaVersion: 3` 全量结构体定义（含 Phase 3 预留字段）、`CustomOutbound` / `RoutingRule` 未知字段无损 `Extra` 编解码、面板元数据（`remark` / `disabled`）剥离
+  - [x] `internal/xray`：实现保留 Tag 锁死、5 类出站校验、`dialerProxy` 环路检测、`geosite:` / `geoip:` / `quic` / `domain_strategy` 校验、引用完整性校验及精细化 `RequiresIPv6()`
+  - [x] `internal/xray`：升级 `MergeRoutingPolicy` 支持节点 `outbound_overrides`（`replace` / `remap`）
+  - [x] `internal/xray` & `internal/service`：实现出站敏感字段 `enc:v1:` AES-GCM 加密、密文未改幂等保留、`admin` 角色权限拦截及 `redactConfig` 扩展脱敏
+  - [x] 通过全部 Go 单元测试与回归测试（`go test ./...`）
+- [x] **Step 2（前端双模式编辑器与联调）**
+  - [x] `frontend`：引入 `@codemirror/*` 封装适配主题变量的 `JsonEditor`
+  - [x] `frontend`：重构 `TemplateEditor` 为 `xl` 宽抽屉，完成「结构化视图 ⇄ 策略 JSON」双向同步、路由瀑布流卡片排序与 5 类自定义出站表单 + 单条 JSON 切换
+  - [x] `frontend`：扩展 `BindingFields` 支持节点按出站 Tag 覆盖/重映射，补齐前端测试与构建（`npm run lint && npm test && npm run build`）
 
 ### Phase 2：场景片段库 + 未发布草稿远端沙箱预检
-- [ ] 后端新增 `POST /api/nodes/:id/preflight-draft`（限 `super_admin`，复用 `lockNode`，礼让活跃部署租约，跑只读 `xray -test`，隔离飞书告警）及接口单测
-- [ ] 前端新增 `routing-snippets.ts`（WARP / 多 IP / 链式落地出站片段 + AI / 流媒体 / Telegram / BT / 广告规则片段）并接入编辑器快捷插入菜单
-- [ ] 前端在 `TemplateEditor` 与 `BindingEditor` 接入「选节点预览合并配置 + 一键远端沙箱预检」面板
+- [x] 后端新增 `POST /api/nodes/:id/preflight-draft`（限 `super_admin`，复用 `lockNode`，礼让活跃部署租约，跑只读 `xray -test`，隔离飞书告警）及接口单测
+- [x] 前端新增 `routing-snippets.ts`（WARP / 多 IP / 链式落地出站片段 + AI / 流媒体 / Telegram / BT / 广告规则片段）并接入编辑器快捷插入菜单
+- [x] 前端在 `TemplateEditor` 与 `BindingEditor` 接入「选节点预览合并配置 + 一键远端沙箱预检」面板
 
 ### Phase 3：服务端 DNS 分流 + 负载均衡与探测
-- [ ] 后端放开 `SchemaVersion: 3` 中的 `dns`、`balancers`、`observatory` 与 `RoutingRule.BalancerTag` 校验及合并渲染
-- [ ] 实现启用 `dns` 时内置 `direct` 出站 `UseIP` 自动联动、`leastPing` / `fallbackTag` 与 `observatory` 自动补齐、`probeURL` SSRF 校验及节点 `dns_override` 合并
-- [ ] 前端抽屉扩展 `负载均衡` 与 `DNS 设置` 两个结构化面板、路由规则目标分组下拉框（Outbounds + Balancers）及节点级 DNS 覆盖控件，完成全量回归测试
+- [x] 后端放开 `SchemaVersion: 3` 中的 `dns`、`balancers`、`observatory` 与 `RoutingRule.BalancerTag` 校验及合并渲染
+- [x] 实现启用 `dns` 时内置 `direct` 出站 `UseIP` 自动联动、`leastPing` / `fallbackTag` 与 `observatory` 自动补齐、`probeURL` SSRF 校验及节点 `dns_override` 合并
+- [x] 前端抽屉扩展 `负载均衡` 与 `DNS 设置` 两个结构化面板、路由规则目标分组下拉框（Outbounds + Balancers）及节点级 DNS 覆盖控件，完成全量回归测试

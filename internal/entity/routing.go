@@ -64,6 +64,7 @@ type NodeConfigState struct {
 	RuntimeAuthorizationHash    string     `json:"-"`
 	LastHealthyRevision         uint       `json:"last_healthy_revision"`
 	LastHealthyPolicy           string     `gorm:"type:text" json:"-"`
+	LastHealthyOverrides        string     `gorm:"type:text" json:"-"`
 	LastHealthyTemplateID       uint       `json:"last_healthy_template_id"`
 	LastHealthyTemplateRevision uint       `json:"last_healthy_template_revision"`
 	VerifiedAt                  *time.Time `json:"verified_at"`
