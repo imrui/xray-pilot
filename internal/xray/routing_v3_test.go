@@ -30,7 +30,7 @@ func TestSchemaV3LosslessExtraAndMetadataStripping(t *testing.T) {
 					"sockopt": {"dialerProxy": "direct-v4", "tcpKeepAliveInterval": 30}
 				},
 				"mux": {"enabled": true, "concurrency": 8},
-				"proxySettings": {"tag": "legacy-compat"}
+				"targetStrategy": "UseIP"
 			},
 			{
 				"tag": "unused-outbound",
@@ -75,7 +75,7 @@ func TestSchemaV3LosslessExtraAndMetadataStripping(t *testing.T) {
 	roundTrip := string(roundTripBytes)
 	for _, want := range []string{
 		`"香港落地出口"`,
-		`"proxySettings"`,
+		`"targetStrategy"`,
 		`"tcpKeepAliveInterval"`,
 		`"uot":true`,
 		`"ruleTag":"ai-rule"`,
@@ -102,7 +102,7 @@ func TestSchemaV3LosslessExtraAndMetadataStripping(t *testing.T) {
 	for _, expected := range []string{
 		`"domainStrategy": "IPOnDemand"`,
 		`"sendThrough": "203.0.113.5"`,
-		`"proxySettings"`,
+		`"targetStrategy"`,
 		`"tcpKeepAliveInterval": 30`,
 		`"concurrency": 8`,
 		`"ruleTag": "ai-rule"`,
@@ -501,7 +501,7 @@ func TestPhase3DNSBalancersObservatoryAndCrossModuleMerge(t *testing.T) {
 	// 2. 验证 leastPing 自动补齐 observatory，使用系统探针 URL，并拉入候选出站及 fallbackTag (direct-v4)
 	for _, want := range []string{
 		`"observatory"`,
-		`"https://cp.cloudflare.com/generate_204"`,
+		`"https://1.1.1.1/"`,
 		`"probeInterval": "1m"`,
 		`"balancerTag": "unlock-pool"`,
 		`"hk-landing"`,

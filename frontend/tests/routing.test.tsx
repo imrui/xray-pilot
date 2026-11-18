@@ -1,8 +1,9 @@
 import './dom-setup.mjs'
 import React from 'react'
+import { readFileSync } from 'node:fs'
 import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup, within, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route, Outlet } from 'react-router-dom'
 import { ConfirmProvider } from '../src/components/ui/ConfirmProvider'
@@ -14,6 +15,7 @@ import { Btn } from '../src/components/ui/Form'
 import { Drawer } from '../src/components/ui/Drawer'
 import { TemplateNodes, TemplateEditor } from '../src/components/routing/Templates'
 import { RoutingBindingDrawer } from '../src/components/routing/BindingEditor'
+import { DraftPreflightModal } from '../src/components/routing/DraftPreflightModal'
 import { SyncHistory } from '../src/components/routing/SyncTools'
 import { submitNodeSync } from '../src/lib/node-sync'
 import { requestID } from '../src/lib/request-id'
@@ -22,11 +24,12 @@ import request from '../src/lib/axios'
 import {
   emptyPolicy,
   configConfirmed,
+  isValidObservatoryProbeURL,
   normalizeBinding,
   upgradeRoutingPolicy,
   requiresIPv6,
 } from '../src/lib/routing-model'
-import type { RoutingBinding, RoutingTemplate } from '../src/lib/routing-model'
+import type { RoutingBinding, RoutingPolicy, RoutingTemplate } from '../src/lib/routing-model'
 
 const template: RoutingTemplate = {
   id: 1,
@@ -157,6 +160,204 @@ afterEach(() => {
   cleanup()
   clients.forEach((c) => c.clear())
   clients = []
+})
+
+test('卡片调序与同模式点击保留当前对象、JSON 草稿及未知字段', () => {
+  api()
+  const a = { type: 'field', domain: ['domain:a.test'], outboundTag: 'direct', attrs: { ':method': 'GET' } }
+  const b = { type: 'field', domain: ['domain:b.test'], outboundTag: 'block' }
+  mount(<TemplateEditor template={{ ...template, draft: JSON.stringify({ ...emptyPolicy, custom_rules: [a, b] }) }} onClose={() => {}} onConfigure={() => {}} />)
+  fireEvent.change(screen.getByLabelText('规则 #1 备注'), { target: { value: 'edited' } })
+  fireEvent.click(screen.getAllByRole('button', { name: '表单' })[0])
+  assert.equal((screen.getByLabelText('规则 #1 备注') as HTMLInputElement).value, 'edited')
+  fireEvent.click(screen.getAllByRole('button', { name: 'JSON' })[0])
+  fireEvent.click(screen.getByRole('button', { name: '下移规则 #1' }))
+  assert.deepEqual(JSON.parse((screen.getByLabelText('规则 #2 JSON') as HTMLTextAreaElement).value).domain, a.domain)
+  fireEvent.click(screen.getAllByRole('button', { name: '表单' })[1])
+  fireEvent.click(screen.getByRole('tab', { name: '策略 JSON 源码' }))
+  const policy = JSON.parse((screen.getByLabelText('策略 JSON 源码') as HTMLTextAreaElement).value)
+  assert.deepEqual(policy.custom_rules, [b, { ...a, remark: 'edited' }])
+})
+
+test('无效规则 JSON 调序及切换功能页后仍保留，阻止保存与全局 JSON 切换', async () => {
+  api()
+  const rules = [
+    { type: 'field', domain: ['domain:a.test'], outboundTag: 'direct' },
+    { type: 'field', domain: ['domain:b.test'], outboundTag: 'block' },
+  ]
+  mount(<TemplateEditor template={{ ...template, draft: JSON.stringify({ ...emptyPolicy, custom_rules: rules }) }} onClose={() => {}} onConfigure={() => {}} />)
+  fireEvent.click(screen.getAllByRole('button', { name: 'JSON' })[0])
+  fireEvent.change(screen.getByLabelText('规则 #1 JSON'), { target: { value: '{"domain":' } })
+  fireEvent.click(screen.getByRole('button', { name: '下移规则 #1' }))
+  fireEvent.click(screen.getByRole('tab', { name: /自定义出站/ }))
+  fireEvent.click(screen.getByRole('tab', { name: /路由规则/ }))
+  assert.equal((screen.getByLabelText('规则 #2 JSON') as HTMLTextAreaElement).value, '{"domain":')
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText(/存在尚未修正的单条 JSON/)
+  assert.equal(calls.some((c) => c.method === 'patch'), false)
+  fireEvent.click(screen.getByRole('tab', { name: '策略 JSON 源码' }))
+  assert.equal(screen.queryByLabelText('策略 JSON 源码'), null)
+  fireEvent.change(screen.getByLabelText('规则 #2 JSON'), { target: { value: JSON.stringify(rules[0]) } })
+  fireEvent.click(screen.getByRole('tab', { name: '策略 JSON 源码' }))
+  assert.ok(screen.getByLabelText('策略 JSON 源码'))
+})
+
+test('删除前方出站不串用后方卡片 JSON，修复后表单与保存保持一致', async () => {
+  api((_method, _url, body) => body.draft ? { ...template, draft: JSON.stringify(body.draft), version: 5 } : undefined)
+  const first = { tag: 'first', protocol: 'socks', settings: { servers: [{ address: 'a.test', port: 1080 }] } }
+  const second = { tag: 'second', protocol: 'socks', mux: { enabled: false }, settings: { servers: [{ address: 'b.test', port: 1080 }] } }
+  mount(<TemplateEditor template={{ ...template, draft: JSON.stringify({ ...emptyPolicy, custom_outbounds: [first, second] }) }} onClose={() => {}} onConfigure={() => {}} />)
+  fireEvent.click(screen.getByRole('tab', { name: /自定义出站/ }))
+  fireEvent.change(screen.getAllByLabelText('落地服务器地址 *')[0], { target: { value: 'edited.test' } })
+  fireEvent.click(screen.getAllByRole('button', { name: '表单' })[0])
+  assert.equal((screen.getAllByLabelText('落地服务器地址 *')[0] as HTMLInputElement).value, 'edited.test')
+  fireEvent.click(screen.getAllByRole('button', { name: 'JSON' })[1])
+  fireEvent.change(screen.getByLabelText('自定义出站 second JSON'), { target: { value: '{"tag":' } })
+  fireEvent.click(screen.getAllByRole('button', { name: '删除' })[0])
+  assert.equal((screen.getByLabelText('自定义出站 second JSON') as HTMLTextAreaElement).value, '{"tag":')
+  fireEvent.change(screen.getByLabelText('自定义出站 second JSON'), { target: { value: JSON.stringify(second) } })
+  fireEvent.click(screen.getByRole('button', { name: '表单' }))
+  assert.equal((screen.getByLabelText('落地服务器地址 *') as HTMLInputElement).value, 'b.test')
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText('草稿已保存。')
+  const saved = calls.find((c) => c.method === 'patch')!.data as { draft: { custom_outbounds: unknown[] } }
+  assert.deepEqual(saved.draft.custom_outbounds, [second])
+})
+
+test('WireGuard Reserved 校验三个字节并写入 settings，保留未知参数', async () => {
+  api((_method, _url, body) => body.draft ? { ...template, draft: JSON.stringify(body.draft), version: 5 } : undefined)
+  const outbound = { tag: 'warp', protocol: 'wireguard', settings: { secretKey: 'key', address: ['172.16.0.2/32'], peers: [{ endpoint: 'warp.test:2408', publicKey: 'public', keepAlive: 25 }], noKernelTun: true } }
+  mount(<TemplateEditor template={{ ...template, draft: JSON.stringify({ ...emptyPolicy, custom_outbounds: [outbound] }) }} onClose={() => {}} onConfigure={() => {}} />)
+  fireEvent.click(screen.getByRole('tab', { name: /自定义出站/ }))
+  const field = screen.getByLabelText('WARP Reserved（可选，如 0,0,0）')
+  for (const value of ['1,2', '1,2,256', '1,2,-1', '1,,3', '1,2,3.5']) {
+    fireEvent.change(field, { target: { value } })
+    assert.ok(screen.getByText(/Reserved 必须是 3 个/))
+  }
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText(/存在尚未修正/)
+  assert.equal(calls.some((c) => c.method === 'patch'), false)
+  fireEvent.change(field, { target: { value: '1,2,3' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText('草稿已保存。')
+  const saved = calls.find((c) => c.method === 'patch')!.data as { draft: { custom_outbounds: typeof outbound[] } }
+  assert.deepEqual(saved.draft.custom_outbounds[0].settings, { ...outbound.settings, reserved: [1, 2, 3] })
+})
+
+test('已保存节点覆盖的无效 JSON 计入 dirty，阻止保存、影响预览和沙箱，修正后可保存', async () => {
+  const outbound = { tag: 'proxy', protocol: 'socks', settings: { servers: [{ address: 'old.test', port: 1080 }] } }
+  api((method, url) => {
+    if (method === 'get' && url.endsWith('/routing')) return { ...binding, overrides: JSON.stringify({ outbound_overrides: { proxy: { mode: 'replace', outbound } } }) }
+    if (url.endsWith('/template-preview')) return { ...overview.nodes[0].routing, policy: { ...emptyPolicy, custom_outbounds: [outbound] } }
+  })
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  await screen.findByLabelText('出站覆盖模式 · proxy')
+  fireEvent.click(screen.getByRole('button', { name: 'JSON' }))
+  fireEvent.change(screen.getByLabelText('自定义出站 proxy JSON'), { target: { value: '{"tag":' } })
+  assert.ok(screen.getByRole('button', { name: '放弃本节修改' }))
+  for (const name of ['保存路由', '查看影响范围', '沙箱预检']) {
+    const button = screen.getByRole('button', { name }) as HTMLButtonElement
+    assert.equal(button.disabled, true)
+    fireEvent.click(button)
+  }
+  assert.equal(calls.some((c) => c.method === 'put' || c.url.endsWith('/preflight-draft') || c.url.endsWith('/routing/preview')), false)
+  fireEvent.click(screen.getByRole('button', { name: '关闭', exact: true }))
+  await screen.findByText('放弃未保存的路由修改？')
+  fireEvent.click(screen.getByRole('button', { name: '继续编辑' }))
+  const updated = { ...outbound, settings: { servers: [{ address: 'new.test', port: 1080 }] } }
+  fireEvent.change(screen.getByLabelText('自定义出站 proxy JSON'), { target: { value: JSON.stringify(updated) } })
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await waitFor(() => assert.ok(calls.find((c) => c.method === 'put')))
+  const saved = JSON.parse((calls.find((c) => c.method === 'put')!.data as RoutingBinding).overrides)
+  assert.deepEqual(saved.outbound_overrides.proxy.outbound, updated)
+})
+
+test('继承模板刷新移除出站后，清理失效覆盖同时解除该卡片的错误状态', async () => {
+  const outbound = { tag: 'proxy', protocol: 'socks', settings: { servers: [{ address: 'old.test', port: 1080 }] } }
+  api((method, url) => {
+    if (method === 'get' && url.endsWith('/routing')) return { ...binding, overrides: JSON.stringify({ outbound_overrides: { proxy: { mode: 'replace', outbound } } }) }
+    if (url.endsWith('/template-preview')) return { ...overview.nodes[0].routing, policy: { ...emptyPolicy, custom_outbounds: [outbound] } }
+  })
+  mount(<RoutingBindingDrawer scope="node" id={1} name="lab-1" onClose={() => {}} />)
+  await screen.findByLabelText('出站覆盖模式 · proxy')
+  fireEvent.click(screen.getByRole('button', { name: 'JSON' }))
+  fireEvent.change(screen.getByLabelText('自定义出站 proxy JSON'), { target: { value: '{"tag":' } })
+  assert.equal((screen.getByRole('button', { name: '保存路由' }) as HTMLButtonElement).disabled, true)
+  await act(async () => {
+    clients[0].setQueryData(['routing-template-preview', 1, 'inherit', 0, 0], {
+      ...overview.nodes[0].routing,
+      policy: emptyPolicy,
+    })
+  })
+  await screen.findByText(/检测到失效的节点出站覆盖/)
+  fireEvent.click(screen.getByRole('button', { name: '清理失效出站覆盖' }))
+  assert.equal(screen.queryByText(/节点出站仍有未完成或无效的输入/), null)
+  assert.equal((screen.getByRole('button', { name: '保存路由' }) as HTMLButtonElement).disabled, false)
+  fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+  await waitFor(() => assert.ok(calls.find((c) => c.method === 'put')))
+  assert.deepEqual(JSON.parse((calls.find((c) => c.method === 'put')!.data as RoutingBinding).overrides), {})
+})
+
+test('预检请求固定输入，关闭重开隔离旧响应，修改覆盖条件清除旧结果', async () => {
+  const responses: ((v: unknown) => void)[] = []
+  api((method, url) => method === 'post' && url.endsWith('/preflight-draft') ? new Promise((resolve) => responses.push(resolve)) : undefined)
+  function Harness() {
+    const [open, setOpen] = React.useState(true)
+    return <><button onClick={() => setOpen(true)}>重新打开预检</button><DraftPreflightModal open={open} onClose={() => setOpen(false)} nodes={overview.nodes} getDraftPolicy={() => emptyPolicy} draftIdentity="draft-1" /></>
+  }
+  mount(<Harness />)
+  fireEvent.click(screen.getByRole('button', { name: '运行远端沙箱预检' }))
+  await waitFor(() => assert.equal(responses.length, 1))
+  const select = screen.getByLabelText('选择沙箱验证节点') as HTMLSelectElement
+  assert.equal(select.matches(':disabled'), true)
+  fireEvent.change(select, { target: { value: '2' } })
+  assert.equal(select.value, '1')
+  fireEvent.click(screen.getByRole('button', { name: '关闭对话框' }))
+  fireEvent.click(screen.getByRole('button', { name: '重新打开预检' }))
+  fireEvent.change(screen.getByLabelText('选择沙箱验证节点'), { target: { value: '2' } })
+  fireEvent.click(screen.getByRole('button', { name: '运行远端沙箱预检' }))
+  await waitFor(() => assert.equal(responses.length, 2))
+  const result = { valid: true, requires_ipv6: false, elapsed_ms: 1, warnings: [], redacted_config: '{}', error: '' }
+  await act(async () => { responses[0]({ ...result, xray_version: 'node-A' }) })
+  assert.equal(screen.queryByText('Xray node-A'), null)
+  assert.equal(screen.queryByText('远端 Xray 沙箱预检通过'), null)
+  await act(async () => { responses[1]({ ...result, xray_version: 'node-B' }) })
+  await screen.findByText('Xray node-B')
+  fireEvent.click(screen.getByRole('switch'))
+  assert.equal(screen.queryByText('远端 Xray 沙箱预检通过'), null)
+  const sent = calls.filter((c) => c.url.endsWith('/preflight-draft'))
+  assert.deepEqual(sent.map((c) => c.url), ['/nodes/1/preflight-draft', '/nodes/2/preflight-draft'])
+})
+
+test('预检中的策略变化取消旧会话，迟到响应不会恢复成功状态', async () => {
+  let finish: ((v: unknown) => void) | undefined
+  api((method, url) => method === 'post' && url.endsWith('/preflight-draft') ? new Promise((resolve) => { finish = resolve }) : undefined)
+  function Harness() {
+    const [identity, setIdentity] = React.useState('before')
+    return <><button onClick={() => setIdentity('after')}>修改草稿</button><DraftPreflightModal open onClose={() => {}} nodes={overview.nodes} draftIdentity={identity} getDraftPolicy={() => emptyPolicy} /></>
+  }
+  mount(<Harness />)
+  fireEvent.click(screen.getByRole('button', { name: '运行远端沙箱预检' }))
+  await waitFor(() => assert.ok(finish))
+  fireEvent.click(screen.getByText('修改草稿'))
+  await act(async () => { finish!({ valid: true, xray_version: 'old-draft', requires_ipv6: false, elapsed_ms: 1, warnings: [], redacted_config: '{}', error: '' }) })
+  assert.equal(screen.queryByText('远端 Xray 沙箱预检通过'), null)
+  assert.equal((screen.getByRole('button', { name: '运行远端沙箱预检' }) as HTMLButtonElement).disabled, false)
+})
+
+test('DNS 服务器调序保留对应卡片编辑缓冲与未知字段', () => {
+  api()
+  const first = { address: '1.1.1.1', domains: ['domain:a.test'], timeoutMs: 3000 }
+  const second = { address: '8.8.8.8', domains: ['domain:b.test'] }
+  mount(<TemplateEditor template={{ ...template, draft: JSON.stringify({ ...emptyPolicy, dns: { enabled: true, servers: [first, second] } }) }} onClose={() => {}} onConfigure={() => {}} />)
+  fireEvent.click(screen.getByRole('tab', { name: /DNS 设置/ }))
+  fireEvent.change(screen.getByLabelText('DNS #1 匹配域名'), { target: { value: 'domain:edited.test\n' } })
+  fireEvent.click(screen.getByRole('button', { name: '下移 DNS #1' }))
+  assert.equal((screen.getByLabelText('DNS #1 匹配域名') as HTMLTextAreaElement).value, 'domain:b.test')
+  assert.equal((screen.getByLabelText('DNS #2 匹配域名') as HTMLTextAreaElement).value, 'domain:edited.test\n')
+  fireEvent.click(screen.getByRole('tab', { name: '策略 JSON 源码' }))
+  const policy = JSON.parse((screen.getByLabelText('策略 JSON 源码') as HTMLTextAreaElement).value)
+  assert.deepEqual(policy.dns.servers, [second, { ...first, domains: ['domain:edited.test'] }])
 })
 
 test('路由页采用列表和抽屉，不提供节点同步入口', async () => {
@@ -1071,4 +1272,61 @@ test('节点路由绑定抽屉支持本节点服务端 DNS 三态覆盖（继承
   const secondSaved = JSON.parse((putCalls[putCalls.length - 1].data as RoutingBinding).overrides)
   assert.equal(secondSaved.dns_override.enabled, true)
   assert.deepEqual(secondSaved.dns_override.servers, ['9.9.9.9'])
+})
+
+test('前端 requiresIPv6 与后端共享测试集保持逐项一致', () => {
+  const raw = readFileSync(
+    new URL('../../internal/xray/testdata/ipv6_parity_cases.json', import.meta.url),
+    'utf8',
+  )
+  const cases = JSON.parse(raw) as { name: string; want: boolean; policy: RoutingPolicy }[]
+  assert.ok(cases.length >= 12)
+  for (const tc of cases) {
+    assert.equal(
+      requiresIPv6(tc.policy),
+      tc.want,
+      `case ${tc.name} mismatch: expected ${tc.want}`,
+    )
+  }
+
+  // 自动生成的 Observatory 继承 IPv6 默认探针与非公网/非 443 回退均与后端完全一致
+  const autoObsPolicy: RoutingPolicy = {
+    schema_version: 3,
+    ipv4_force_domains: [],
+    ipv6_force_domains: [],
+    ipv6_failure_policy: 'strict',
+    balancers: [{ tag: 'pool', selector: ['direct-v4'], strategy: { type: 'leastPing' } }],
+    custom_rules: [{ type: 'field', port: '443', balancerTag: 'pool' }],
+  }
+  assert.equal(requiresIPv6(autoObsPolicy), false)
+  assert.equal(requiresIPv6(autoObsPolicy, 'https://[2606:4700:4700::1111]/'), true)
+  assert.equal(requiresIPv6(autoObsPolicy, 'https://[2606:4700:4700::1111]:443/probe'), true)
+
+  const urlCases = JSON.parse(
+    readFileSync(
+      new URL('../../internal/xray/testdata/observatory_url_cases.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { valid: string[]; invalid: string[] }
+  for (const validURL of urlCases.valid) {
+    assert.equal(isValidObservatoryProbeURL(validURL), true, `expected valid probe URL: ${validURL}`)
+    assert.equal(
+      requiresIPv6(autoObsPolicy, validURL),
+      validURL.includes('['),
+      `expected requiresIPv6 parity for valid probe URL: ${validURL}`,
+    )
+  }
+  for (const invalidURL of urlCases.invalid) {
+    assert.equal(
+      isValidObservatoryProbeURL(invalidURL),
+      false,
+      `expected invalid probe URL: ${invalidURL}`,
+    )
+    // 任何不合法探针（含 ULA fc00::/7、文档前缀 2001:db8::/32、NAT64 64:ff9b::/96、非 443 端口）必须回退到安全 IPv4 默认值
+    assert.equal(
+      requiresIPv6(autoObsPolicy, invalidURL),
+      false,
+      `invalid probe URL ${invalidURL} must fall back to IPv4 default`,
+    )
+  }
 })

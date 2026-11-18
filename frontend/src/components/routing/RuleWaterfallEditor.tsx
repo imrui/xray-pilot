@@ -14,6 +14,7 @@ import { Btn, Field, FieldGroup, SelectField, Switch } from '@/components/ui/For
 import { Modal } from '@/components/ui/Modal'
 import { JsonEditor } from '@/components/ui/JsonEditor'
 import { RULE_SNIPPETS } from '@/lib/routing-snippets'
+import { editorItemKey, retainEditorItemKey } from '@/lib/routing-editor'
 import type { RuleSnippet } from '@/lib/routing-snippets'
 import {
   BUILTIN_OUTBOUNDS,
@@ -144,7 +145,9 @@ function SingleRuleCard({
   onRawErrorChange: (err: string) => void
 }) {
   const [mode, setMode] = useState<'form' | 'json'>('form')
-  const [rawText, setRawText] = useState(() => JSON.stringify(rule, null, 2))
+  const [rawDraft, setRawDraft] = useState<{ text: string; source: string } | null>(null)
+  const serialized = JSON.stringify(rule)
+  const rawText = rawDraft?.source === serialized ? rawDraft.text : JSON.stringify(rule, null, 2)
   const [rawError, setRawError] = useState('')
   const [domainDraft, setDomainDraft] = useState<string | null>(null)
   const [ipDraft, setIpDraft] = useState<string | null>(null)
@@ -161,8 +164,9 @@ function SingleRuleCard({
     : (rule.outboundTag ?? 'direct')
 
   const switchMode = (target: 'form' | 'json') => {
+    if (target === mode) return
     if (target === 'json') {
-      setRawText(JSON.stringify(rule, null, 2))
+      setRawDraft(null)
       setRawError('')
       onRawErrorChange('')
       setMode('json')
@@ -219,7 +223,7 @@ function SingleRuleCard({
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
-        <div className="flex flex-wrap items-center gap-2">
+        <fieldset disabled={disabled || mode === 'json'} className="flex flex-wrap items-center gap-2">
           <Badge label={`#${index + 1}`} variant={enabled ? 'blue' : 'gray'} />
           <div className="flex items-center gap-1.5 text-xs">
             <Switch
@@ -246,7 +250,7 @@ function SingleRuleCard({
             }}
             className="h-8 w-52 rounded border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 text-xs text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none"
           />
-        </div>
+        </fieldset>
 
         <div className="flex items-center gap-1.5">
           <div className="inline-flex rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-0.5 text-xs">
@@ -255,7 +259,7 @@ function SingleRuleCard({
               onClick={() => switchMode('form')}
               className={`inline-flex items-center gap-1 rounded px-2 py-1 font-medium transition ${
                 mode === 'form'
-                  ? 'bg-[var(--accent)] text-white'
+                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                   : 'text-soft hover:text-[var(--text)]'
               }`}
             >
@@ -267,7 +271,7 @@ function SingleRuleCard({
               onClick={() => switchMode('json')}
               className={`inline-flex items-center gap-1 rounded px-2 py-1 font-medium transition ${
                 mode === 'json'
-                  ? 'bg-[var(--accent)] text-white'
+                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                   : 'text-soft hover:text-[var(--text)]'
               }`}
             >
@@ -298,7 +302,7 @@ function SingleRuleCard({
             aria-label={`删除规则 #${index + 1}`}
             disabled={disabled}
             onClick={onDelete}
-            className="rounded border border-[var(--danger-border)] bg-[var(--danger-soft)] p-1.5 text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white disabled:opacity-40"
+            className="rounded border border-[var(--danger-border)] bg-[var(--danger-soft)] p-1.5 text-[var(--danger)] hover:bg-[var(--danger)] hover:text-[var(--danger-contrast)] disabled:opacity-40"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -458,13 +462,15 @@ function SingleRuleCard({
             readOnly={disabled}
             minHeight="160px"
             onChange={(text) => {
-              setRawText(text)
               try {
                 const parsed = parseSingleObject<RoutingRuleItem>(text, '路由规则')
+                const next = { type: 'field', ...parsed }
+                setRawDraft({ text, source: JSON.stringify(next) })
                 setRawError('')
                 onRawErrorChange('')
-                onChange({ type: 'field', ...parsed })
+                onChange(next)
               } catch (e) {
+                setRawDraft({ text, source: serialized })
                 const msg = (e as Error).message
                 setRawError(msg)
                 onRawErrorChange(msg)
@@ -550,8 +556,6 @@ export function RuleWaterfallEditor({
     const next = [...rules]
     const [moved] = next.splice(index, 1)
     next.splice(target, 0, moved)
-    setRuleErrors({})
-    onPendingErrorChange?.(false)
     onRulesChange(next)
   }
 
@@ -644,7 +648,7 @@ export function RuleWaterfallEditor({
           <div className="space-y-3">
             {rules.map((rule, idx) => (
               <SingleRuleCard
-                key={idx}
+                key={editorItemKey(rule)}
                 rule={rule}
                 index={idx}
                 total={rules.length}
@@ -653,13 +657,13 @@ export function RuleWaterfallEditor({
                 disabled={disabled}
                 onMove={(delta) => moveRule(idx, delta)}
                 onDelete={() => {
-                  updateRuleError(idx, '')
+                  updateRuleError(editorItemKey(rule), '')
                   onRulesChange(rules.filter((_, i) => i !== idx))
                 }}
-                onRawErrorChange={(err) => updateRuleError(idx, err)}
+                onRawErrorChange={(err) => updateRuleError(editorItemKey(rule), err)}
                 onChange={(updated) => {
                   const next = [...rules]
-                  next[idx] = updated
+                  next[idx] = retainEditorItemKey(rule, updated)
                   onRulesChange(next)
                 }}
               />

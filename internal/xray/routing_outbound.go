@@ -52,7 +52,6 @@ var allowedOutboundProtocols = map[string]bool{
 	"trojan":      true,
 	"shadowsocks": true,
 	"wireguard":   true,
-	"loopback":    true,
 }
 
 // CustomOutbound 表示策略模板中的自定义出站配置，支持保留未知高级字段。
@@ -69,7 +68,8 @@ type CustomOutbound struct {
 
 // BalancerStrategy 预留给 Phase 3 负载均衡模块。
 type BalancerStrategy struct {
-	Type string `json:"type,omitempty"`
+	Type  string                     `json:"type,omitempty"`
+	Extra map[string]json.RawMessage `json:"-"`
 }
 
 // Balancer 预留给 Phase 3 负载均衡模块。
@@ -208,6 +208,9 @@ func normalizeRawMessage(raw json.RawMessage) json.RawMessage {
 }
 
 func (c *CustomOutbound) UnmarshalJSON(data []byte) error {
+	if err := validateOutboundJSONKeys(data); err != nil {
+		return err
+	}
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(data, &rawMap); err != nil {
 		return err
@@ -445,6 +448,9 @@ func validateCustomOutbound(co CustomOutbound) error {
 		return err
 	}
 	if !allowedOutboundProtocols[co.Protocol] {
+		if co.Protocol == "loopback" {
+			return fmt.Errorf("不允许 loopback 出站重入托管入站")
+		}
 		if co.Protocol == "dns" {
 			return fmt.Errorf("不允许自定义 dns 出站，服务端 DNS 将通过顶层 dns 模块管控")
 		}
@@ -468,10 +474,26 @@ func validateCustomOutbound(co CustomOutbound) error {
 	if err := checkOutboundSecretsValid(co); err != nil {
 		return err
 	}
+	// 这些字段可绕过路由保护或受控引用图；配置不得经原始 JSON 重新引入。
+	for _, raw := range []json.RawMessage{co.Settings, co.StreamSettings, co.Mux} {
+		if err := validateOutboundJSONKeys(raw); err != nil {
+			return err
+		}
+	}
+	for key, raw := range co.Extra {
+		if isUnsafeOutboundField(key) {
+			return fmt.Errorf("自定义出站不允许字段 %s", key)
+		}
+		if err := validateOutboundJSONKeys(raw); err != nil {
+			return err
+		}
+	}
 
 	switch co.Protocol {
 	case "socks", "http":
 		var cfg struct {
+			Address string `json:"address"`
+			Port    int    `json:"port"`
 			Servers []struct {
 				Address string `json:"address"`
 				Port    int    `json:"port"`
@@ -481,8 +503,23 @@ func validateCustomOutbound(co CustomOutbound) error {
 				} `json:"users"`
 			} `json:"servers"`
 		}
-		if len(co.Settings) == 0 || json.Unmarshal(co.Settings, &cfg) != nil || len(cfg.Servers) == 0 {
+		if len(co.Settings) == 0 || json.Unmarshal(co.Settings, &cfg) != nil {
 			return fmt.Errorf("%s 出站必须配置非空 settings.servers", co.Protocol)
+		}
+		if cfg.Address != "" {
+			if len(cfg.Servers) > 0 {
+				return fmt.Errorf("%s 出站不能同时配置 settings.address 简写与 servers", co.Protocol)
+			}
+			if err := validateHostAddress(cfg.Address); err != nil {
+				return err
+			}
+			if err := validatePortRange(cfg.Port); err != nil {
+				return err
+			}
+			break
+		}
+		if len(cfg.Servers) == 0 {
+			return fmt.Errorf("%s 出站必须配置 settings.address 或非空 settings.servers", co.Protocol)
 		}
 		for i, srv := range cfg.Servers {
 			if err := validateHostAddress(srv.Address); err != nil {
@@ -494,7 +531,10 @@ func validateCustomOutbound(co CustomOutbound) error {
 		}
 	case "vless":
 		var cfg struct {
-			Vnext []struct {
+			Address string `json:"address"`
+			Port    int    `json:"port"`
+			ID      string `json:"id"`
+			Vnext   []struct {
 				Address string `json:"address"`
 				Port    int    `json:"port"`
 				Users   []struct {
@@ -502,8 +542,26 @@ func validateCustomOutbound(co CustomOutbound) error {
 				} `json:"users"`
 			} `json:"vnext"`
 		}
-		if len(co.Settings) == 0 || json.Unmarshal(co.Settings, &cfg) != nil || len(cfg.Vnext) == 0 {
+		if len(co.Settings) == 0 || json.Unmarshal(co.Settings, &cfg) != nil {
 			return fmt.Errorf("vless 出站必须配置非空 settings.vnext")
+		}
+		if cfg.Address != "" {
+			if len(cfg.Vnext) > 0 {
+				return fmt.Errorf("vless 出站不能同时配置 settings.address 简写与 vnext")
+			}
+			if err := validateHostAddress(cfg.Address); err != nil {
+				return err
+			}
+			if err := validatePortRange(cfg.Port); err != nil {
+				return err
+			}
+			if strings.TrimSpace(cfg.ID) == "" {
+				return fmt.Errorf("vless settings.id 不能为空")
+			}
+			break
+		}
+		if len(cfg.Vnext) == 0 {
+			return fmt.Errorf("vless 出站必须配置 settings.address 或非空 settings.vnext")
 		}
 		for i, vn := range cfg.Vnext {
 			if err := validateHostAddress(vn.Address); err != nil {
@@ -523,11 +581,13 @@ func validateCustomOutbound(co CustomOutbound) error {
 		}
 	case "wireguard":
 		var cfg struct {
-			SecretKey string `json:"secretKey"`
+			SecretKey string          `json:"secretKey"`
+			Reserved  json.RawMessage `json:"reserved"`
 			Peers     []struct {
-				Endpoint     string `json:"endpoint"`
-				PublicKey    string `json:"publicKey"`
-				PreSharedKey string `json:"preSharedKey"`
+				Endpoint     string          `json:"endpoint"`
+				PublicKey    string          `json:"publicKey"`
+				PreSharedKey string          `json:"preSharedKey"`
+				Reserved     json.RawMessage `json:"reserved"`
 			} `json:"peers"`
 		}
 		if len(co.Settings) == 0 || json.Unmarshal(co.Settings, &cfg) != nil {
@@ -536,10 +596,24 @@ func validateCustomOutbound(co CustomOutbound) error {
 		if strings.TrimSpace(cfg.SecretKey) == "" {
 			return fmt.Errorf("wireguard 出站 secretKey 不能为空")
 		}
+		if len(cfg.Reserved) > 0 {
+			var reserved []int
+			if err := json.Unmarshal(cfg.Reserved, &reserved); err != nil || len(reserved) != 0 && len(reserved) != 3 {
+				return fmt.Errorf("wireguard settings.reserved 必须为空数组或 3 个 0~255 的整数")
+			}
+			for _, value := range reserved {
+				if value < 0 || value > 255 {
+					return fmt.Errorf("wireguard settings.reserved 必须为空数组或 3 个 0~255 的整数")
+				}
+			}
+		}
 		if len(cfg.Peers) == 0 {
 			return fmt.Errorf("wireguard 出站至少需要配置 1 个 peer")
 		}
 		for i, peer := range cfg.Peers {
+			if len(peer.Reserved) > 0 {
+				return fmt.Errorf("peers[%d].reserved 不受支持，请移至 settings.reserved", i)
+			}
 			if strings.TrimSpace(peer.PublicKey) == "" {
 				return fmt.Errorf("peers[%d]: publicKey 不能为空", i)
 			}
@@ -687,64 +761,6 @@ func isIPv6Literal(addr string) bool {
 	return ip != nil && ip.To4() == nil
 }
 
-func outboundRequiresIPv6(co CustomOutbound) bool {
-	if co.SendThrough != "" && isIPv6Literal(co.SendThrough) {
-		return true
-	}
-	if len(co.Settings) == 0 {
-		return false
-	}
-	switch co.Protocol {
-	case "freedom":
-		var cfg struct {
-			DomainStrategy string `json:"domainStrategy"`
-		}
-		if json.Unmarshal(co.Settings, &cfg) == nil && cfg.DomainStrategy == "ForceIPv6" {
-			return true
-		}
-	case "socks", "http", "trojan", "shadowsocks":
-		var cfg struct {
-			Servers []struct {
-				Address string `json:"address"`
-			} `json:"servers"`
-		}
-		if json.Unmarshal(co.Settings, &cfg) == nil {
-			for _, srv := range cfg.Servers {
-				if isIPv6Literal(srv.Address) {
-					return true
-				}
-			}
-		}
-	case "vless", "vmess":
-		var cfg struct {
-			Vnext []struct {
-				Address string `json:"address"`
-			} `json:"vnext"`
-		}
-		if json.Unmarshal(co.Settings, &cfg) == nil {
-			for _, vn := range cfg.Vnext {
-				if isIPv6Literal(vn.Address) {
-					return true
-				}
-			}
-		}
-	case "wireguard":
-		var cfg struct {
-			Peers []struct {
-				Endpoint string `json:"endpoint"`
-			} `json:"peers"`
-		}
-		if json.Unmarshal(co.Settings, &cfg) == nil {
-			for _, peer := range cfg.Peers {
-				if host, _, err := net.SplitHostPort(peer.Endpoint); err == nil && isIPv6Literal(host) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 // referencedOutboundTags 返回策略中所有被实际启用规则及 dialerProxy 传递引用的出站 Tag 集合。
 func (p RoutingPolicy) referencedOutboundTags() map[string]bool {
 	refs := make(map[string]bool)
@@ -794,6 +810,14 @@ func (p RoutingPolicy) referencedOutboundTags() map[string]bool {
 	}
 
 	byTag := make(map[string]CustomOutbound, len(p.CustomOutbounds))
+	// 独立观测器也会主动拨号，不能把仅由探测引用的出站当作未使用项裁剪。
+	if p.Observatory != nil {
+		if observed, err := matchSelectorCandidates(p.Observatory.SubjectSelector, candidates); err == nil {
+			for _, tag := range observed {
+				enqueue(tag)
+			}
+		}
+	}
 	for _, co := range p.CustomOutbounds {
 		byTag[co.Tag] = co
 	}
@@ -815,127 +839,38 @@ type secretTransformFunc func(path, value string) (string, error)
 
 func transformOutboundSecrets(co CustomOutbound, fn secretTransformFunc) (CustomOutbound, error) {
 	out := co
-	if len(co.Settings) > 0 {
-		m, err := decodeJSONObject(co.Settings)
-		if err != nil {
-			return out, err
-		}
-		changed := false
-		applyMapStr := func(obj map[string]any, key, fieldPath string) error {
-			rawVal, exists := obj[key]
-			if !exists || rawVal == nil {
-				return nil
-			}
-			s, ok := rawVal.(string)
-			if !ok || s == "" {
-				return nil
-			}
-			next, err := fn(fieldPath, s)
+	var err error
+	out.Settings, err = transformSecretJSON(co.Settings, "settings", fn)
+	if err != nil {
+		return co, err
+	}
+	out.StreamSettings, err = transformSecretJSON(co.StreamSettings, "streamSettings", fn)
+	if err != nil {
+		return co, err
+	}
+	out.Mux, err = transformSecretJSON(co.Mux, "mux", fn)
+	if err != nil {
+		return co, err
+	}
+	if co.Extra != nil {
+		out.Extra = make(map[string]json.RawMessage, len(co.Extra))
+		for key, raw := range co.Extra {
+			// 包装字段名，确保顶层扩展本身是敏感标量时也走同一规则。
+			wrapped, err := json.Marshal(map[string]json.RawMessage{key: raw})
 			if err != nil {
-				return err
+				return co, err
 			}
-			if next != s {
-				obj[key] = next
-				changed = true
-			}
-			return nil
-		}
-
-		switch co.Protocol {
-		case "socks", "http":
-			if servers, ok := m["servers"].([]any); ok {
-				for i, srvAny := range servers {
-					srv, ok := srvAny.(map[string]any)
-					if !ok {
-						continue
-					}
-					if users, ok := srv["users"].([]any); ok {
-						for j, uAny := range users {
-							if u, ok := uAny.(map[string]any); ok {
-								if err := applyMapStr(u, "pass", fmt.Sprintf("settings.servers[%d].users[%d].pass", i, j)); err != nil {
-									return out, err
-								}
-							}
-						}
-					}
-				}
-			}
-		case "vless", "vmess":
-			if vnexts, ok := m["vnext"].([]any); ok {
-				for i, vnAny := range vnexts {
-					vn, ok := vnAny.(map[string]any)
-					if !ok {
-						continue
-					}
-					if users, ok := vn["users"].([]any); ok {
-						for j, uAny := range users {
-							if u, ok := uAny.(map[string]any); ok {
-								if err := applyMapStr(u, "id", fmt.Sprintf("settings.vnext[%d].users[%d].id", i, j)); err != nil {
-									return out, err
-								}
-							}
-						}
-					}
-				}
-			}
-		case "trojan", "shadowsocks":
-			if servers, ok := m["servers"].([]any); ok {
-				for i, srvAny := range servers {
-					if srv, ok := srvAny.(map[string]any); ok {
-						if err := applyMapStr(srv, "password", fmt.Sprintf("settings.servers[%d].password", i)); err != nil {
-							return out, err
-						}
-					}
-				}
-			}
-		case "wireguard":
-			if err := applyMapStr(m, "secretKey", "settings.secretKey"); err != nil {
-				return out, err
-			}
-			if peers, ok := m["peers"].([]any); ok {
-				for i, pAny := range peers {
-					if peer, ok := pAny.(map[string]any); ok {
-						if err := applyMapStr(peer, "preSharedKey", fmt.Sprintf("settings.peers[%d].preSharedKey", i)); err != nil {
-							return out, err
-						}
-					}
-				}
-			}
-		}
-
-		if changed {
-			raw, err := marshalNoEscape(m)
+			value, err := transformSecretJSON(wrapped, "extra", fn)
 			if err != nil {
-				return out, err
+				return co, err
 			}
-			out.Settings = raw
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(value, &fields); err != nil {
+				return co, err
+			}
+			out.Extra[key] = fields[key]
 		}
 	}
-
-	if len(co.StreamSettings) > 0 {
-		m, err := decodeJSONObject(co.StreamSettings)
-		if err != nil {
-			return out, err
-		}
-		if rs, ok := m["realitySettings"].(map[string]any); ok {
-			if s, ok := rs["privateKey"].(string); ok && s != "" {
-				next, err := fn("streamSettings.realitySettings.privateKey", s)
-				if err != nil {
-					return out, err
-				}
-				if next != s {
-					rs["privateKey"] = next
-					m["realitySettings"] = rs
-					raw, err := marshalNoEscape(m)
-					if err != nil {
-						return out, err
-					}
-					out.StreamSettings = raw
-				}
-			}
-		}
-	}
-
 	return out, nil
 }
 
@@ -1072,15 +1007,14 @@ func maskExtraRawJSON(raw json.RawMessage) json.RawMessage {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, val := range x {
-				if s, ok := val.(string); ok && s != "" {
-					switch k {
-					case "privateKey", "password", "pass", "secretKey", "preSharedKey":
-						if s != MaskedPlaceholder {
-							x[k] = MaskedPlaceholder
-							changed = true
-						}
-						continue
+				if IsSensitiveConfigKey(k) {
+					if s, ok := val.(string); !ok || s != MaskedPlaceholder {
+						x[k] = MaskedPlaceholder
+						changed = true
 					}
+					continue
+				}
+				if s, ok := val.(string); ok && s != "" {
 					if strings.HasPrefix(s, OutboundSecretPrefix) {
 						x[k] = MaskedPlaceholder
 						changed = true
@@ -1492,7 +1426,19 @@ func BuildOverridesForTarget(baseRaw, targetRaw string) (string, error) {
 					outOverrides[baseCo.Tag] = OutboundOverride{Mode: "replace", Outbound: &cp}
 				}
 			} else {
-				outOverrides[baseCo.Tag] = OutboundOverride{Mode: "remap", TargetTag: "direct"}
+				// 老快照仅保留合并结果；fallbackTag 仍可提供确定的 remap 证据。
+				remapTarget := "direct"
+				for _, baseBalancer := range base.Balancers {
+					if baseBalancer.FallbackTag != baseCo.Tag {
+						continue
+					}
+					for _, targetBalancer := range target.Balancers {
+						if targetBalancer.Tag == baseBalancer.Tag && targetBalancer.FallbackTag != "" {
+							remapTarget = targetBalancer.FallbackTag
+						}
+					}
+				}
+				outOverrides[baseCo.Tag] = OutboundOverride{Mode: "remap", TargetTag: remapTarget}
 			}
 		}
 		if len(outOverrides) > 0 {
@@ -1509,5 +1455,16 @@ func BuildOverridesForTarget(baseRaw, targetRaw string) (string, error) {
 		}
 	}
 	data, err := json.Marshal(ov)
-	return string(data), err
+	if err != nil {
+		return "", err
+	}
+	merged, err := MergeRoutingPolicy(baseRaw, string(data))
+	if err != nil {
+		return "", fmt.Errorf("历史覆盖无法无损重建: %w", err)
+	}
+	mergedJSON, err := json.Marshal(merged)
+	if err != nil || !PoliciesSemanticallyEqual(string(mergedJSON), targetRaw) {
+		return "", fmt.Errorf("历史快照缺少原始覆盖且无法无损重建，拒绝恢复不同策略")
+	}
+	return string(data), nil
 }

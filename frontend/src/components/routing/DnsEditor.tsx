@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, Globe, Info, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Btn, Field, FieldGroup, SelectField, Switch } from '@/components/ui/Form'
 import { createDefaultDNSConfig, domainLines } from '@/lib/routing-model'
+import { editorItemKey, retainEditorItemKey } from '@/lib/routing-editor'
 import type {
   DNSConfigModel,
   DNSHostValue,
@@ -86,7 +87,7 @@ function SingleDnsServerCard({
               onClick={() => switchEntryMode('simple')}
               className={`rounded px-2 py-1 font-medium transition ${
                 !isObject
-                  ? 'bg-[var(--accent)] text-white'
+                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                   : 'text-soft hover:text-[var(--text)]'
               }`}
             >
@@ -98,7 +99,7 @@ function SingleDnsServerCard({
               onClick={() => switchEntryMode('object')}
               className={`rounded px-2 py-1 font-medium transition ${
                 isObject
-                  ? 'bg-[var(--accent)] text-white'
+                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                   : 'text-soft hover:text-[var(--text)]'
               }`}
             >
@@ -129,7 +130,7 @@ function SingleDnsServerCard({
             disabled={disabled || total <= 1}
             title={total <= 1 ? '启用 DNS 时至少保留 1 个上游服务器' : '删除此上游 DNS'}
             onClick={onDelete}
-            className="rounded border border-[var(--danger-border)] bg-[var(--danger-soft)] p-1.5 text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white disabled:opacity-40"
+            className="rounded border border-[var(--danger-border)] bg-[var(--danger-soft)] p-1.5 text-[var(--danger)] hover:bg-[var(--danger)] hover:text-[var(--danger-contrast)] disabled:opacity-40"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -259,14 +260,17 @@ export function DnsEditor({
   const [cachedDraft, setCachedDraft] = useState<DNSConfigModel>(() =>
     dns && dns.enabled ? dns : createDefaultDNSConfig(),
   )
-  const [hostRows, setHostRows] = useState<{ key: string; value: string }[] | null>(null)
+  const [hostDraft, setHostDraft] = useState<{
+    rows: { key: string; value: string }[]
+    source: string
+  } | null>(null)
 
   const enabled = !!dns?.enabled
   const activeDns: DNSConfigModel = dns && dns.enabled ? dns : cachedDraft
   const servers = activeDns.servers ?? []
 
   const syncedHostRows: { key: string; value: string }[] =
-    hostRows ??
+    hostDraft?.source === JSON.stringify(activeDns.hosts ?? {}) ? hostDraft.rows :
     Object.entries(activeDns.hosts ?? {}).map(([k, v]) => ({
       key: k,
       value: Array.isArray(v) ? v.join(', ') : String(v),
@@ -291,7 +295,7 @@ export function DnsEditor({
       commitDns(restored)
     } else {
       if (dns) setCachedDraft(dns)
-      setHostRows(null)
+      setHostDraft(null)
       onChange(null)
     }
   }
@@ -302,7 +306,6 @@ export function DnsEditor({
   }
 
   const updateHostRows = (rows: { key: string; value: string }[]) => {
-    setHostRows(rows)
     const map: Record<string, DNSHostValue> = {}
     for (const r of rows) {
       const k = r.key.trim()
@@ -317,6 +320,7 @@ export function DnsEditor({
     const next = { ...activeDns, enabled: true }
     if (Object.keys(map).length > 0) next.hosts = map
     else delete next.hosts
+    setHostDraft({ rows, source: JSON.stringify(next.hosts ?? {}) })
     commitDns(next)
   }
 
@@ -461,7 +465,7 @@ export function DnsEditor({
             <div className="space-y-3">
               {servers.map((srv, idx) => (
                 <SingleDnsServerCard
-                  key={idx}
+                  key={typeof srv === 'object' && srv !== null ? editorItemKey(srv) : `simple-${idx}`}
                   entry={srv}
                   index={idx}
                   total={servers.length}
@@ -486,7 +490,9 @@ export function DnsEditor({
                   }}
                   onChange={(updated) => {
                     const nextServers = [...servers]
-                    nextServers[idx] = updated
+                    nextServers[idx] = typeof srv === 'object' && srv !== null && typeof updated === 'object' && updated !== null
+                      ? retainEditorItemKey(srv, updated)
+                      : updated
                     commitDns({ ...activeDns, enabled: true, servers: nextServers })
                   }}
                 />

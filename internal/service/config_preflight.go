@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -170,15 +171,17 @@ func (s *SyncService) PreflightDraft(nodeID uint, req PreflightDraftRequest) (*P
 		return out, nil
 	}
 
-	rendered, err := xray.ApplyRoutingPolicyWithOptions(baseConfig, effectivePolicy, xray.RenderOptions{
+	renderOpts := xray.RenderOptions{
 		DefaultProbeURL: s.settingSvc.Get(KeyXrayProbeURL),
-	})
+	}
+	rendered, err := xray.ApplyRoutingPolicyWithOptions(baseConfig, effectivePolicy, renderOpts)
 	if err != nil {
 		out.ElapsedMs = time.Since(start).Milliseconds()
 		out.Error = err.Error()
 		return out, nil
 	}
-	out.RequiresIPv6 = effectivePolicy.RequiresIPv6()
+	out.Warnings = append(out.Warnings, xray.DiagnoseRenderedDNSSelfLoop(baseConfig, effectivePolicy, renderOpts)...)
+	out.RequiresIPv6 = effectivePolicy.RequiresIPv6WithOptions(renderOpts)
 	out.RedactedConfig = redactConfig(rendered)
 
 	// 3. 礼让线上活跃部署租约，复用进程内 lockNode 串行执行远端只读 xray -test
@@ -224,7 +227,7 @@ func (s *SyncService) PreflightNode(nodeID uint) error {
 		return fmt.Errorf("无法连接目标节点")
 	}
 	defer c.Close()
-	reqIPv6 := snapshot != nil && snapshot.Policy != nil && snapshot.Policy.RequiresIPv6()
+	reqIPv6 := snapshot != nil && snapshot.Policy != nil && snapshot.Policy.RequiresIPv6WithOptions(xray.RenderOptions{DefaultProbeURL: p.ProbeURL})
 	return c.ApplyXrayConfig(content, p.ConfigPath, false, true, xssh.TransactionOptions{ProbeURL: p.ProbeURL, RequiresIPv6: reqIPv6})
 }
 
@@ -251,12 +254,15 @@ func scrubConfigSecretsFromMessage(msg, renderedConfig string) string {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, y := range x {
-				switch k {
-				case "privateKey", "password", "id", "pass", "secretKey", "preSharedKey":
-					if s, ok := y.(string); ok && len(s) >= 4 {
+				if xray.IsSensitiveConfigKey(k) {
+					if s, ok := y.(string); ok && s != "" {
 						secrets = append(secrets, s)
+						// 内核错误可能包含 JSON 转义后的值。
+						if encoded, err := json.Marshal(s); err == nil && len(encoded) >= 2 {
+							secrets = append(secrets, string(encoded[1:len(encoded)-1]))
+						}
 					}
-				default:
+				} else {
 					walk(y)
 				}
 			}
@@ -267,11 +273,12 @@ func scrubConfigSecretsFromMessage(msg, renderedConfig string) string {
 		}
 	}
 	walk(obj)
-	out := msg
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	replacements := make([]string, 0, len(secrets)*2)
 	for _, secret := range secrets {
-		out = strings.ReplaceAll(out, secret, "<masked>")
+		replacements = append(replacements, secret, "<masked>")
 	}
-	return out
+	return strings.NewReplacer(replacements...).Replace(msg)
 }
 
 // Redact recursively, including proxy account passwords, outbound secrets and user UUIDs.
@@ -285,10 +292,9 @@ func redactConfig(raw string) string {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, y := range x {
-				switch k {
-				case "privateKey", "password", "id", "email", "pass", "user", "secretKey", "preSharedKey":
+				if xray.IsSensitiveConfigKey(k) {
 					x[k] = "<masked>"
-				default:
+				} else {
 					walk(y)
 				}
 			}

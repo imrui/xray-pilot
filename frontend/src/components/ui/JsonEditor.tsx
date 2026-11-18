@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { EditorState, Compartment } from '@codemirror/state'
+import { EditorState, Compartment, Annotation } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { json, jsonParseLinter } from '@codemirror/lang-json'
@@ -21,6 +21,8 @@ const canMountCodeMirror =
   typeof document !== 'undefined' &&
   typeof Range !== 'undefined' &&
   typeof Range.prototype.getClientRects === 'function'
+
+const externalValueUpdate = Annotation.define<boolean>()
 
 function buildTheme(minHeight: string, maxHeight?: string) {
   return EditorView.theme({
@@ -123,7 +125,7 @@ export function JsonEditor({
           EditorView.editable.of(!readOnly),
         ]),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
+          if (update.docChanged && !update.transactions.some((tr) => tr.annotation(externalValueUpdate))) {
             onChangeRef.current?.(update.state.doc.toString())
           }
         }),
@@ -162,6 +164,7 @@ export function JsonEditor({
     if (current !== value) {
       view.dispatch({
         changes: { from: 0, to: current.length, insert: value },
+        annotations: externalValueUpdate.of(true),
       })
     }
   }, [value])

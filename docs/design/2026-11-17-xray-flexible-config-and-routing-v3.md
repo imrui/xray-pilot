@@ -240,8 +240,8 @@
    - 正则：`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`，模板内不可重复。
    - 严禁等于保留字（`direct`、`block`、`direct-v4`、`direct-v6`、`api`、`api-inbound`、`dns-out`）或匹配托管入站前缀（`vless-reality-*`、`vless-ws-*`、`trojan-*`、`http-proxy-*`、`socks-proxy-*`）。
 3. **协议范围与必填校验**：
-   - 允许协议：`freedom`、`blackhole`、`socks`、`http`、`vless`、`vmess`、`trojan`、`shadowsocks`、`wireguard`、`loopback`（拦截 `dns` 出站，避免误配破坏解析）。
-   - 结构化协议校验：`socks` / `http` / `vless` 校验服务器地址非空且端口为 `1~65535`；`wireguard` 校验 `secretKey` 非空且至少含 1 个有效 `peer`（`endpoint` 含端口、`publicKey` 非空）；`freedom` 若设置 `sendThrough` 必须为合法 IPv4/IPv6 字面量。
+   - 允许协议：`freedom`、`blackhole`、`socks`、`http`、`vless`、`vmess`、`trojan`、`shadowsocks`、`wireguard`（拦截 `dns` 出站以及可绕过受控路由重入管理入站的 `loopback` 出站；同时禁止注入 `redirect`、旧式 `proxySettings` 与 `reverse` 字段）。
+   - 结构化协议校验：`socks` / `http` / `vless` 校验服务器地址非空且端口为 `1~65535`；`wireguard` 校验 `secretKey` 非空、`settings.reserved` 为空或 3 个字节整数，且至少含 1 个有效 `peer`（`endpoint` 含端口、`publicKey` 非空）；`freedom` 若设置 `sendThrough` 必须为合法 IPv4/IPv6 字面量。
 4. **`dialerProxy` 链式代理校验**：
    - 若 `streamSettings.sockopt.dialerProxy` 非空，目标 Tag 必须存在于有效出站集合中（且不能指向 `block` 或 `api`）。
    - 执行有向图环路检测，拦截自指（`A -> A`）与循环依赖（`A -> B -> A`）。
@@ -408,10 +408,10 @@
 1. **Xray 依赖自动补齐（防启动报错）**：
    - 在 Xray-core 中，一旦任一 `balancer` 使用了 `strategy.type == "leastPing"` 或配置了 `fallbackTag`，顶层必须存在 `observatory` 且其 `subjectSelector` 必须覆盖对应候选出站，否则 Xray 进程启动直接失败。
    - **面板智能联动**：当策略中存在 `leastPing` 或 `fallbackTag` 的均衡器时：
-     - 若 `observatory == nil`，`ApplyRoutingPolicy` 自动生成默认 `observatory`：`subjectSelector` 自动汇总相关 `balancer.selector` 去重集合，`probeURL` 取面板系统设置 `xray.probe_url`（未设则用默认 `https://www.gstatic.com/generate_204`），`probeInterval` 默认 `"1m"`，`enableConcurrency: true`。
+     - 若 `observatory == nil`，`ApplyRoutingPolicy` 自动生成默认 `observatory`：`subjectSelector` 自动汇总相关 `balancer.selector` 去重集合，`probeURL` 若面板系统设置 `xray.probe_url` 为合规公网 IP HTTPS URL 则复用，否则默认回退为 `https://1.1.1.1/`，`probeInterval` 默认 `"1m"`，`enableConcurrency: true`。
      - 若管理员显式配置了 `observatory`，校验其 `subjectSelector` 必须完整覆盖所有依赖健康状态的 `balancer.selector` 集合。
 2. **`observatory` 参数安全校验**：
-   - `probeURL`：非空时直接调用 `pkg/ssh.ValidateProbeURL` 校验——强制要求公网 HTTPS（443 端口）、无账号参数、严禁私网/回环 IP，彻底阻断通过 `observatory` 探测面板或节点内网服务的 SSRF 风险。
+   - `probeURL`：调用 `ValidateObservatoryProbeURL`（基于 `pkg/ssh.ValidateProbeURL` 并进一步限定为全球单播公网 IP 字面量的 HTTPS 443 URL）校验——无账号参数、严禁私网/回环/保留 IP 与域名重绑定，彻底阻断通过 `observatory` 或结合 `dns.hosts` 探测面板及节点内网服务的 SSRF 风险。
    - `probeInterval`：校验为合法 Go/Xray 时间段字符串（如 `"30s"`、`"1m"`、`"5m"`），且下限不低于 `10s`、上限不超过 `1h`，防止高频探测打满落地机连接数。
 
 #### 7.2.3 路由规则与节点覆盖的跨模块协同

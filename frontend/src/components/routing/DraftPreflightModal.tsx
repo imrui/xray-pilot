@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CheckCircle2, Play, Server, ShieldAlert, Sparkles } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
@@ -8,58 +8,87 @@ import { preflightDraft } from '@/lib/routing'
 import type { PreflightDraftResponse } from '@/lib/routing'
 import type { RoutingNode, RoutingPolicy } from '@/lib/routing-model'
 
-export function DraftPreflightModal({
+type DraftPreflightModalProps = {
+  open: boolean
+  onClose: () => void
+  nodes: RoutingNode[]
+  lockedNodeID?: number
+  customOverrides?: Record<string, unknown> | string | null
+  draftIdentity?: string
+  getDraftPolicy: () => Promise<RoutingPolicy | Record<string, unknown>> | RoutingPolicy | Record<string, unknown>
+}
+
+export function DraftPreflightModal(props: DraftPreflightModalProps) {
+  // 每次重新打开或草稿变化均创建新会话，旧请求不能回写到新会话。
+  return props.open ? (
+    <DraftPreflightSession
+      key={JSON.stringify([props.lockedNodeID, props.customOverrides, props.draftIdentity, props.nodes.map((node) => node.id)])}
+      {...props}
+    />
+  ) : null
+}
+
+function DraftPreflightSession({
   open,
   onClose,
   nodes,
   lockedNodeID,
   customOverrides,
   getDraftPolicy,
-}: {
-  open: boolean
-  onClose: () => void
-  nodes: RoutingNode[]
-  lockedNodeID?: number
-  customOverrides?: Record<string, unknown> | string | null
-  getDraftPolicy: () => Promise<RoutingPolicy | Record<string, unknown>> | RoutingPolicy | Record<string, unknown>
-}) {
+}: DraftPreflightModalProps) {
   const defaultNodeID = lockedNodeID ?? nodes.find((n) => n.active)?.id ?? nodes[0]?.id ?? 0
   const [selectedNodeID, setSelectedNodeID] = useState<number>(defaultNodeID)
   const [useNodeOverrides, setUseNodeOverrides] = useState(true)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<PreflightDraftResponse | null>(null)
   const [requestError, setRequestError] = useState('')
+  const pendingRequest = useRef<AbortController | null>(null)
+  useEffect(() => () => { pendingRequest.current?.abort() }, [])
+  const close = () => {
+    pendingRequest.current?.abort()
+    setRunning(false)
+    setResult(null)
+    setRequestError('')
+    onClose()
+  }
 
-  const effectiveNodeID = lockedNodeID ?? selectedNodeID
+  const effectiveNodeID = lockedNodeID ?? (nodes.some((node) => node.id === selectedNodeID) ? selectedNodeID : defaultNodeID)
   const targetNode = nodes.find((n) => n.id === effectiveNodeID)
 
   const runPreflight = async () => {
+    if (running) return
     if (!effectiveNodeID) {
       setRequestError('请先选择一台目标节点。')
       return
     }
     setRunning(true)
     setRequestError('')
+    setResult(null)
+    const controller = new AbortController()
+    pendingRequest.current = controller
     try {
       const policy = await getDraftPolicy()
+      if (controller.signal.aborted) return
       const res = await preflightDraft(effectiveNodeID, {
         policy,
         use_node_overrides: customOverrides !== undefined ? false : useNodeOverrides,
         custom_overrides: customOverrides !== undefined ? customOverrides : null,
-      })
+      }, controller.signal)
+      if (controller.signal.aborted) return
       setResult(res)
     } catch (e) {
+      if (controller.signal.aborted) return
       setResult(null)
       setRequestError((e as Error).message)
     } finally {
-      setRunning(false)
+      if (!controller.signal.aborted) setRunning(false)
     }
   }
 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={close}
       size="lg"
       title={
         lockedNodeID && targetNode
@@ -68,7 +97,7 @@ export function DraftPreflightModal({
       }
       footer={
         <>
-          <Btn variant="secondary" disabled={running} onClick={onClose}>
+          <Btn variant="secondary" onClick={close}>
             关闭
           </Btn>
           <Btn
@@ -95,7 +124,7 @@ export function DraftPreflightModal({
           </div>
         </div>
 
-        <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
+        <fieldset disabled={running} className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
           {lockedNodeID ? (
             <div className="flex items-center gap-2 text-sm">
               <Server className="h-4 w-4 text-[var(--accent)]" />
@@ -113,6 +142,7 @@ export function DraftPreflightModal({
                 label="选择沙箱验证节点"
                 value={effectiveNodeID}
                 onChange={(v) => {
+                  if (running) return
                   setSelectedNodeID(Number(v))
                   setResult(null)
                   setRequestError('')
@@ -126,11 +156,16 @@ export function DraftPreflightModal({
                 <span className="text-xs text-soft">
                   叠加该节点当前已保存的节点级覆盖（若存在不兼容旧覆盖将自动跳过并提示）
                 </span>
-                <Switch checked={useNodeOverrides} onChange={setUseNodeOverrides} />
+                <Switch checked={useNodeOverrides} onChange={(enabled) => {
+                  if (running) return
+                  setUseNodeOverrides(enabled)
+                  setResult(null)
+                  setRequestError('')
+                }} />
               </div>
             </>
           )}
-        </div>
+        </fieldset>
 
         {requestError && (
           <div

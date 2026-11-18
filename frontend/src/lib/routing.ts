@@ -66,11 +66,12 @@ export async function previewBinding(binding: RoutingBinding) {
   ).data.data
 }
 
-export async function preflightDraft(nodeID: number, payload: PreflightDraftRequest) {
+export async function preflightDraft(nodeID: number, payload: PreflightDraftRequest, signal?: AbortSignal) {
   return (
     await request.post<{ data: PreflightDraftResponse }>(
       `/nodes/${nodeID}/preflight-draft`,
       payload,
+      { signal },
     )
   ).data.data
 }

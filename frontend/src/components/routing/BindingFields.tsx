@@ -31,12 +31,25 @@ export function BindingFields({
   value,
   onChange,
   templates,
+  disabled = false,
+  onPendingErrorChange,
 }: {
   value: RoutingBinding
   onChange: (b: RoutingBinding) => void
   templates: RoutingTemplate[]
+  disabled?: boolean
+  onPendingErrorChange?: (hasError: boolean) => void
 }) {
   const superAdmin = useAuthStore((s) => s.role) === 'super_admin'
+  const [outboundErrors, setOutboundErrors] = useState<Record<string, string>>({})
+  const hasPendingError = Object.keys(outboundErrors).length > 0
+  const updateOutboundError = (tag: string, error: string) => {
+    const next = { ...outboundErrors }
+    if (error) next[tag] = error
+    else delete next[tag]
+    setOutboundErrors(next)
+    onPendingErrorChange?.(Object.keys(next).length > 0)
+  }
   const revisions = useQuery({
     queryKey: ['routing-revisions', value.template_id],
     queryFn: () => getRevisions(value.template_id),
@@ -97,6 +110,7 @@ export function BindingFields({
 
   return (
     <div className="space-y-4">
+      <fieldset disabled={hasPendingError} className="space-y-4">
       <SelectField
         label="路由来源"
         value={value.mode}
@@ -161,6 +175,12 @@ export function BindingFields({
             </p>
           )}
         </div>
+      )}
+      </fieldset>
+      {hasPendingError && (
+        <p role="alert" className="text-xs text-[var(--danger)]">
+          节点出站仍有未完成或无效的输入，请修正或放弃修改后再切换来源、保存或预检。
+        </p>
       )}
       {value.scope === 'node' && value.mode !== 'legacy' && (
         <FieldGroup
@@ -228,6 +248,10 @@ export function BindingFields({
                   onClick={() => {
                     const cleaned = { ...outboundOverridesMap }
                     for (const t of staleOutboundTags) delete cleaned[t]
+                    const remainingErrors = { ...outboundErrors }
+                    for (const t of staleOutboundTags) delete remainingErrors[t]
+                    setOutboundErrors(remainingErrors)
+                    onPendingErrorChange?.(Object.keys(remainingErrors).length > 0)
                     override('outbound_overrides', Object.keys(cleaned).length ? cleaned : undefined)
                   }}
                 >
@@ -305,6 +329,7 @@ export function BindingFields({
                         label={`出站覆盖模式 · ${tmplOutbound.tag}`}
                         value={ovMode}
                         onChange={(nextMode) => {
+                          updateOutboundError(tmplOutbound.tag, '')
                           if (nextMode === 'inherit') {
                             updateOutboundOverride(tmplOutbound.tag, undefined)
                           } else if (nextMode === 'remap') {
@@ -346,7 +371,8 @@ export function BindingFields({
                             outbound={currentOv?.outbound ?? { ...tmplOutbound }}
                             lockedTag={tmplOutbound.tag}
                             peerOutboundTags={peerTags}
-                            disabled={!superAdmin}
+                            disabled={disabled || !superAdmin}
+                            onRawErrorChange={(error) => updateOutboundError(tmplOutbound.tag, error)}
                             onChange={(updatedOutbound) =>
                               updateOutboundOverride(tmplOutbound.tag, {
                                 mode: 'replace',

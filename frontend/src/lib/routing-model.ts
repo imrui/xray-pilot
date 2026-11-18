@@ -17,6 +17,8 @@ export type RoutingRuleItem = {
   disabled?: boolean
   domain?: string[]
   ip?: string[]
+  source?: string[] | null
+  inboundTag?: string[] | null
   port?: string
   network?: string
   protocol?: string[]
@@ -422,93 +424,550 @@ export function upgradeRoutingPolicy(raw: string): RoutingPolicy {
   return next
 }
 
-function isIPv6HostLiteral(rawHost: string): boolean {
-  let h = rawHost.trim()
-  if (!h) return false
-  if (h.startsWith('[')) {
-    const closeIdx = h.indexOf(']')
-    if (closeIdx > 1) h = h.slice(1, closeIdx)
-  } else if ((h.match(/:/g)?.length ?? 0) === 1) {
-    // host:port (IPv4 or domain), not an IPv6 literal
-    return false
-  }
-  return h.includes(':') && /^[0-9a-fA-F:.]+$/.test(h) && !h.toLowerCase().startsWith('::ffff:')
+const KNOWN_RULE_KEYS = new Set([
+  'type',
+  'remark',
+  'disabled',
+  'domain',
+  'ip',
+  'source',
+  'inboundTag',
+  'port',
+  'network',
+  'protocol',
+  'outboundTag',
+  'balancerTag',
+])
+
+function isPublicProbeIPv4(a: number, b: number, c: number): boolean {
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return false
+  if (a === 169 && b === 254) return false
+  if (a === 172 && b >= 16 && b <= 31) return false
+  if (a === 192 && b === 168) return false
+  if (a === 100 && (b & 0xc0) === 64) return false
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return false
+  if (a === 198 && (b === 18 || b === 19)) return false
+  if (a === 198 && b === 51 && c === 100) return false
+  if (a === 203 && b === 0 && c === 113) return false
+  return true
 }
 
-function outboundNeedsHostIPv6(co: CustomOutbound): boolean {
-  if (co.sendThrough && isIPv6HostLiteral(co.sendThrough)) return true
-  const settings = co.settings
-  if (!settings || typeof settings !== 'object') return false
-  if (co.protocol === 'freedom' && settings.domainStrategy === 'ForceIPv6') return true
-  if (Array.isArray(settings.servers)) {
-    for (const s of settings.servers) {
-      if (s && typeof s === 'object' && typeof (s as { address?: string }).address === 'string') {
-        if (isIPv6HostLiteral((s as { address: string }).address)) return true
+function isPublicProbeIPv6(val: bigint): boolean {
+  if ((val >> 125n) !== 1n) return false
+  if (
+    ipv6MatchesRuleTarget(val, '2001::/23') ||
+    ipv6MatchesRuleTarget(val, '2001:db8::/32') ||
+    ipv6MatchesRuleTarget(val, '2002::/16')
+  ) {
+    return false
+  }
+  return true
+}
+
+export function isValidObservatoryProbeURL(raw: string): boolean {
+  const s = raw.trim()
+  if (s !== raw || !/^https:\/\//i.test(s)) return false
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i)
+    if (code <= 0x1f || code === 0x7f) return false
+    if (code === 0x25 /* % */) {
+      if (i + 2 >= s.length || !/^[0-9a-fA-F]{2}$/.test(s.slice(i + 1, i + 3))) {
+        return false
       }
     }
   }
-  if (Array.isArray(settings.vnext)) {
-    for (const v of settings.vnext) {
-      if (v && typeof v === 'object' && typeof (v as { address?: string }).address === 'string') {
-        if (isIPv6HostLiteral((v as { address: string }).address)) return true
+  let parsedURL: URL
+  try {
+    parsedURL = new URL(s)
+  } catch {
+    return false
+  }
+  if (
+    parsedURL.protocol !== 'https:' ||
+    parsedURL.username ||
+    parsedURL.password ||
+    parsedURL.search ||
+    parsedURL.hash
+  ) {
+    return false
+  }
+  const rest = s.slice('https://'.length)
+  const pathIdx = rest.search(/[/?#]/)
+  const authority = pathIdx === -1 ? rest : rest.slice(0, pathIdx)
+  if (!authority || authority.includes('@') || authority.includes('%')) return false
+
+  if (authority.startsWith('[')) {
+    const closeIdx = authority.indexOf(']')
+    if (closeIdx <= 1) return false
+    const rawHost = authority.slice(1, closeIdx)
+    const after = authority.slice(closeIdx + 1)
+    if (after !== '' && after !== ':' && after !== ':443') return false
+    const v6 = parseIPv6BigInt(rawHost)
+    if (!v6) return false
+    if (v6.ipv4Mapped) {
+      const low32 = Number(v6.value & 0xffffffffn)
+      return isPublicProbeIPv4(
+        (low32 >>> 24) & 0xff,
+        (low32 >>> 16) & 0xff,
+        (low32 >>> 8) & 0xff,
+      )
+    }
+    return isPublicProbeIPv6(v6.value)
+  }
+
+  const parts = authority.split(':')
+  if (parts.length > 2) return false
+  if (parts.length === 2 && parts[1] !== '' && parts[1] !== '443') return false
+  const v4 = parseIPv4Octets(parts[0])
+  if (!v4) return false
+  return isPublicProbeIPv4(v4[0], v4[1], v4[2])
+}
+const ALLOWED_DNS_URI_PREFIXES = [
+  'https://',
+  'https+local://',
+  'tcp://',
+  'tcp+local://',
+  'quic+local://',
+]
+
+function parseIPv4Octets(s: string): [number, number, number, number] | null {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s)
+  if (!m) return null
+  const octets: number[] = []
+  for (let i = 1; i <= 4; i++) {
+    const part = m[i]
+    if (part.length > 1 && part.startsWith('0')) return null
+    const n = Number(part)
+    if (n < 0 || n > 255) return null
+    octets.push(n)
+  }
+  return octets as [number, number, number, number]
+}
+
+function parseIPv6BigInt(raw: string): { value: bigint; ipv4Mapped: boolean } | null {
+  let s = raw.trim()
+  if (!s) return null
+  if (s.startsWith('[') && s.endsWith(']')) {
+    s = s.slice(1, -1)
+  }
+  if (!s.includes(':')) return null
+  const halves = s.split('::')
+  if (halves.length > 2) return null
+
+  const parseSide = (side: string, allowTrailingV4: boolean): number[] | null => {
+    if (!side) return []
+    const parts = side.split(':')
+    const groups: number[] = []
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i]
+      if (allowTrailingV4 && i === parts.length - 1 && p.includes('.')) {
+        const v4 = parseIPv4Octets(p)
+        if (!v4) return null
+        groups.push((v4[0] << 8) | v4[1], (v4[2] << 8) | v4[3])
+      } else {
+        if (!/^[0-9a-fA-F]{1,4}$/.test(p)) return null
+        groups.push(parseInt(p, 16))
       }
     }
+    return groups
   }
-  if (co.protocol === 'wireguard' && Array.isArray(settings.peers)) {
-    for (const peer of settings.peers) {
-      const ep = peer && typeof peer === 'object' ? (peer as { endpoint?: string }).endpoint : ''
-      if (typeof ep === 'string' && ep.startsWith('[') && isIPv6HostLiteral(ep)) return true
+
+  let groups: number[]
+  if (halves.length === 1) {
+    const g = parseSide(halves[0], true)
+    if (!g || g.length !== 8) return null
+    groups = g
+  } else {
+    const left = parseSide(halves[0], false)
+    const right = parseSide(halves[1], true)
+    if (!left || !right || left.length + right.length >= 8) return null
+    const pad = new Array<number>(8 - left.length - right.length).fill(0)
+    groups = [...left, ...pad, ...right]
+  }
+
+  let val = 0n
+  for (const g of groups) {
+    val = (val << 16n) | BigInt(g)
+  }
+  const ipv4Mapped =
+    groups[0] === 0 &&
+    groups[1] === 0 &&
+    groups[2] === 0 &&
+    groups[3] === 0 &&
+    groups[4] === 0 &&
+    groups[5] === 0xffff
+  return { value: val, ipv4Mapped }
+}
+
+function classifyIPLiteral(raw: string): 'v4' | 'v6' | null {
+  const s = raw.trim()
+  if (!s) return null
+  if (parseIPv4Octets(s)) return 'v4'
+  const v6 = parseIPv6BigInt(s)
+  if (!v6) return null
+  return v6.ipv4Mapped ? 'v4' : 'v6'
+}
+
+function strategyNeedsIPv6(strategy: string): boolean {
+  const lower = strategy.toLowerCase()
+  return lower === 'forceipv6' || lower === 'useipv6'
+}
+
+function localDialNeedsIPv6(address: string, sendThrough: string, strategy: string): boolean {
+  if (classifyIPLiteral(sendThrough) === 'v6' || classifyIPLiteral(address) === 'v6') {
+    return true
+  }
+  return classifyIPLiteral(address) === null && strategyNeedsIPv6(strategy)
+}
+
+function splitEndpointHost(endpoint: string): string | null {
+  const s = endpoint.trim()
+  if (!s) return null
+  if (s.startsWith('[')) {
+    const close = s.indexOf(']:')
+    if (close <= 1) return null
+    return s.slice(1, close)
+  }
+  const lastColon = s.lastIndexOf(':')
+  if (lastColon <= 0 || s.indexOf(':') !== lastColon) return null
+  return s.slice(0, lastColon)
+}
+
+function matchOutboundSelectors(selectors: string[], candidates: string[]): string[] {
+  const matched = new Set<string>()
+  for (const rawSel of selectors) {
+    const sel = rawSel.trim()
+    if (!sel || sel !== rawSel) continue
+    if ('block'.startsWith(sel) || 'api'.startsWith(sel) || 'api-inbound'.startsWith(sel)) {
+      continue
     }
+    for (const c of candidates) {
+      if (c && c.startsWith(sel)) matched.add(c)
+    }
+  }
+  return [...matched]
+}
+
+type ParsedDnsEndpoint = {
+  host: string
+  port: number
+  uri: boolean
+  local: boolean
+  system: boolean
+}
+
+function parseDnsEndpointForIPv6(address: string, explicitPort = 0): ParsedDnsEndpoint | null {
+  if (!address || address.trim() !== address || /[\s]/.test(address)) return null
+  if (address === 'localhost') {
+    return explicitPort ? null : { host: '', port: 0, uri: false, local: false, system: true }
+  }
+  for (const prefix of ALLOWED_DNS_URI_PREFIXES) {
+    if (address.startsWith(prefix)) {
+      const local = prefix.includes('+local://')
+      const normalized = address.replace('+local://', '://')
+      let u: URL
+      try {
+        u = new URL(normalized)
+      } catch {
+        return null
+      }
+      if (!u.hostname || u.username || u.password || u.hash) return null
+      let host = u.hostname.toLowerCase()
+      if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1)
+      if (host.endsWith('.')) host = host.slice(0, -1)
+      const isHTTPS = prefix.startsWith('https')
+      const isQUIC = prefix.startsWith('quic')
+      let port = explicitPort
+      if (u.port) {
+        port = Number(u.port)
+      }
+      if (!port) {
+        port = isHTTPS ? 443 : isQUIC ? 853 : 53
+      }
+      return { host, port, uri: true, local, system: false }
+    }
+  }
+  if (address.includes('://')) return null
+  if (classifyIPLiteral(address) === null) return null
+  return {
+    host: address.startsWith('[') && address.endsWith(']') ? address.slice(1, -1) : address,
+    port: explicitPort || 53,
+    uri: false,
+    local: false,
+    system: false,
+  }
+}
+
+function ipv6MatchesRuleTarget(hostIPv6: bigint, target: string): boolean {
+  const slash = target.indexOf('/')
+  if (slash === -1) {
+    const parsed = parseIPv6BigInt(target)
+    return !!parsed && !parsed.ipv4Mapped && parsed.value === hostIPv6
+  }
+  const ipPart = target.slice(0, slash)
+  const bits = Number(target.slice(slash + 1))
+  if (!Number.isInteger(bits) || bits < 0 || bits > 128) return false
+  const net = parseIPv6BigInt(ipPart)
+  if (!net || net.ipv4Mapped) return false
+  if (bits === 0) return true
+  const shift = BigInt(128 - bits)
+  return (hostIPv6 >> shift) === (net.value >> shift)
+}
+
+function dnsRuleMatchesEndpoint(rule: RoutingRuleItem, ep: ParsedDnsEndpoint, hostBig: bigint): boolean {
+  if (
+    (rule.domain?.length ?? 0) > 0 ||
+    (rule.protocol?.length ?? 0) > 0 ||
+    (rule.source?.length ?? 0) > 0 ||
+    (rule.inboundTag?.length ?? 0) > 0
+  ) {
+    return false
+  }
+  for (const k of Object.keys(rule)) {
+    if (!KNOWN_RULE_KEYS.has(k)) return false
+  }
+  const netProto = ep.uri ? 'tcp' : 'udp'
+  if (rule.network && rule.network !== 'tcp,udp' && rule.network !== netProto) {
+    return false
+  }
+  if (rule.port) {
+    let matchedPort = false
+    for (const part of rule.port.split(',')) {
+      const bounds = part.trim().split('-')
+      const low = Number(bounds[0])
+      const high = bounds.length === 2 ? Number(bounds[1]) : low
+      if (ep.port >= low && ep.port <= high) matchedPort = true
+    }
+    if (!matchedPort) return false
+  }
+  if (!rule.ip || rule.ip.length === 0) return true
+  for (const target of rule.ip) {
+    if (ipv6MatchesRuleTarget(hostBig, target)) return true
   }
   return false
 }
 
-export function requiresIPv6(policy: RoutingPolicy): boolean {
+export function requiresIPv6(policy: RoutingPolicy, defaultProbeURL = ''): boolean {
   const ver = policy.schema_version ?? 1
   if (ver < 2) return !!policy.enable_ipv6_outbound
-  if ((policy.ipv6_force_domains ?? []).length > 0) return true
 
   const outbounds = policy.custom_outbounds ?? []
-  const balancers = policy.balancers ?? []
   const byTag = new Map(outbounds.map((o) => [o.tag, o]))
-  const balancerByTag = new Map(balancers.map((b) => [b.tag, b]))
-  const allCandidateTags = ['direct', 'direct-v4', 'direct-v6', ...outbounds.map((o) => o.tag)]
-  const visited = new Set<string>()
-  const queue: string[] = []
-  const enqueue = (tag?: string) => {
-    if (tag && !visited.has(tag)) {
-      visited.add(tag)
-      queue.push(tag)
+  const selectableTags = [
+    ...outbounds.map((o) => o.tag).filter(Boolean),
+    'direct',
+    'direct-v4',
+    'direct-v6',
+  ]
+  const visiting = new Set<string>()
+
+  const checkOutbound = (tag: string, target: string): boolean => {
+    const key = `${tag}\0${target}`
+    if (visiting.has(key)) return false
+    visiting.add(key)
+    try {
+      switch (tag) {
+        case 'block':
+          return false
+        case 'direct-v4':
+          return localDialNeedsIPv6(target, '', 'ForceIPv4')
+        case 'direct-v6':
+          return localDialNeedsIPv6(target, '', 'ForceIPv6')
+        case 'direct': {
+          const strategy =
+            policy.dns && policy.dns.enabled ? (policy.dns.queryStrategy ?? '') : 'AsIs'
+          return localDialNeedsIPv6(target, '', strategy)
+        }
+      }
+      const co = byTag.get(tag)
+      if (!co || co.protocol === 'blackhole') return false
+
+      const settings =
+        co.settings && typeof co.settings === 'object' ? co.settings : ({} as Record<string, unknown>)
+      const stream =
+        co.streamSettings && typeof co.streamSettings === 'object'
+          ? co.streamSettings
+          : ({} as Record<string, unknown>)
+      const sockopt =
+        stream.sockopt && typeof stream.sockopt === 'object'
+          ? (stream.sockopt as Record<string, unknown>)
+          : ({} as Record<string, unknown>)
+
+      let strategy = typeof sockopt.domainStrategy === 'string' ? sockopt.domainStrategy : ''
+      const outerStrategy = typeof co.targetStrategy === 'string' ? co.targetStrategy : ''
+      if (co.protocol === 'freedom') {
+        const ts = typeof settings.targetStrategy === 'string' ? settings.targetStrategy : ''
+        const ds = typeof settings.domainStrategy === 'string' ? settings.domainStrategy : ''
+        const freedomStrategy = ts || ds
+        if (freedomStrategy && freedomStrategy.toLowerCase() !== 'asis') {
+          strategy = freedomStrategy
+        }
+      }
+      if (outerStrategy && outerStrategy.toLowerCase() !== 'asis') {
+        strategy = outerStrategy
+      }
+
+      const dp = extractDialerProxy(co)
+      const dial = (address: string): boolean => {
+        if (dp) {
+          let nextAddr = address
+          if (classifyIPLiteral(nextAddr) === null && strategyNeedsIPv6(strategy)) {
+            nextAddr = '2001:db8::1'
+          }
+          return checkOutbound(dp, nextAddr)
+        }
+        return localDialNeedsIPv6(address, co.sendThrough ?? '', strategy)
+      }
+
+      switch (co.protocol) {
+        case 'freedom':
+          return dial(target)
+        case 'socks':
+        case 'http':
+        case 'trojan':
+        case 'shadowsocks': {
+          if (typeof settings.address === 'string' && settings.address && dial(settings.address)) {
+            return true
+          }
+          if (Array.isArray(settings.servers)) {
+            for (const s of settings.servers) {
+              const addr =
+                s && typeof s === 'object' && typeof (s as { address?: unknown }).address === 'string'
+                  ? (s as { address: string }).address
+                  : ''
+              if (dial(addr)) return true
+            }
+          }
+          return false
+        }
+        case 'vless':
+        case 'vmess': {
+          if (typeof settings.address === 'string' && settings.address && dial(settings.address)) {
+            return true
+          }
+          if (Array.isArray(settings.vnext)) {
+            for (const v of settings.vnext) {
+              const addr =
+                v && typeof v === 'object' && typeof (v as { address?: unknown }).address === 'string'
+                  ? (v as { address: string }).address
+                  : ''
+              if (dial(addr)) return true
+            }
+          }
+          return false
+        }
+        case 'wireguard': {
+          if (Array.isArray(settings.peers)) {
+            for (const p of settings.peers) {
+              const ep =
+                p && typeof p === 'object' && typeof (p as { endpoint?: unknown }).endpoint === 'string'
+                  ? (p as { endpoint: string }).endpoint
+                  : ''
+              const host = splitEndpointHost(ep)
+              if (host !== null && dial(host)) return true
+            }
+          }
+          return false
+        }
+      }
+      return false
+    } finally {
+      visiting.delete(key)
     }
   }
 
+  const checkRule = (r: RoutingRuleItem, target: string): boolean => {
+    if (r.outboundTag) return checkOutbound(r.outboundTag, target)
+    for (const b of policy.balancers ?? []) {
+      if (b.tag !== r.balancerTag) continue
+      const tags = matchOutboundSelectors(b.selector ?? [], selectableTags)
+      for (const t of tags) {
+        if (checkOutbound(t, target)) return true
+      }
+      return !!b.fallbackTag && checkOutbound(b.fallbackTag, target)
+    }
+    return false
+  }
+
+  if (checkOutbound('direct', '')) return true
+  if ((policy.ipv6_force_domains ?? []).length > 0 && checkOutbound('direct-v6', '')) return true
   for (const r of policy.custom_rules ?? []) {
-    if (r.disabled) continue
-    enqueue(r.outboundTag)
-    if (r.balancerTag) {
-      const bal = balancerByTag.get(r.balancerTag)
-      if (bal) {
-        if (bal.fallbackTag) enqueue(bal.fallbackTag)
-        for (const sel of bal.selector ?? []) {
-          if (!sel) continue
-          for (const candidate of allCandidateTags) {
-            if (candidate && candidate.startsWith(sel)) enqueue(candidate)
-          }
-        }
+    if (!r.disabled && checkRule(r, '')) return true
+  }
+
+  // Observatory（显式与自动补齐）
+  const activeBalancerTags = new Set(
+    (policy.custom_rules ?? [])
+      .filter((r) => !r.disabled && !!r.balancerTag)
+      .map((r) => r.balancerTag!),
+  )
+  const autoObsSelectors: string[] = []
+  let needsAutoObs = false
+  for (const b of policy.balancers ?? []) {
+    if (!activeBalancerTags.has(b.tag)) continue
+    const st = b.strategy?.type || 'random'
+    if (st === 'leastPing' || !!b.fallbackTag) {
+      needsAutoObs = true
+      for (const s of b.selector ?? []) {
+        if (!autoObsSelectors.includes(s)) autoObsSelectors.push(s)
       }
     }
   }
+  const trimmedDefaultProbe = defaultProbeURL.trim()
+  const safeDefaultProbe = isValidObservatoryProbeURL(trimmedDefaultProbe)
+    ? trimmedDefaultProbe
+    : 'https://1.1.1.1/'
 
-  while (queue.length > 0) {
-    const curr = queue.shift()!
-    if (curr === 'direct-v6') return true
-    const co = byTag.get(curr)
-    if (co) {
-      if (outboundNeedsHostIPv6(co)) return true
-      const dp = extractDialerProxy(co)
-      if (dp) enqueue(dp)
+  let obsProbeURL = ''
+  let obsSelectors: string[] | null = null
+  if (policy.observatory) {
+    obsProbeURL = policy.observatory.probeURL || safeDefaultProbe
+    obsSelectors = policy.observatory.subjectSelector ?? []
+  } else if (needsAutoObs) {
+    obsProbeURL = safeDefaultProbe
+    obsSelectors = autoObsSelectors
+  }
+  if (obsSelectors !== null) {
+    let probeHost = ''
+    try {
+      const u = new URL(obsProbeURL)
+      probeHost =
+        u.hostname.startsWith('[') && u.hostname.endsWith(']')
+          ? u.hostname.slice(1, -1)
+          : u.hostname
+    } catch {
+      probeHost = ''
+    }
+    const tags = matchOutboundSelectors(obsSelectors, selectableTags)
+    for (const t of tags) {
+      if (checkOutbound(t, probeHost)) return true
     }
   }
+
+  // DNS 上游物理拨号检查
+  if (policy.dns && policy.dns.enabled) {
+    for (const srv of policy.dns.servers ?? []) {
+      const address = typeof srv === 'string' ? srv : (srv?.address ?? '')
+      const port = typeof srv === 'object' && srv !== null ? (srv.port ?? 0) : 0
+      const ep = parseDnsEndpointForIPv6(address, port)
+      if (!ep || ep.system || classifyIPLiteral(ep.host) !== 'v6') continue
+      const parsedV6 = parseIPv6BigInt(ep.host)
+      if (!parsedV6 || parsedV6.ipv4Mapped) continue
+      // Loopback (::1) 或 Link-local (fe80::/10) 不要求默认 IPv6 出口
+      if (parsedV6.value === 1n || (parsedV6.value >> 118n) === 0x3fan) continue
+      if (ep.local) return true
+
+      let matched = false
+      for (const rule of policy.custom_rules ?? []) {
+        if (rule.disabled || !dnsRuleMatchesEndpoint(rule, ep, parsedV6.value)) continue
+        matched = true
+        if (checkRule(rule, ep.host)) return true
+        break
+      }
+      if (!matched && checkOutbound('direct', ep.host)) return true
+    }
+  }
+
   return false
 }
 

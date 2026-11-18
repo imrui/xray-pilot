@@ -33,6 +33,7 @@
   --nav-active-bg: #2563eb;
   --nav-active-text: #ffffff;
   --danger: #dc2626;
+  --danger-contrast: #ffffff;
   --danger-soft: rgba(220, 38, 38, 0.1);
   --danger-border: rgba(220, 38, 38, 0.24);
   /* warning / success 在亮色下也会直接作文字色（胶囊、提示行），取 700 档保证 4.5:1 以上 */
@@ -90,6 +91,7 @@
   --nav-active-bg: #232326;
   --nav-active-text: #f4f4f5;
   --danger: #f87171;
+  --danger-contrast: #ffffff;
   --danger-soft: rgba(248, 113, 113, 0.14);
   --danger-border: rgba(248, 113, 113, 0.3);
   --warning: #fbbf24;

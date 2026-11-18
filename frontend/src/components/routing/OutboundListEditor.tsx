@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Btn, Field, SelectField } from '@/components/ui/Form'
 import { JsonEditor } from '@/components/ui/JsonEditor'
 import { OUTBOUND_SNIPPETS } from '@/lib/routing-snippets'
+import { editorItemKey, retainEditorItemKey, wireGuardReservedError } from '@/lib/routing-editor'
 import {
   BUILTIN_OUTBOUNDS,
   STRUCTURED_OUTBOUND_PROTOCOLS,
@@ -24,7 +25,6 @@ const ALL_PROTOCOL_OPTIONS = [
   { value: 'shadowsocks', label: 'Shadowsocks（JSON 模式）' },
   { value: 'vmess', label: 'VMess（JSON 模式）' },
   { value: 'blackhole', label: 'Blackhole（JSON 模式）' },
-  { value: 'loopback', label: 'Loopback（JSON 模式）' },
 ]
 
 function SecretInput({
@@ -100,15 +100,20 @@ export function SingleOutboundFields({
 }) {
   const structuredSupported = isStructuredOutboundProtocol(outbound.protocol)
   const [mode, setMode] = useState<'form' | 'json'>(structuredSupported ? 'form' : 'json')
-  const [rawText, setRawText] = useState(() => JSON.stringify(outbound, null, 2))
+  const [rawDraft, setRawDraft] = useState<{ text: string; source: string } | null>(null)
+  const serialized = JSON.stringify(outbound)
+  const rawText = rawDraft?.source === serialized ? rawDraft.text : JSON.stringify(outbound, null, 2)
   const [rawError, setRawError] = useState('')
+  const [reservedDraft, setReservedDraft] = useState<string | null>(null)
+  const [reservedError, setReservedError] = useState('')
 
   const activeMode = !structuredSupported ? 'json' : mode
   const tagError = lockedTag ? '' : validateOutboundTag(outbound.tag)
 
   const switchMode = (target: 'form' | 'json') => {
+    if (target === activeMode || reservedError) return
     if (target === 'json') {
-      setRawText(JSON.stringify(outbound, null, 2))
+      setRawDraft(null)
       setRawError('')
       onRawErrorChange?.('')
       setMode('json')
@@ -121,11 +126,16 @@ export function SingleOutboundFields({
         tag: lockedTag ?? (typeof parsed.tag === 'string' ? parsed.tag : outbound.tag),
         protocol: typeof parsed.protocol === 'string' ? parsed.protocol : outbound.protocol,
       }
+      if (fixed.protocol === 'wireguard') {
+        const error = wireGuardReservedError(fixed.settings?.reserved)
+        if (error) throw new Error(error)
+      }
       if (!isStructuredOutboundProtocol(fixed.protocol)) {
         setRawError(`协议 ${fixed.protocol} 暂不支持表单模式，请继续使用 JSON 编辑或切换为受支持协议。`)
         return
       }
       onChange(fixed)
+      setReservedDraft(null)
       setRawError('')
       onRawErrorChange?.('')
       setMode('form')
@@ -160,9 +170,12 @@ export function SingleOutboundFields({
     }
     onChange(next)
     if (!isStructuredOutboundProtocol(nextProto)) {
-      setRawText(JSON.stringify(next, null, 2))
+      setRawDraft(null)
       setMode('json')
     }
+    setReservedDraft(null)
+    setReservedError('')
+    onRawErrorChange?.('')
   }
 
   // SOCKS / HTTP helpers
@@ -278,7 +291,7 @@ export function SingleOutboundFields({
     const addresses = Array.isArray(settings.address) ? (settings.address as string[]) : []
     const peers = Array.isArray(settings.peers) ? [...(settings.peers as Record<string, unknown>[])] : [{}]
     const peer0 = { ...(peers[0] ?? {}) }
-    const reservedArr = Array.isArray(peer0.reserved) ? (peer0.reserved as number[]) : []
+    const reservedArr = Array.isArray(settings.reserved) ? (settings.reserved as number[]) : []
 
     const patchWG = (patch: Record<string, unknown>) => {
       onChange({
@@ -356,20 +369,24 @@ export function SingleOutboundFields({
           <Field
             label="WARP Reserved（可选，如 0,0,0）"
             placeholder="留空或填 3 个字节整数"
-            value={reservedArr.join(',')}
+            value={reservedDraft ?? reservedArr.join(',')}
+            error={reservedError || undefined}
             onChange={(e) => {
               const raw = e.target.value.trim()
+              setReservedDraft(e.target.value)
               if (!raw) {
-                const rest = { ...peer0 }
+                const rest = { ...settings }
                 delete rest.reserved
-                patchWG({ peers: [rest, ...peers.slice(1)] })
+                setReservedError('')
+                onRawErrorChange?.('')
+                onChange({ ...outbound, settings: rest })
                 return
               }
-              const nums = raw
-                .split(',')
-                .map((x) => Number(x.trim()))
-                .filter((n) => !Number.isNaN(n))
-              patchPeer0({ reserved: nums })
+              const nums = raw.split(',').map((x) => x.trim() === '' ? NaN : Number(x.trim()))
+              const error = wireGuardReservedError(nums)
+              setReservedError(error)
+              onRawErrorChange?.(error)
+              if (!error) patchWG({ reserved: nums })
             }}
           />
         </div>
@@ -546,7 +563,7 @@ export function SingleOutboundFields({
             onClick={() => switchMode('form')}
             className={`inline-flex items-center gap-1 rounded px-2.5 py-1 font-medium transition ${
               activeMode === 'form'
-                ? 'bg-[var(--accent)] text-white'
+                ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                 : 'text-soft hover:text-[var(--text)] disabled:opacity-40'
             }`}
           >
@@ -558,7 +575,7 @@ export function SingleOutboundFields({
             onClick={() => switchMode('json')}
             className={`inline-flex items-center gap-1 rounded px-2.5 py-1 font-medium transition ${
               activeMode === 'json'
-                ? 'bg-[var(--accent)] text-white'
+                ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                 : 'text-soft hover:text-[var(--text)]'
             }`}
           >
@@ -620,7 +637,6 @@ export function SingleOutboundFields({
             readOnly={disabled}
             minHeight="200px"
             onChange={(text) => {
-              setRawText(text)
               try {
                 const parsed = parseSingleObject<CustomOutbound>(text, '自定义出站')
                 const fixed: CustomOutbound = {
@@ -628,10 +644,16 @@ export function SingleOutboundFields({
                   tag: lockedTag ?? (typeof parsed.tag === 'string' ? parsed.tag : ''),
                   protocol: typeof parsed.protocol === 'string' ? parsed.protocol : '',
                 }
+                if (fixed.protocol === 'wireguard') {
+                  const error = wireGuardReservedError(fixed.settings?.reserved)
+                  if (error) throw new Error(error)
+                }
+                setRawDraft({ text, source: JSON.stringify(fixed) })
                 setRawError('')
                 onRawErrorChange?.('')
                 onChange(fixed)
               } catch (e) {
+                setRawDraft({ text, source: serialized })
                 const msg = (e as Error).message
                 setRawError(msg)
                 onRawErrorChange?.(msg)
@@ -775,7 +797,7 @@ export function OutboundListEditor({
             const duplicateCount = outbounds.filter((o) => o.tag && o.tag === item.tag).length
             return (
               <div
-                key={idx}
+                key={editorItemKey(item)}
                 className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
@@ -807,7 +829,7 @@ export function OutboundListEditor({
                         : '删除此自定义出站'
                     }
                     onClick={() => {
-                      updateCardError(idx, '')
+                      updateCardError(editorItemKey(item), '')
                       onChange(outbounds.filter((_, i) => i !== idx))
                     }}
                     className="h-8 px-3 text-xs"
@@ -821,10 +843,10 @@ export function OutboundListEditor({
                   outbound={item}
                   peerOutboundTags={allTags}
                   disabled={disabled}
-                  onRawErrorChange={(err) => updateCardError(idx, err)}
+                  onRawErrorChange={(err) => updateCardError(editorItemKey(item), err)}
                   onChange={(updated) => {
                     const next = [...outbounds]
-                    next[idx] = updated
+                    next[idx] = retainEditorItemKey(item, updated)
                     onChange(next)
                   }}
                 />

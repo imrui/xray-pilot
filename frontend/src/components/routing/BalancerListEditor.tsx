@@ -1,6 +1,7 @@
 import { Activity, Plus, Scale, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Btn, Field, FieldGroup, SelectField, Switch } from '@/components/ui/Form'
+import { editorItemKey, retainEditorItemKey } from '@/lib/routing-editor'
 import {
   BUILTIN_OUTBOUNDS,
   countBalancerReferences,
@@ -79,7 +80,7 @@ export function BalancerListEditor({
 
   const updateBalancer = (index: number, nextItem: BalancerItem) => {
     const next = [...balancers]
-    next[index] = nextItem
+    next[index] = retainEditorItemKey(balancers[index], nextItem)
     onBalancersChange(next)
   }
 
@@ -168,7 +169,7 @@ export function BalancerListEditor({
 
             return (
               <div
-                key={idx}
+                key={editorItemKey(item)}
                 className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
@@ -349,7 +350,7 @@ export function BalancerListEditor({
                       : outboundTags.length > 0
                         ? [outboundTags[0]]
                         : [''],
-                  probeURL: 'https://www.gstatic.com/generate_204',
+                  probeURL: 'https://1.1.1.1/',
                   probeInterval: '1m',
                   enableConcurrency: true,
                 })
@@ -358,7 +359,7 @@ export function BalancerListEditor({
             options={[
               {
                 value: 'auto',
-                label: '自动默认（推荐 · 同步时自动汇总候选集并继承面板探测 URL，每 1m 并发探测）',
+                label: '自动默认（推荐 · 自动汇总候选集，使用公网 IP 探测地址，每 1m 并发探测）',
               },
               {
                 value: 'custom',
@@ -371,8 +372,8 @@ export function BalancerListEditor({
             <div className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3.5">
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field
-                  label="探测目标 URL（probeURL，仅限公网 HTTPS 443）"
-                  placeholder="https://www.gstatic.com/generate_204"
+                  label="探测目标 URL（probeURL，仅限公网 IP，HTTPS 443）"
+                  placeholder="https://1.1.1.1/"
                   value={observatory.probeURL ?? ''}
                   onChange={(e) => {
                     const next = { ...observatory }
@@ -396,6 +397,9 @@ export function BalancerListEditor({
                 />
               </div>
 
+              <p className="text-xs text-soft">
+                请使用明确的公网 IP，防止域名解析变化将健康探测导向内网。
+              </p>
               <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-2">
                 <div>
                   <p className="text-xs font-medium text-[var(--text)]">

@@ -121,7 +121,7 @@ func TestActualXrayRoutingFixtures(t *testing.T) {
 		ips  []string
 	}{{"ipv4-only", false, nil}, {"ipv6-strict", true, nil}, {"custom-target-ips", false, []string{"1.1.1.1", "203.0.113.0/24", "2001:db8::/32"}}} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := RoutingPolicy{EnableIPv6: tc.ipv6, IPv6FailurePolicy: "strict", IPv4Domains: []string{"domain:example.com"}, IPv6Domains: []string{"domain:example.net"}}
+			p := RoutingPolicy{SchemaVersion: 1, EnableIPv6: tc.ipv6, IPv6FailurePolicy: "strict", IPv4Domains: []string{"domain:example.com"}, IPv6Domains: []string{"domain:example.net"}}
 			if len(tc.ips) > 0 {
 				p.CustomRules = []RoutingRule{{Type: "field", IP: tc.ips, OutboundTag: "direct-v4"}}
 			}

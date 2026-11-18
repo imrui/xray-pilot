@@ -114,6 +114,7 @@ export function TemplateEditor({
   const originalSerialized = JSON.stringify(original, null, 2)
 
   const dirty =
+    hasRuleCardError || hasOutboundCardError ||
     name !== base.name ||
     description !== base.description ||
     legacyV1 ||
@@ -284,7 +285,7 @@ export function TemplateEditor({
               onClick={() => switchViewMode('structured')}
               className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 font-medium transition ${
                 viewMode === 'structured'
-                  ? 'bg-[var(--accent)] text-white'
+                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                   : 'text-soft hover:text-[var(--text)]'
               }`}
             >
@@ -298,7 +299,7 @@ export function TemplateEditor({
               onClick={() => switchViewMode('json')}
               className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 font-medium transition ${
                 viewMode === 'json'
-                  ? 'bg-[var(--accent)] text-white'
+                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                   : 'text-soft hover:text-[var(--text)]'
               }`}
             >
@@ -388,7 +389,7 @@ export function TemplateEditor({
               </button>
             </div>
 
-            {activeTab === 'rules' && (
+            <div hidden={activeTab !== 'rules'}>
               <RuleWaterfallEditor
                 domainStrategy={domainStrategy}
                 onDomainStrategyChange={setDomainStrategy}
@@ -407,8 +408,8 @@ export function TemplateEditor({
                 disabled={!writable || busy}
                 onPendingErrorChange={setHasRuleCardError}
               />
-            )}
-            {activeTab === 'outbounds' && (
+            </div>
+            <div hidden={activeTab !== 'outbounds'}>
               <OutboundListEditor
                 outbounds={customOutbounds}
                 rules={customRules}
@@ -417,8 +418,8 @@ export function TemplateEditor({
                 onChange={setCustomOutbounds}
                 onPendingErrorChange={setHasOutboundCardError}
               />
-            )}
-            {activeTab === 'balancers' && (
+            </div>
+            <div hidden={activeTab !== 'balancers'}>
               <BalancerListEditor
                 balancers={balancers}
                 observatory={observatory}
@@ -428,10 +429,10 @@ export function TemplateEditor({
                 onBalancersChange={setBalancers}
                 onObservatoryChange={setObservatory}
               />
-            )}
-            {activeTab === 'dns' && (
+            </div>
+            <div hidden={activeTab !== 'dns'}>
               <DnsEditor dns={dns} disabled={!writable || busy} onChange={setDns} />
-            )}
+            </div>
           </div>
         ) : (
           <FieldGroup
@@ -471,6 +472,7 @@ export function TemplateEditor({
           open={sandboxOpen}
           onClose={() => setSandboxOpen(false)}
           nodes={overview.data?.nodes ?? []}
+          draftIdentity={currentSerialized}
           getDraftPolicy={() => {
             if (viewMode === 'structured') {
               if (hasRuleCardError || hasOutboundCardError) {

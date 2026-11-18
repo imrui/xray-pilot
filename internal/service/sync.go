@@ -103,7 +103,7 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	}
 
 	params := s.sshParams(node)
-	params.RequiresIPv6 = snapshot.Policy != nil && snapshot.Policy.RequiresIPv6()
+	params.RequiresIPv6 = snapshot.Policy != nil && snapshot.Policy.RequiresIPv6WithOptions(xray.RenderOptions{DefaultProbeURL: params.ProbeURL})
 	if state.VerifiedAt != nil && state.RuntimeHash == xray.ConfigHash(configContent) && state.DiskHash == state.RuntimeHash {
 		params.ConfirmedProcess = state.ProcessID
 	}
@@ -413,6 +413,9 @@ func (s *SyncService) PreviewConfig(nodeID uint) (string, []string, error) {
 	content, warnings, err := s.buildConfig(node)
 	if err != nil {
 		return "", warnings, err
+	}
+	if eff, effErr := NewRoutingService().Effective(nodeID); effErr == nil && eff != nil && eff.Policy != nil {
+		warnings = append(warnings, xray.DiagnoseRenderedDNSSelfLoop(content, *eff.Policy, xray.RenderOptions{})...)
 	}
 	// 脱敏：将生成配置中的 privateKey 替换为占位符（避免通过 API 暴露）
 	masked := redactConfig(content)

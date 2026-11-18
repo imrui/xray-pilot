@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"regexp"
 	"sort"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 )
 
 var (
-	geositeTagRegex = regexp.MustCompile(`^[A-Za-z0-9_@-]+$`)
+	geositeTagRegex = regexp.MustCompile(`^[A-Za-z0-9_-]+(@[A-Za-z0-9_-]+)*$`)
 	geoipTagRegex   = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 )
 
@@ -32,7 +33,20 @@ type RoutingPolicy struct {
 }
 
 type RenderOptions struct {
-	DefaultProbeURL string
+	DefaultProbeURL   string
+	NodeGeosite       *GeositeDB
+	NodeGeositeSHA256 string
+}
+
+// VerifiedNodeGeosite 仅在调用方显式提供目标节点 geodata 且 SHA-256 摘要校验一致时返回，绝不隐式读取面板本机文件。
+func (o RenderOptions) VerifiedNodeGeosite() *GeositeDB {
+	if o.NodeGeosite == nil || strings.TrimSpace(o.NodeGeositeSHA256) == "" {
+		return nil
+	}
+	if !strings.EqualFold(o.NodeGeosite.SHA256(), strings.TrimSpace(o.NodeGeositeSHA256)) {
+		return nil
+	}
+	return o.NodeGeosite
 }
 
 type routingPolicyLegacyWire struct {
@@ -345,12 +359,47 @@ func validateDomain(v string) error {
 	return nil
 }
 
+// parseXrayCIDR 对齐 Xray 26.3.27 / 26.11.9 的 parseCIDR 语义：先将 IPv4-mapped IPv6 还原为 IPv4（前缀上限 32），再应用掩码。
+func parseXrayCIDR(s string) (netip.Prefix, error) {
+	ipStr, bitsStr, ok := strings.Cut(s, "/")
+	if !ok || bitsStr == "" {
+		return netip.Prefix{}, fmt.Errorf("无效 CIDR: %q", s)
+	}
+	for i := 0; i < len(bitsStr); i++ {
+		if bitsStr[i] < '0' || bitsStr[i] > '9' {
+			return netip.Prefix{}, fmt.Errorf("无效 CIDR 前缀长度: %q", s)
+		}
+	}
+	addr, err := netip.ParseAddr(ipStr)
+	if err != nil || addr.Zone() != "" {
+		return netip.Prefix{}, fmt.Errorf("无效 CIDR 地址: %q", s)
+	}
+	addr = addr.Unmap()
+	bits, err := strconv.Atoi(bitsStr)
+	if err != nil || bits < 0 || bits > addr.BitLen() {
+		return netip.Prefix{}, fmt.Errorf("CIDR 前缀长度超出地址族上限: %q", s)
+	}
+	return netip.PrefixFrom(addr, bits), nil
+}
+
+func parseXrayIPOrCIDR(v string) error {
+	if strings.Contains(v, "/") {
+		_, err := parseXrayCIDR(v)
+		return err
+	}
+	addr, err := netip.ParseAddr(v)
+	if err != nil || addr.Zone() != "" {
+		return fmt.Errorf("无效 IP 地址: %q", v)
+	}
+	return nil
+}
+
 func validateIPRule(v string) error {
 	if v == "" || len(v) > 256 || strings.TrimSpace(v) != v {
 		return fmt.Errorf("IP 匹配项无效: %q", v)
 	}
 	if strings.HasPrefix(v, "geoip:") || strings.HasPrefix(v, "!geoip:") {
-		tag := strings.TrimPrefix(strings.TrimPrefix(v, "!"), "geoip:")
+		tag := strings.TrimPrefix(strings.TrimPrefix(normalizeGeoIPRule(v), "geoip:"), "!")
 		if !geoipTagRegex.MatchString(tag) {
 			return fmt.Errorf("无效 geoip 标签: %q", v)
 		}
@@ -359,12 +408,29 @@ func validateIPRule(v string) error {
 		}
 		return nil
 	}
-	if net.ParseIP(v) == nil {
-		if _, _, err := net.ParseCIDR(v); err != nil {
-			return fmt.Errorf("IP 必须是地址、CIDR 或 geoip: 标签")
-		}
+	if err := parseXrayIPOrCIDR(v); err != nil {
+		return fmt.Errorf("IP 必须是合法地址、CIDR（注意映射地址前缀上限）或 geoip: 标签: %w", err)
 	}
 	return nil
+}
+
+// normalizeGeoIPRule 使用新旧内核都支持的否定 GeoIP 语法。
+func normalizeGeoIPRule(v string) string {
+	if strings.HasPrefix(v, "!geoip:") {
+		return "geoip:!" + strings.TrimPrefix(v, "!geoip:")
+	}
+	return v
+}
+
+func normalizeIPRules(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[i] = normalizeGeoIPRule(v)
+	}
+	return out
 }
 
 // MergeRoutingPolicy 合并基础模板策略与节点级覆盖（含按出站 Tag 的 replace / remap 及节点级 DNS 覆盖）。
@@ -529,19 +595,15 @@ func MergeRoutingPolicy(base, overrides string) (RoutingPolicy, error) {
 
 // RequiresIPv6 判定该路由策略是否需要节点本机具备可用 IPv6 默认出口路由。
 func (p RoutingPolicy) RequiresIPv6() bool {
+	return p.RequiresIPv6WithOptions(RenderOptions{})
+}
+
+// RequiresIPv6WithOptions 与最终渲染共用探针设置，避免遗漏自动观测器的本机 IPv6 依赖。
+func (p RoutingPolicy) RequiresIPv6WithOptions(opts RenderOptions) bool {
 	if p.SchemaVersion < 2 {
 		return p.EnableIPv6
 	}
-	refs := p.referencedOutboundTags()
-	if refs["direct-v6"] {
-		return true
-	}
-	for _, co := range p.CustomOutbounds {
-		if refs[co.Tag] && outboundRequiresIPv6(co) {
-			return true
-		}
-	}
-	return false
+	return routingPolicyRequiresIPv6(p, opts)
 }
 
 func ApplyRoutingPolicy(content string, p RoutingPolicy) (string, error) {
@@ -565,7 +627,7 @@ func ApplyRoutingPolicyWithOptions(content string, p RoutingPolicy, opts RenderO
 	if cfg.Routing == nil {
 		return "", fmt.Errorf("缺少系统路由")
 	}
-	if err := checkDNSInboundPortConflict(p.DNS, cfg.Inbounds); err != nil {
+	if err := checkDNSInboundPortConflictWithGeosite(p.DNS, cfg.Inbounds, opts.VerifiedNodeGeosite()); err != nil {
 		return "", err
 	}
 	if p.SchemaVersion >= 3 {
@@ -587,6 +649,7 @@ func ApplyRoutingPolicyWithOptions(content string, p RoutingPolicy, opts RenderO
 		}
 		r.Remark = ""
 		r.Disabled = false
+		r.IP = normalizeIPRules(r.IP)
 		cfg.Routing.Rules = append(cfg.Routing.Rules, r)
 	}
 	if len(p.IPv4Domains) > 0 {

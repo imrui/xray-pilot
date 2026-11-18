@@ -318,7 +318,7 @@ func TestPhase3ServiceDNSOverrideObservatoryAndBalancerGuardrails(t *testing.T) 
 	settingSvc := NewSettingService()
 
 	// 配置系统默认健康探测 URL，验证 leastPing 均衡器自动生成的 observatory 能继承该设置
-	if err := settingSvc.BatchUpdate(map[string]string{KeyXrayProbeURL: "https://cp.cloudflare.com/generate_204"}); err != nil {
+	if err := settingSvc.BatchUpdate(map[string]string{KeyXrayProbeURL: "https://1.0.0.1/"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -374,7 +374,7 @@ func TestPhase3ServiceDNSOverrideObservatoryAndBalancerGuardrails(t *testing.T) 
 	}
 	for _, must := range []string{
 		`"balancerTag": "hk-pool"`,
-		`"probeURL": "https://cp.cloudflare.com/generate_204"`,
+		`"probeURL": "https://1.0.0.1/"`,
 		`"domainStrategy": "UseIPv4"`,
 		`"https://1.1.1.1/dns-query"`,
 	} {
