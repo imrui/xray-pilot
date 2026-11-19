@@ -7,8 +7,9 @@ test('二维码脚本未加载时，中转和节点弹窗可打开并复制当�
   const relay = 'http://relay.test/sub/user'
   const node = 'vless://node.test'
   const template = await readFile(new URL('../../internal/handler/templates/subscribe.html', import.meta.url), 'utf8')
-  // 使用页面自身的 DOM 和事件处理器，只替换本用例的地址，不加载外部脚本。
-  const dom = new JSDOM(template.replaceAll('{{.RelayURL}}', relay).replaceAll('{{.Link}}', node), {
+  // 模拟二维码库不可用，保留页面原有的 DOM 和事件处理器。
+  const html = template.replace('{{.QRCodeScript}}', '').replaceAll('{{.RelayURL}}', relay).replaceAll('{{.Link}}', node)
+  const dom = new JSDOM(html, {
     url: 'https://panel.test/sub/user', runScripts: 'dangerously',
   })
   t.after(() => dom.window.close())

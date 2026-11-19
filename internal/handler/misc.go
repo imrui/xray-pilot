@@ -22,8 +22,10 @@ import (
 //go:embed templates/subscribe.html
 var subscribePageHTML string
 
+// 只将随程序编译的二维码库作为可信脚本插入订阅页。
+//
 //go:embed templates/qrcode.min.js
-var subscribeQRCode []byte
+var subscribeQRCode template.JS
 
 // ---- 日志 ----
 
@@ -233,12 +235,13 @@ func (h *SubscribeHandler) handleInfoPage(c *gin.Context, token string) {
 
 	type tmplData struct {
 		*service.SubscribePageData
+		QRCodeScript          template.JS
 		ExpiresStr            string
 		TrafficLastUpdatedStr string // 预格式化避免模板里写日期 layout
 		HasTraffic            bool   // 是否曾产生过流量；用于模板判定占位提示
 	}
 
-	td := tmplData{SubscribePageData: data}
+	td := tmplData{SubscribePageData: data, QRCodeScript: subscribeQRCode}
 	if data.ExpiresAt != nil {
 		td.ExpiresStr = data.ExpiresAt.Format("2006-01-02")
 	} else {

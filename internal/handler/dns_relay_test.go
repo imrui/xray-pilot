@@ -124,13 +124,19 @@ func TestRelayHTMLAndMachineSubscriptions(t *testing.T) {
 	html := get(path)
 	for _, want := range []string{"内网中转订阅", fmt.Sprintf("data-copy=%q", first+id), fmt.Sprintf("data-link=%q", first+id),
 		fmt.Sprintf("value=%q checked", first+id), fmt.Sprintf("value=%q", first+id+"?format=json"), fmt.Sprintf("value=%q", first+id+"?format=clash"),
-		"/subscription-assets/qrcode.js", "暂无可用节点"} {
+		"暂无可用节点"} {
 		if !strings.Contains(html, want) {
 			t.Fatal("missing HTML", want)
 		}
 	}
-	if strings.Contains(html, "fonts.googleapis.com") || strings.Contains(html, "cdn.jsdelivr.net") || !strings.Contains(get("/subscription-assets/qrcode.js"), "QRCode") {
+	if !strings.Contains(html, "<script>"+string(subscribeQRCode)+"</script>") || strings.Contains(html, "/subscription-assets/") {
+		t.Fatal("the subscription page must include the QR script when only /sub/ is forwarded")
+	}
+	if strings.Contains(html, "fonts.googleapis.com") || strings.Contains(html, "cdn.jsdelivr.net") {
 		t.Fatal("external subscription asset")
+	}
+	if get("/subscription-assets/qrcode.js") != string(subscribeQRCode) {
+		t.Fatal("legacy QR script URL must still serve the embedded script")
 	}
 	for _, format := range []string{"v2ray", "clash", "singbox"} {
 		if strings.Contains(get(path+"?format="+format), id) {
