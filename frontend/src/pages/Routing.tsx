@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { PencilLine, Plus } from 'lucide-react'
+import { HelpPopover } from '@/components/ui/HelpPopover'
+import { Eye, PencilLine, Plus } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { PageShell } from '@/components/ui/Page'
 import { Btn } from '@/components/ui/Form'
 import { ListToolbar, FilterChip } from '@/components/ui/ListToolbar'
 import { Table, Pagination } from '@/components/ui/Table'
-import { Badge } from '@/components/ui/Badge'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { useConfirm } from '@/lib/confirm-context'
 import { RoutingBindingDrawer } from '@/components/routing/BindingEditor'
@@ -16,6 +16,31 @@ import type { RoutingTemplate } from '@/lib/routing-model'
 import { invalidateRouting, useRoutingOverview } from '@/lib/routing'
 import request from '@/lib/axios'
 
+function DraftSummary({ draft }: { draft: string }) {
+  const policy = readPolicy(draft)
+  const legacy = (policy.schema_version ?? 1) < 2
+  const ipv4 = policy.ipv4_force_domains.length
+  const ipv6 = policy.ipv6_force_domains.length
+  const rules = policy.custom_rules.length
+  const outbounds = policy.custom_outbounds?.length ?? 0
+  const balancers = policy.balancers?.length ?? 0
+  const parts = [
+    legacy && '默认 IPv4（旧版）',
+    ipv4 > 0 && `IPv4 域名 ${ipv4}`,
+    ipv6 > 0 && `${legacy ? '旧版 IPv6 列表' : 'IPv6 域名'} ${ipv6}`,
+    rules > 0 && `${rules} 条规则`,
+    outbounds > 0 && `${outbounds} 个出站`,
+    balancers > 0 && `${balancers} 个负载均衡`,
+    policy.dns?.enabled && '自定义 DNS',
+  ].filter(Boolean)
+  return (
+    <div className="space-y-1 whitespace-normal text-sm leading-6">
+      <p>{parts.length ? parts.join(' · ') : '默认直连'}</p>
+      {requiresIPv6(policy) && <p className="text-[var(--warning)]">需要可用 IPv6 出口</p>}
+    </div>
+  )
+}
+
 export default function Routing() {
   const qc = useQueryClient()
   const confirm = useConfirm()
@@ -24,6 +49,7 @@ export default function Routing() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [edit, setEdit] = useState<RoutingTemplate | null>(null)
   const [history, setHistory] = useState<RoutingTemplate | null>(null)
   const [nodes, setNodes] = useState<RoutingTemplate | null>(null)
@@ -31,7 +57,7 @@ export default function Routing() {
   const [error, setError] = useState('')
   const rows = (query.data?.templates ?? []).filter(
     (t) =>
-      (t.name + t.description).toLowerCase().includes(search.toLowerCase()) &&
+      `${t.name} ${t.description}`.toLowerCase().includes(search.trim().toLowerCase()) &&
       (filter === 'all' || (filter === 'draft' ? t.draft_changed : t.latest_revision > 0)),
   )
   const remove = async (t: RoutingTemplate) => {
@@ -82,7 +108,11 @@ export default function Routing() {
           </>
         }
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2">
+            <HelpPopover title="路由配置说明">
+              <p>预设仅供选用。要应用模板，请先绑定已发布的版本，再到节点列表预览并同步配置。</p>
+              <p>节点优先使用单独指定的版本，其次使用分组配置，最后继承全局默认。</p>
+            </HelpPopover>
             <Btn variant="secondary" onClick={() => setGlobal(true)}>
               全局默认
             </Btn>
@@ -106,13 +136,9 @@ export default function Routing() {
                 新增路由模板
               </Btn>
             )}
-          </>
+          </div>
         }
       />
-      <p className="text-sm text-soft">
-        模板定义路由规则；配置节点后，在节点列表预览和同步完整配置。
-        预设不会自动应用；全局默认仅供继承节点使用，节点指定优先于分组，分组优先于全局。
-      </p>
       {(error || query.error) && (
         <div role="alert" className="text-sm text-[var(--danger)]">
           {error || '路由模板加载失败。'}{' '}
@@ -128,136 +154,121 @@ export default function Routing() {
         </div>
       )}
       {!query.error && (
-        <Table
-          data={rows.slice((page - 1) * 10, page * 10)}
-          loading={query.isLoading}
-          columns={[
-            {
-              key: 'name',
-              label: '名称',
-              render: (t) => (
-                <div>
-                  <button className="font-semibold text-[var(--accent)]" onClick={() => setEdit(t)}>
-                    {t.name}
-                  </button>
-                  {t.preset_key && <span className="ml-2 text-xs text-soft">预设起始模板</span>}
-                  <p className="mt-1 max-w-xs whitespace-normal text-xs text-soft">
-                    {t.description || '未填写说明'}
-                  </p>
-                </div>
-              ),
-            },
-            {
-              key: 'rules',
-              label: '草稿规则摘要',
-              render: (t) => {
-                const p = readPolicy(t.draft)
-                const isModern = (p.schema_version ?? 1) >= 2
-                const outCount = p.custom_outbounds?.length ?? 0
-                const balCount = p.balancers?.length ?? 0
-                const hasDns = !!p.dns?.enabled
-                return (
-                  <div className="space-y-1 text-xs">
-                    <p>
-                      强制 IPv4 {p.ipv4_force_domains.length} ·{' '}
-                      {isModern ? '强制 IPv6' : '旧版 IPv6 列表'}{' '}
-                      {p.ipv6_force_domains.length}
-                    </p>
-                    <p>
-                      {isModern ? '默认直连' : '旧版：默认 IPv4'} · 自定义出站 {outCount}
-                      {balCount > 0 ? ` · 负载均衡 ${balCount}` : ''} · 自定义规则{' '}
-                      {p.custom_rules.length}
-                      {hasDns ? ' · 自定义 DNS' : ''}
-                    </p>
-                    {requiresIPv6(p) && <p className="text-[var(--warning)]">需要可用 IPv6 出口</p>}
+        <div className="[&_table]:table-fixed [&_th]:text-sm [&_th]:tracking-normal [&_th]:text-soft [&_th:first-child]:w-[30%] [&_th:last-child]:text-right [&_td]:py-4 [&_span.uppercase]:text-sm [&_span.uppercase]:tracking-normal">
+          <Table
+            data={rows.slice((page - 1) * pageSize, page * pageSize)}
+            loading={query.isLoading}
+            columns={[
+              {
+                key: 'name',
+                label: '模板',
+                render: (t) => (
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-baseline justify-end gap-x-2 md:justify-start">
+                      <button
+                        className="wrap-anywhere whitespace-normal text-right text-base font-semibold leading-6 text-[var(--text)] hover:text-[var(--accent)] focus-visible:outline-[var(--accent)] md:text-left"
+                        onClick={() => setEdit(t)}
+                      >
+                        {t.name}
+                      </button>
+                      {t.preset_key && <span className="text-sm font-normal text-soft">预设</span>}
+                    </div>
+                    {t.description && (
+                      <p className="line-clamp-1 wrap-anywhere whitespace-normal text-sm font-normal leading-6 text-soft" title={t.description}>
+                        {t.description}
+                      </p>
+                    )}
                   </div>
-                )
+                ),
               },
-            },
-            {
-              key: 'latest_revision',
-              label: '最新可用版本',
-              render: (t) => (t.latest_revision ? `v${t.latest_revision}` : '尚未发布'),
-            },
-            {
-              key: 'usage',
-              label: '使用情况',
-              render: (t) => (
-                <button
-                  className="text-left text-xs text-[var(--accent)]"
-                  onClick={() => setNodes(t)}
-                >
-                  {t.node_count} 个节点使用
-                  <p className="mt-1 text-soft">{t.binding_count} 条直接绑定</p>
-                </button>
-              ),
-            },
-            {
-              key: 'draft_changed',
-              label: '草稿状态',
-              render: (t) => (
-                <Badge
-                  label={t.draft_changed ? '有未发布修改' : '与最新版本一致'}
-                  variant={t.draft_changed ? 'yellow' : 'gray'}
-                />
-              ),
-            },
-            {
-              key: 'actions',
-              label: '操作',
-              render: (t) => (
-                <div className="flex justify-end gap-2">
-                  <Btn variant="secondary" onClick={() => setEdit(t)}>
-                    <PencilLine className="h-4 w-4" />
-                    {superAdmin ? '编辑' : '查看'}
-                  </Btn>
-                  <Btn
-                    variant="secondary"
-                    disabled={!t.latest_revision}
-                    onClick={() => setNodes(t)}
-                  >
-                    配置节点
-                  </Btn>
-                  <ActionMenu
-                    items={[
-                      { label: '版本历史与引用', onSelect: () => setHistory(t) },
-                      ...(superAdmin
-                        ? [
-                            {
-                              label: '复制草稿为新模板',
-                              onSelect: () =>
-                                setEdit({
-                                  id: 0,
-                                  name: `${t.name} - 副本`,
-                                  description: t.description,
-                                  draft: t.draft,
-                                  version: 0,
-                                  latest_revision: 0,
-                                  draft_changed: true,
-                                  binding_count: 0,
-                                  node_count: 0,
-                                }),
-                            },
-                          ]
-                        : []),
-                      ...(superAdmin && !t.latest_revision
-                        ? [
-                            {
-                              label: '删除未发布模板',
-                              danger: true,
-                              onSelect: () => void remove(t),
-                            },
-                          ]
-                        : []),
-                    ]}
-                  />
-                </div>
-              ),
-            },
-          ]}
-        />
+              {
+                key: 'rules',
+                label: '草稿策略',
+                render: (t) => <DraftSummary draft={t.draft} />,
+              },
+              {
+                key: 'usage',
+                label: '发布与使用',
+                render: (t) => (
+                  <div className="space-y-1 whitespace-normal text-sm leading-6">
+                    <p>
+                      {t.latest_revision ? `已发布 v${t.latest_revision}` : '未发布'}
+                      {t.latest_revision > 0 && t.draft_changed && (
+                        <span className="ml-2 inline-block text-[var(--warning)]">草稿有修改</span>
+                      )}
+                    </p>
+                    <button
+                      className="text-right font-normal text-soft hover:text-[var(--accent)] hover:underline md:text-left"
+                      onClick={() => setNodes(t)}
+                    >
+                      {t.node_count ? `${t.node_count} 个节点` : '暂无节点使用'}
+                      {t.binding_count > 0 && ` · ${t.binding_count} 条直接绑定`}
+                    </button>
+                  </div>
+                ),
+              },
+              {
+                key: 'actions',
+                label: '操作',
+                render: (t) => (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Btn
+                      variant="secondary"
+                      className="whitespace-nowrap px-3"
+                      onClick={() => setEdit(t)}
+                    >
+                      {superAdmin ? <PencilLine className="size-4" /> : <Eye className="size-4" />}
+                      {superAdmin ? '编辑' : '查看'}
+                    </Btn>
+                    <Btn
+                      variant="secondary"
+                      className="whitespace-nowrap px-3"
+                      disabled={!t.latest_revision}
+                      onClick={() => setNodes(t)}
+                    >
+                      配置节点
+                    </Btn>
+                    <ActionMenu
+                      items={[
+                        { label: '版本历史与引用', onSelect: () => setHistory(t) },
+                        ...(superAdmin
+                          ? [
+                              {
+                                label: '复制草稿为新模板',
+                                onSelect: () =>
+                                  setEdit({
+                                    id: 0,
+                                    name: `${t.name} - 副本`,
+                                    description: t.description,
+                                    draft: t.draft,
+                                    version: 0,
+                                    latest_revision: 0,
+                                    draft_changed: true,
+                                    binding_count: 0,
+                                    node_count: 0,
+                                  }),
+                              },
+                            ]
+                          : []),
+                        ...(superAdmin && !t.latest_revision
+                          ? [
+                              {
+                                label: '删除未发布模板',
+                                danger: true,
+                                onSelect: () => void remove(t),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </div>
       )}
-      <Pagination page={page} pageSize={10} total={rows.length} onChange={setPage} />
+      <Pagination page={page} pageSize={pageSize} total={query.data ? rows.length : undefined} onChange={setPage} onPageSizeChange={setPageSize} />
       {edit && (
         <TemplateEditor
           key={`${edit.id}:${edit.edit_payload ?? edit.draft}`}

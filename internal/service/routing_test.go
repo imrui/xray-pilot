@@ -48,6 +48,29 @@ func publishRouting(t *testing.T, name, policy string) *entity.RoutingTemplateRe
 	}
 	return rev
 }
+
+func TestStoredLegacyRuleRendersForDesiredAndHealthyPolicy(t *testing.T) {
+	n, _ := routingFixture(t)
+	const rule = `[{"Type":"field","IP":["192.0.2.0/24"],"outboundtag":"direct-v4"}]`
+	const snapshot = `{"schema_version":2,"ipv6_failure_policy":"strict","custom_rules":` + rule + `}`
+	updates := repository.DB.Model(&entity.RoutingBinding{}).Where("scope = ? AND target_id = ?", "node", n.ID).
+		Update("overrides", `{"custom_rules":`+rule+`}`)
+	if updates.Error != nil || updates.RowsAffected != 1 {
+		t.Fatalf("seed stored v0.7.2 override: %v (%d rows)", updates.Error, updates.RowsAffected)
+	}
+	sync := NewSyncService()
+	want, _, err := sync.buildConfigPolicy(n, `{"schema_version":2,"ipv6_failure_policy":"strict","custom_rules":[{"type":"field","ip":["192.0.2.0/24"],"outboundTag":"direct-v4"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{"desired", snapshot} {
+		got, _, err := sync.buildConfigPolicy(n, source)
+		if err != nil || got != want {
+			t.Fatalf("stored policy %s changed rendered config: %v", source, err)
+		}
+	}
+}
+
 func TestRoutingInheritanceConflictAndOverride(t *testing.T) {
 	n, _ := routingFixture(t)
 	s := NewRoutingService()

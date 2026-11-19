@@ -5,8 +5,64 @@ import (
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestOverviewSelectsLatestSyncFailure(t *testing.T) {
+	n, _ := routingFixture(t)
+	base := time.Now().UTC().Truncate(time.Second)
+	newer := base.Add(time.Second)
+	if err := repository.DB.Model(n).Update("sync_status", entity.SyncStatusFailed).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.EnsureConfigState(repository.DB, n.ID); err != nil {
+		t.Fatal(err)
+	}
+	state := repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ?", n.ID)
+	if err := state.Updates(map[string]any{"last_error": "SSH 连接失败: private-test-value", "updated_at": base}).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertSummary := func(reason string, at time.Time) {
+		t.Helper()
+		overview, err := NewRoutingService().Overview()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, result := range []*RoutingOverview{overview, MaskRoutingOverview(overview)} {
+			row := result.Nodes[0]
+			if row.ID != n.ID || row.LastSyncError != reason || (row.LastSyncErrorAt == nil) != at.IsZero() || row.LastSyncErrorAt != nil && !row.LastSyncErrorAt.Equal(at) {
+				t.Fatalf("incorrect failure summary: %s %v", row.LastSyncError, row.LastSyncErrorAt)
+			}
+			data, err := json.Marshal(row)
+			if err != nil || strings.Contains(string(data), "private-test-value") || at.IsZero() && strings.Contains(string(data), "last_sync_error") {
+				t.Fatal("unsafe or obsolete overview error", err)
+			}
+		}
+	}
+	assertSummary("SSH 连接失败", base)
+	job := entity.ConfigDeployment{NodeID: n.ID, RequestKey: "older-job", Status: "failed", Error: "上传配置失败: DRIFT_CONFLICT", UpdatedAt: newer}
+	if err := repository.DB.Create(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertSummary("DRIFT_CONFLICT", newer)
+	if err := state.Updates(map[string]any{"last_error": "PREFLIGHT_FAILED: private-test-value", "updated_at": newer.Add(time.Second)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertSummary("PREFLIGHT_FAILED", newer.Add(time.Second))
+	if err := state.Update("last_error", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DB.Model(n).Update("sync_status", entity.SyncStatusDrifted).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertSummary("DRIFT_CONFLICT", newer)
+	if err := repository.DB.Create(&entity.ConfigDeployment{NodeID: n.ID, RequestKey: "latest-job", Status: "succeeded"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	assertSummary("", time.Time{})
+}
 
 func TestRoutingPreviewDoesNotPersistAndMatchesSave(t *testing.T) {
 	n, _ := routingFixture(t)

@@ -96,8 +96,8 @@ func (s *ProfileService) Delete(id uint) error {
 	return nil
 }
 
-func (s *ProfileService) List(page, pageSize int) ([]dto.ProfileResponse, int64, error) {
-	profiles, total, err := s.profileRepo.List(page, pageSize)
+func (s *ProfileService) List(page, pageSize int, keyword, protocol string, keywordProtocols []string) ([]dto.ProfileResponse, int64, error) {
+	profiles, total, err := s.profileRepo.List(page, pageSize, keyword, protocol, keywordProtocols)
 	if err != nil {
 		return nil, 0, err
 	}

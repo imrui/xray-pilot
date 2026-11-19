@@ -111,10 +111,7 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 		result.Error = "无法保存期望版本"
 		return result
 	}
-	params.BaselineHash = state.DiskHash
-	if params.BaselineHash == "" {
-		params.BaselineHash = node.ConfigHash
-	}
+	params.BaselineHash = recordedBaselineHash(node, state)
 	params.AllowInitial = state.InitialBaseline
 	params.InitialBaselineHash = state.InitialBaselineHash
 	params.OnBaseline = func(hash string) error {
@@ -358,7 +355,9 @@ func (s *SyncService) buildConfigPolicy(node *entity.Node, policy string) (strin
 	}
 	// Previously managed nodes must be able to revoke their last protocol.
 	// Keep the API-only configuration so stale listeners are removed on sync.
-	if len(profileKeys) == 0 && node.ConfigHash == "" {
+	// 空白文件接管会清除旧磁盘哈希，仍需允许已同步过的当前主机撤销最后一个协议。
+	previouslySynced := node.LastSyncAt != nil && (node.RegisteredAt == nil || !node.LastSyncAt.Before(*node.RegisteredAt))
+	if len(profileKeys) == 0 && node.ConfigHash == "" && !previouslySynced {
 		return "", nil, errNodeNoProtocols
 	}
 

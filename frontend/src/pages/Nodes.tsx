@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Copy, FileCode, Filter, Lock, PencilLine, Plus, RefreshCw, Search, Sparkles, Terminal, Wifi } from 'lucide-react'
+import { AlertTriangle, Copy, FileCode, Filter, Lock, PencilLine, Plus, RefreshCw, Sparkles, Terminal, Wifi } from 'lucide-react'
 import { OneClickInstallDialog } from '@/components/OneClickInstallDialog'
 import { nodeApi, profileApi } from '@/lib/api'
+import { fetchAllPages } from '@/lib/pagination'
+import { useListSearch } from '@/lib/use-list-search'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { HelpPopover } from '@/components/ui/HelpPopover'
+import { Pagination } from '@/components/ui/Table'
 import { generateShortIds } from '@/lib/keygen'
 import { copyText } from '@/lib/clipboard'
 import { protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
@@ -10,7 +15,6 @@ import type { InboundProfile, Node, NodeKey, SyncStatus } from '@/types'
 import { PreviewConfigModal } from '@/components/nodes/ConfigPreview'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Btn, FieldGroup, SelectField, Switch } from '@/components/ui/Form'
-import { HintTip } from '@/components/ui/HintTip'
 import { PageShell, SurfaceCard } from '@/components/ui/Page'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
@@ -25,7 +29,11 @@ import { useRoutingOverview } from '@/lib/routing'
 import { routingLabel, jobStatus } from '@/lib/routing-model'
 
 const DEFAULT_PAGE_SIZE = 10
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const configFailureMarkers = [
+  'PREFLIGHT_FAILED', 'IPV6_UNAVAILABLE', 'VERSION_UNSUPPORTED', 'PATH_MISMATCH', 'ROLLED_BACK',
+  'ROLLBACK_FAILED', 'AUTHORIZATION_STOPPED', 'HEALTH_FAILED', 'HEALTH_PROBE_UNAVAILABLE',
+  '生成配置失败', '协议配置不完整', '节点未绑定协议', '无法读取当前配置', '目标文件已存在', '节点配置任务未完成', '恢复配置无效',
+]
 
 // 节点级日志级别选项；空值表示继承系统设置（Settings 里的 xray.log_level）
 const NODE_LOG_LEVEL_OPTIONS = [
@@ -39,8 +47,8 @@ const NODE_LOG_LEVEL_OPTIONS = [
 
 const statusMeta: Record<SyncStatus, { label: string; variant: 'green' | 'yellow' | 'red' | 'gray'; tip: string }> = {
   synced: { label: '已同步', variant: 'green', tip: '配置已是最新' },
-  drifted: { label: '待同步', variant: 'yellow', tip: '检测到配置变更或远端配置不一致，建议重新同步' },
-  failed: { label: '同步失败', variant: 'red', tip: '同步失败，建议先测试 SSH 连通性' },
+  drifted: { label: '配置有变更', variant: 'yellow', tip: '检测到配置变更或远端配置不一致，建议重新同步' },
+  failed: { label: '同步失败', variant: 'red', tip: '可在同步记录中查看失败原因' },
   pending: { label: '待同步', variant: 'gray', tip: '节点尚未同步，请点击同步按钮' },
 }
 
@@ -84,7 +92,7 @@ export default function Nodes() {
   const affectedFilter = params.get('ids') ?? ''
   const routing = useRoutingOverview()
   const [routingNode, setRoutingNode] = useState<Node | null>(null)
-  const [diagnosticNode, setDiagnosticNode] = useState<Node | null>(null)
+  const [diagnosticNode, setDiagnosticNode] = useState<Pick<Node, 'id' | 'name'> | null>(null)
   const [history, setHistory] = useState<{ nodeID?: number; submitted?: SyncSubmission[] } | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
@@ -94,23 +102,23 @@ export default function Nodes() {
   const [err, setErr] = useState('')
   const [previewNode, setPreviewNode] = useState<Node | null>(null)
   const [protocolNode, setProtocolNode] = useState<Node | null>(null)
-  const [search, setSearch] = useState('')
-  // 搜索防抖后的关键字：筛选走服务端查询（跨全部分页），避免请求随键入频繁触发
-  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const { search, setSearch, keyword: debouncedSearch } = useListSearch()
   const statusFilter = params.get('sync_status') || 'all'
-  const setStatusFilter = (value: string) => setParams(previous => { const next = new URLSearchParams(previous); if (value === 'all') next.delete('sync_status'); else next.set('sync_status', value); return next })
+  const setStatusFilter = (value: string) => {
+    setParams(previous => {
+      const next = new URLSearchParams(previous)
+      if (value === 'all') next.delete('sync_status')
+      else next.set('sync_status', value)
+      return next
+    }, { replace: true })
+  }
   const [healthFilter, setHealthFilter] = useState<'all' | 'healthy' | 'unhealthy' | 'unchecked'>('all')
-  const [regionFilter, setRegionFilter] = useState<string>('all')
-  const [ownerFilter, setOwnerFilter] = useState<string>('all')
+  const [regionFilter, setRegionFilter] = useState('')
+  const [ownerFilter, setOwnerFilter] = useState('')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [installOpen, setInstallOpen] = useState(false)
   // 更换服务器目标节点；非空时接入对话框进入更换模式
   const [replaceNode, setReplaceNode] = useState<Node | null>(null)
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300)
-    return () => clearTimeout(timer)
-  }, [search])
 
   const filterKey = JSON.stringify([debouncedSearch, statusFilter, healthFilter, regionFilter, ownerFilter, affectedFilter])
   const [pageFilterKey, setPageFilterKey] = useState(filterKey)
@@ -131,15 +139,16 @@ export default function Nodes() {
           keyword: debouncedSearch || undefined,
           sync_status: statusFilter === 'all' ? undefined : statusFilter,
           health: healthFilter === 'all' ? undefined : healthFilter,
-          region: regionFilter === 'all' ? undefined : regionFilter,
-          owner: ownerFilter === 'all' ? undefined : ownerFilter,
+          region: regionFilter || undefined,
+          owner: ownerFilter || undefined,
           ids: affectedFilter || undefined,
         })
         .then((r) => r.data.data!),
   })
-  const { data: profilesData } = useQuery({
+  const { data: profiles = [] } = useQuery({
     queryKey: ['profiles-for-nodes'],
-    queryFn: () => profileApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data!),
+    queryFn: () => fetchAllPages((page, pageSize) =>
+      profileApi.list({ page, page_size: pageSize }).then((r) => r.data.data!)),
   })
   const { data: nodeKeysByNodeId = {} } = useQuery({
     queryKey: ['node-keys-for-list', data?.list?.map((node) => node.id).join(',') ?? ''],
@@ -158,11 +167,13 @@ export default function Nodes() {
 
   // 下拉候选值来自专用接口（全量），不能从当前页数据推导——否则翻页后选项残缺
   const { data: filterOptions } = useQuery({
-    queryKey: ['node-filter-options'],
+    queryKey: ['nodes', 'filter-options'],
     queryFn: () => nodeApi.filterOptions().then((r) => r.data.data!),
   })
-  const regions = filterOptions?.regions ?? []
-  const owners = filterOptions?.owners ?? []
+  const regions = new Set(filterOptions?.regions)
+  const owners = new Set(filterOptions?.owners)
+  if (regionFilter) regions.add(regionFilter)
+  if (ownerFilter) owners.add(ownerFilter)
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['nodes'] })
   const nodeStatus = (n: Node) => {
@@ -312,8 +323,28 @@ export default function Nodes() {
     })
 
   const selectedNodes = filteredNodes.filter((n) => selectedIds.includes(n.id))
-  const activeProfiles = (profilesData?.list ?? []).filter((item) => item.active)
+  const activeProfiles = profiles.filter((item) => item.active)
   const activeProfileMap = new Map(activeProfiles.map((profile) => [profile.id, profile]))
+
+  const renderFailureHint = (n: Node) => {
+    if (n.sync_status !== 'failed' || routing.isPending) return null
+    const summary = routing.data?.nodes.find(row => row.id === n.id)
+    const reason = summary?.last_sync_error ?? ''
+    const linkClass = 'inline-flex items-center gap-1 text-sm hover:underline'
+    if (reason.includes('DRIFT_CONFLICT')) {
+      return <button className={`${linkClass} text-[var(--warning)]`} onClick={() => setDiagnosticNode(n)}>
+        <AlertTriangle className="h-3.5 w-3.5" />基线冲突，去核对
+      </button>
+    }
+    const configFailure = configFailureMarkers.some(marker => reason.includes(marker))
+    const errorAt = summary?.last_sync_error_at
+    if (!configFailure && (!n.last_check_at || !n.last_check_ok || (errorAt && Date.parse(n.last_check_at) < Date.parse(errorAt)))) {
+      return <button className={`${linkClass} text-[var(--warning)]`} onClick={() => testSSH.mutate(n.id)} disabled={testSSH.isPending && testSSH.variables === n.id}>
+        建议先测试 SSH
+      </button>
+    }
+    return <button className={`${linkClass} text-soft`} onClick={() => setHistory({ nodeID: n.id })}>查看失败原因</button>
+  }
 
   const renderGroupCell = (groupNames?: string[]) => {
     if (!groupNames || groupNames.length === 0) return <span className="text-soft">—</span>
@@ -352,6 +383,23 @@ export default function Nodes() {
       .map((key) => activeProfileMap.get(key.profile_id))
       .filter((item): item is InboundProfile => Boolean(item))
 
+  const renderRoutingLink = (node: Node) => {
+    const entry = routing.data?.nodes.find((row) => row.id === node.id)
+    const label = entry
+      ? routingLabel(entry, routing.data?.templates ?? [])
+      : routing.error ? '加载失败，点击查看' : '加载中…'
+    const isBasic = entry?.routing?.mode === 'legacy' && !entry.error
+    return (
+      <button
+        className="mt-1 block max-w-xs text-left text-sm text-[var(--accent)] hover:underline"
+        title={label}
+        onClick={() => setRoutingNode(node)}
+      >
+        {isBasic ? '基础路由' : label}
+      </button>
+    )
+  }
+
   const renderProtocolCell = (node: Node) => {
     const matchedProfiles = getConfiguredProfiles(node.id)
 
@@ -360,7 +408,8 @@ export default function Nodes() {
         <button
           type="button"
           onClick={() => setProtocolNode(node)}
-          className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-2.5 text-xs font-medium text-soft transition hover:bg-[var(--panel-strong)] hover:text-[var(--text)]"
+          title="绑定协议后可生成节点配置"
+          className="inline-flex h-7 items-center rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-2.5 text-sm font-medium text-soft transition hover:bg-[var(--panel-strong)] hover:text-[var(--text)]"
         >
           未配置
         </button>
@@ -396,7 +445,7 @@ export default function Nodes() {
             <button
               type="button"
               onClick={() => setProtocolNode(node)}
-              className="inline-flex h-6 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+              className="inline-flex h-6 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
             >
               +{restProfiles.length}
             </button>
@@ -409,27 +458,26 @@ export default function Nodes() {
   return (
     <PageShell className="space-y-6">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex flex-1 flex-col gap-3 md:flex-row">
-          <label className="relative min-w-0 flex-1 md:max-w-[380px]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索节点名称、地址..."
-              className="h-11 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] pl-10 pr-3 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
-            />
-          </label>
+        <div className="flex min-w-0 flex-1 flex-col gap-3 md:flex-row md:flex-wrap">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="搜索节点名称、地址、地区、所有者或备注"
+            className="min-w-0 flex-1 md:min-w-60 md:max-w-[380px]"
+            inputClassName="h-11"
+          />
           <label className="flex h-11 min-w-[130px] items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm">
             <Filter className="h-4 w-4 text-faint" />
             <select
               value={statusFilter}
+              aria-label="节点同步状态"
               onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
               className="w-full bg-transparent text-sm outline-none"
             >
               <option value="all">全部状态</option>
               <option value="needs_sync">全部待处理</option>
               <option value="synced">已同步</option>
-              <option value="drifted">待同步</option>
+              <option value="drifted">配置有变更</option>
               <option value="failed">同步失败</option>
               <option value="pending">待同步</option>
             </select>
@@ -438,6 +486,7 @@ export default function Nodes() {
             <Filter className="h-4 w-4 text-faint" />
             <select
               value={healthFilter}
+              aria-label="节点健康度"
               onChange={(e) => setHealthFilter(e.target.value as typeof healthFilter)}
               className="w-full bg-transparent text-sm outline-none"
             >
@@ -449,9 +498,9 @@ export default function Nodes() {
           </label>
           <label className="flex h-11 min-w-[130px] items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm">
             <Filter className="h-4 w-4 text-faint" />
-            <select value={regionFilter} onChange={(e) => setRegionFilter(e.target.value)} className="w-full bg-transparent text-sm outline-none">
-              <option value="all">全部地区</option>
-              {regions.map((region) => (
+            <select aria-label="节点地区" value={regionFilter} onChange={(e) => setRegionFilter(e.target.value)} className="w-full bg-transparent text-sm outline-none">
+              <option value="">全部地区</option>
+              {Array.from(regions, (region) => (
                 <option key={region} value={region}>
                   {region}
                 </option>
@@ -460,9 +509,9 @@ export default function Nodes() {
           </label>
           <label className="flex h-11 min-w-[130px] items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm">
             <Filter className="h-4 w-4 text-faint" />
-            <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} className="w-full bg-transparent text-sm outline-none">
-              <option value="all">全部所有者</option>
-              {owners.map((owner) => (
+            <select aria-label="节点所有者" value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} className="w-full bg-transparent text-sm outline-none">
+              <option value="">全部所有者</option>
+              {Array.from(owners, (owner) => (
                 <option key={owner} value={owner}>
                   {owner}
                 </option>
@@ -472,11 +521,14 @@ export default function Nodes() {
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end [&>*]:shrink-0 [&>button]:whitespace-nowrap">
-          <HintTip content="只有在「配置节点密钥」中保存过的协议才会参与该节点的配置生成；保存空对象 {} 表示继承协议默认参数。" />
+          <HelpPopover title="节点同步说明">
+            <p>同步将已保存的协议、有效用户和路由一起下发。节点协议参数保存后才会参与配置生成。</p>
+            <p>「同步全部待处理节点」会处理所有已启用且待同步、配置有变更或同步失败的节点，包括当前筛选之外的节点。</p>
+          </HelpPopover>
           <Btn variant="secondary" onClick={() => setHistory({})}>同步记录</Btn>
           <Btn variant="secondary" loading={syncDrifted.isPending} disabled={sync.isPending} onClick={() => syncDrifted.mutate()}>
             <RefreshCw className="h-4 w-4" />
-            同步待处理节点
+            同步全部待处理节点
           </Btn>
           <Btn variant="accent" onClick={() => setInstallOpen(true)}>
             <Terminal className="h-4 w-4" />
@@ -512,7 +564,7 @@ export default function Nodes() {
                 onClick={async () => {
                   const ok = await confirm({
                     title: `删除已选中的 ${selectedNodes.length} 个节点？`,
-                    description: '该操作不可撤销。',
+                    description: '这些节点的协议密钥、分组关系和路由绑定将一并删除，无法撤销。',
                     confirmText: '批量删除',
                     cancelText: '取消',
                     tone: 'danger',
@@ -550,9 +602,9 @@ export default function Nodes() {
       )}
 
       <SurfaceCard className="overflow-visible">
-        <div className="overflow-x-auto overflow-y-visible">
-          <table className="w-full min-w-[1480px] text-left text-sm">
-            <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
+        <div className="relative overflow-x-auto overflow-y-visible">
+          <table className="w-full min-w-[1140px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)] text-soft [&_th]:whitespace-nowrap [&_th]:px-3 [&_th]:py-3 [&_th]:font-medium">
               <tr>
                 <th className="w-10 px-4 py-3">
                   <input
@@ -563,31 +615,29 @@ export default function Nodes() {
                     aria-label="选择当前页可见节点"
                   />
                 </th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">节点名称</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">连接地址</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">所有者</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">用户 / Xray</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">配置</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">最后同步</th>
-                <th className="px-4 py-3 text-right text-[11px] font-medium uppercase tracking-[0.12em] text-faint">操作</th>
+                <th className="min-w-32">节点</th>
+                <th>连接地址</th>
+                <th>同步状态</th>
+                <th>分组 / 所有者</th>
+                <th>在线用户 / Xray</th>
+                <th>协议 / 目标路由</th>
+                <th>启用</th>
+                <th className="text-right">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={9} className="px-3 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredNodes.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-soft">暂无节点数据</td>
+                  <td colSpan={9} className="px-3 py-10 text-center text-soft">暂无节点数据</td>
                 </tr>
               ) : (
                 filteredNodes.map((n) => (
                   <tr key={n.id} className="transition hover:bg-[var(--panel-muted)]">
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-3.5">
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(n.id)}
@@ -596,24 +646,23 @@ export default function Nodes() {
                         aria-label={`选择节点 ${n.name}`}
                       />
                     </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2">
+                    <td className="px-3 py-3.5">
+                      <div className="flex w-max max-w-48 items-center gap-2">
                         <HealthDot node={n} />
-                        <span className="font-semibold">{n.name}</span>
-                        <span className="text-xs text-faint">#{n.id}</span>
+                        <span className="truncate font-semibold" title={n.name}>{n.name}</span>
                       </div>
-                      <div className="text-xs text-soft">
-                        {n.region || '--'}
+                      <div className="mt-1 text-sm text-soft">
+                        #{n.id}{n.region && ` · ${n.region}`}
                         {n.last_check_at && !n.last_check_ok && (
                           <span className="ml-1.5 text-[var(--danger)]">· 健康检测异常</span>
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-3.5">
                       <CopyableAddress value={n.ip} strong />
-                      <CopyableAddress value={n.domain} />
+                      {n.domain && <CopyableAddress value={n.domain} />}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-3.5">
                       <Tooltip
                         content={nodeStatus(n).tip}
                         side="right"
@@ -626,56 +675,47 @@ export default function Nodes() {
                           />
                         </span>
                       </Tooltip>
-                    </td>
-                    <td className="px-4 py-3.5">
-                      {renderGroupCell(n.group_names)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      {n.owner ? (
-                        <Badge label={n.owner} variant="gray" />
-                      ) : (
-                        <span className="text-soft">—</span>
+                      {n.last_sync_at && (
+                        <time dateTime={n.last_sync_at} title="最后同步" className="mt-1 block text-sm text-soft">
+                          <span className="sr-only">最后同步 </span>
+                          {new Date(n.last_sync_at).toLocaleString('zh-CN')}
+                        </time>
                       )}
+                      {renderFailureHint(n)}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-3.5">
+                      {(n.group_names?.length || !n.owner) ? renderGroupCell(n.group_names) : null}
+                      {n.owner && <div className="text-sm text-soft">所有者 {n.owner}</div>}
+                    </td>
+                    <td className="px-3 py-3.5">
                       <div className="font-medium text-[var(--text)]">{n.online_user_count} 人</div>
-                      <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-soft">
-                        <span
-                          className={`h-2 w-2 rounded-full ${
-                            n.xray_version ? 'bg-[var(--success)]' : 'bg-[var(--border-strong)]'
-                          }`}
-                        />
-                        <span>{n.xray_version ? `Xray ${n.xray_version}` : 'Xray —'}</span>
-                      </div>
+                      <div className="mt-1 text-sm text-soft">{n.xray_version ? `Xray ${n.xray_version}` : '版本未知'}</div>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-3.5">
                       {renderProtocolCell(n)}
-                      <button className="mt-2 block max-w-xs text-left text-xs text-[var(--accent)]" title="已保存的目标路由，点击配置" onClick={() => setRoutingNode(n)}>
-                        路由：{routing.data?.nodes.find(row => row.id === n.id) ? routingLabel(routing.data.nodes.find(row => row.id === n.id)!, routing.data.templates) : routing.error ? '加载失败，点击重试' : '加载中…'}
-                      </button>
+                      {renderRoutingLink(n)}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-3.5">
                       <Switch checked={n.active} onChange={() => toggle.mutate(n.id)} />
                     </td>
-                    <td className="px-4 py-3.5 text-soft">{n.last_sync_at ? new Date(n.last_sync_at).toLocaleString('zh-CN') : '—'}</td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-3 py-3.5">
                       <div className="flex flex-col items-end gap-2">
                         <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => sync.mutate([n.id])}
                             disabled={sync.isPending || syncDrifted.isPending || (getConfiguredProfiles(n.id).length === 0 && !n.last_sync_at)}
-                            className={`inline-flex h-9 items-center gap-1 rounded-md border px-3 text-xs font-medium transition ${
+                            className={`inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-md border px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45 ${
                               n.sync_status === 'failed'
                                 ? 'border-[var(--warning-border)] bg-[var(--warning-soft)] text-[var(--warning)] hover:bg-[var(--warning-soft)]'
                                 : 'border-[var(--border)] bg-[var(--panel-strong)] text-[var(--accent)] hover:bg-[var(--panel-muted)]'
-                            } ${getConfiguredProfiles(n.id).length === 0 ? 'cursor-not-allowed opacity-45 hover:bg-inherit' : ''}`}
+                            }`}
                           >
                             <RefreshCw className={`h-3.5 w-3.5${sync.isPending && sync.variables?.includes(n.id) ? ' animate-spin' : ''}`} />
                             同步
                           </button>
                           <button
                             onClick={() => openEdit(n)}
-                            className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                            className="inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
                           >
                             <PencilLine className="h-3.5 w-3.5" />
                             编辑
@@ -707,7 +747,7 @@ export default function Nodes() {
                                 onSelect: async () => {
                                   const ok = await confirm({
                                     title: `删除节点「${n.name}」？`,
-                                    description: '该操作不可撤销。',
+                                    description: '节点的协议密钥、分组关系和路由绑定将一并删除，无法撤销。',
                                     confirmText: '删除节点',
                                     cancelText: '取消',
                                     tone: 'danger',
@@ -718,12 +758,6 @@ export default function Nodes() {
                             ]}
                           />
                         </div>
-                        {n.sync_status === 'failed' && (
-                          <div className="inline-flex items-center gap-1 text-[11px] text-[var(--warning)]">
-                            <AlertTriangle className="h-3.5 w-3.5" />
-                            建议先测试 SSH
-                          </div>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -734,44 +768,19 @@ export default function Nodes() {
         </div>
       </SurfaceCard>
 
-      <div className="flex items-center justify-between text-sm text-soft">
-        <span>共 {data?.total ?? 0} 条</span>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-2 text-sm text-soft">
-            分页
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value))
-                setPage(1)
-              }}
-              className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            >
-              {PAGE_SIZE_OPTIONS.map((size) => (
-                <option key={size} value={size}>
-                  {size} / 页
-                </option>
-              ))}
-            </select>
-          </label>
-          <Btn variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>上一页</Btn>
-          <span>{page}</span>
-          <Btn
-            variant="secondary"
-            disabled={page >= Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            下一页
-          </Btn>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={data?.total}
+        onChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       <Drawer
         open={drawer.open}
         onClose={closeDrawer}
         title={drawer.node ? `编辑节点 · ${drawer.node.name}` : '新增节点'}
-        description="连接信息和 SSH 参数放入右侧抽屉，避免大型表单打断列表浏览。"
-        width="lg"
+        idleStatus=""
         dirty={dirty}
         saving={save.isPending}
         onBeforeClose={confirmCloseDrawer}
@@ -782,8 +791,8 @@ export default function Nodes() {
           </>
         }
       >
-        <div className="space-y-4">
-          <FieldGroup title="节点标识" description="基础信息用于列表展示和节点识别。">
+        <div className="space-y-4 [&_label]:text-sm">
+          <FieldGroup title="节点标识">
             <Field label="节点名 *" value={form.name} onChange={f('name')} />
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="地区" value={form.region} onChange={f('region')} placeholder="如：香港" />
@@ -792,27 +801,29 @@ export default function Nodes() {
             <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="例如：高可用入口节点" />
           </FieldGroup>
 
-          <FieldGroup title="连接地址" description="域名为空时使用 IP 直连。">
-            <Field label="IP *" value={form.ip} onChange={f('ip')} placeholder="服务器 IP" />
-            <Field label="连接域名" value={form.domain} onChange={f('domain')} placeholder="CDN/中转域名（留空用 IP）" />
+          <FieldGroup title="连接地址">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="服务器 IP *" value={form.ip} onChange={f('ip')} />
+              <Field label="连接域名（留空使用 IP）" value={form.domain} onChange={f('domain')} placeholder="CDN 或中转域名" />
+            </div>
           </FieldGroup>
 
-          <FieldGroup title="SSH 参数" description="用于后续同步、健康检查和配置下发。密钥路径可留空，自动使用系统设置中的默认值。">
+          <FieldGroup title="SSH 连接">
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="SSH 端口" value={form.ssh_port} onChange={f('ssh_port')} type="number" />
               <Field label="SSH 用户" value={form.ssh_user} onChange={f('ssh_user')} />
             </div>
             <Field
-              label="SSH 密钥路径（可选覆盖）"
+              label="SSH 密钥路径（留空继承系统设置）"
               value={form.ssh_key_path}
               onChange={f('ssh_key_path')}
-              placeholder="留空使用系统默认（/etc/xray-pilot/ssh/id_ed25519）"
+              placeholder="/etc/xray-pilot/ssh/id_ed25519"
             />
           </FieldGroup>
 
-          <FieldGroup title="Xray 运行参数" description="节点级覆盖，仅作用于本节点；留空则继承系统设置。">
+          <FieldGroup title="Xray 运行参数">
             <SelectField
-              label="日志级别"
+              label="节点日志级别"
               value={form.log_level}
               onChange={(v) => setForm((prev) => ({ ...prev, log_level: v }))}
               options={NODE_LOG_LEVEL_OPTIONS}
@@ -820,7 +831,7 @@ export default function Nodes() {
           </FieldGroup>
 
           {drawer.node && (
-            <FieldGroup title="快捷动作" description="编辑抽屉内直接做连通性和配置确认。">
+            <FieldGroup title="连接与配置检查">
               <div className="flex flex-wrap gap-2">
                 <Btn
                   variant="secondary"
@@ -839,9 +850,13 @@ export default function Nodes() {
         </div>
       </Drawer>
 
-      {affectedFilter && <div className="text-sm text-soft">当前仅显示受影响节点。<Btn variant="secondary" onClick={() => setParams({})}>清除节点筛选</Btn></div>}
-      {history && <SyncHistory {...history} onClose={() => { setHistory(null); void invalidate() }} />}
-      {diagnosticNode && <NodeDiagnostics id={diagnosticNode.id} name={diagnosticNode.name} onClose={() => setDiagnosticNode(null)} />}
+      {affectedFilter && <div className="text-sm text-soft">当前仅显示受影响节点。<Btn variant="secondary" onClick={() => setParams(previous => {
+        const next = new URLSearchParams(previous)
+        next.delete('ids')
+        return next
+      }, { replace: true })}>清除节点筛选</Btn></div>}
+      {history && <SyncHistory {...history} onInspect={(id, name) => { setHistory(null); setDiagnosticNode({ id, name }) }} onClose={() => { setHistory(null); void invalidate() }} />}
+      {diagnosticNode && <NodeDiagnostics key={diagnosticNode.id} {...diagnosticNode} lastSyncError={routing.data?.nodes.find(n => n.id === diagnosticNode.id)?.last_sync_error} onClose={() => setDiagnosticNode(null)} />}
       {routingNode && <RoutingBindingDrawer scope="node" id={routingNode.id} name={routingNode.name} onClose={() => setRoutingNode(null)} onPreview={() => { setPreviewNode(routingNode); setRoutingNode(null) }} />}
       {previewNode && (
         <PreviewConfigModal
@@ -853,7 +868,7 @@ export default function Nodes() {
       {protocolNode && (
         <NodeProtocolsDrawer
           node={protocolNode}
-          profiles={profilesData?.list ?? []}
+          profiles={profiles}
           onPreview={() => {
             setPreviewNode(protocolNode)
             setProtocolNode(null)
@@ -937,7 +952,7 @@ function NodeProtocolsDrawer({
   const filteredProfiles = activeProfiles.filter((p) => {
     const kw = filter.trim().toLowerCase()
     if (!kw) return true
-    return p.name.toLowerCase().includes(kw) || p.protocol.toLowerCase().includes(kw)
+    return [p.name, p.protocol, protocolLabel(p.protocol)].some(value => value.toLowerCase().includes(kw))
   })
 
   const activateProfile = (id: number) => {
@@ -1145,8 +1160,8 @@ function NodeProtocolsDrawer({
       dirty={dirtyProfileIds.length > 0}
       saving={protocolBusy}
       onBeforeClose={canCloseProtocols}
-      description="左侧选择/多选协议；右侧编辑参数与端口。未绑协议直接保存即视为绑定。"
-      width="xl"
+      description={<span className="wrap-anywhere">{[`#${node.id}`, node.ip, node.domain, node.region, node.owner && `所有者 ${node.owner}`].filter(Boolean).join(' · ')}</span>}
+      idleStatus=""
       footer={
         <>
           <Btn variant="secondary" disabled={protocolBusy} onClick={() => void canCloseProtocols().then(ok => { if (ok) onClose() })}>关闭</Btn>
@@ -1164,30 +1179,15 @@ function NodeProtocolsDrawer({
         </>
       }
     >
-      <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)] [&_label]:text-sm">
         {/* 左侧：协议清单 */}
         <div className="space-y-3">
-          <div className="border-l-2 border-[var(--accent)] pl-3 text-xs text-soft">
-            <div className="font-medium text-[var(--text)]">
-              <span className="text-faint">#{node.id}</span>
-              <span className="mx-2">{node.name}</span>
-            </div>
-            <div className="mt-1 truncate">
-              {[node.ip, node.domain].filter(Boolean).join(' · ')}
-            </div>
-            <div className="mt-1 truncate">
-              <span className="text-faint">地区</span> {node.region || '--'}
-              <span className="mx-1.5 text-faint">·</span>
-              <span className="text-faint">所有者</span> {node.owner || '--'}
-            </div>
-          </div>
-          <input
+          <SearchInput
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="搜索协议 名称/类型"
-            className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none"
+            onChange={setFilter}
+            placeholder="搜索协议名称或类型"
           />
-          <div className="flex items-center justify-between text-xs text-soft">
+          <div className="flex items-center justify-between text-sm text-soft">
             <span>共 {filteredProfiles.length} 个</span>
             <button
               type="button"
@@ -1228,24 +1228,17 @@ function NodeProtocolsDrawer({
                     aria-label={`选择 ${p.name}`}
                   />
                   <button type="button" onClick={() => activateProfile(p.id)} className="flex min-w-0 flex-1 flex-col gap-1 text-left">
-                    <span className="flex items-center gap-1.5">
-                      <Badge label={protocolLabel(p.protocol)} variant={protocolBadgeVariant(p.protocol)} />
-                      {isDirty && <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" title="未保存" />}
+                    <span className="flex max-w-full items-center gap-1.5 font-semibold text-[var(--text)]">
+                      <span className="truncate">{p.name}</span>
+                      {isDirty && <span className="size-1.5 shrink-0 rounded-full bg-[var(--warning)]" title="未保存" />}
+                      {k?.locked && <Lock className="size-3.5 shrink-0 text-[var(--warning)]" aria-label="已锁定" />}
                     </span>
-                    <span className="flex items-center gap-1.5 truncate text-xs text-soft">
-                      <span className="truncate font-medium text-[var(--text)]">{p.name}</span>
-                      <span className="text-faint">·</span>
-                      {k ? (
-                        <>
-                          <span>{k.port > 0 ? `端口 ${effPort}` : `默认 ${effPort}`}</span>
-                          {k.locked && <Lock className="h-3.5 w-3.5 text-[var(--warning)]" aria-label="已锁定" />}
-                        </>
-                      ) : (
-                        <span className="text-faint">未绑</span>
-                      )}
+                    <span className="flex flex-wrap items-center gap-1.5 text-sm text-soft">
+                      {p.name !== protocolLabel(p.protocol) && <Badge label={protocolLabel(p.protocol)} variant={protocolBadgeVariant(p.protocol)} />}
+                      <span>{k ? (k.port > 0 ? `端口 ${effPort}` : `默认端口 ${effPort}`) : '未绑定'}</span>
                     </span>
                   </button>
-                  {k && <Badge label="已绑" variant="green" />}
+                  {k && <Badge label="已绑定" variant="green" />}
                 </div>
               )
             })}
@@ -1256,7 +1249,7 @@ function NodeProtocolsDrawer({
         <div className="space-y-4">
           {targets.length === 0 && (
             <div className="rounded-2xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-soft">
-              请从左侧选择协议（点击进入编辑，复选框用于批量操作）
+              选择协议以编辑，勾选多个协议可批量绑定或保存。
             </div>
           )}
 
@@ -1270,10 +1263,8 @@ function NodeProtocolsDrawer({
                 }
                 description={
                   isBatchMode
-                    ? '批量保存会对所有勾选的协议生效；未绑协议会以模板默认参数完成绑定（可保存后逐个微调）。'
-                    : activeProfile
-                      ? `协议默认端口 ${activeProfile.port}（${activeProfile.protocol === 'hysteria2' ? 'UDP' : 'TCP'}）。端口留空或填 0 即继承默认。`
-                      : ''
+                    ? '保存时将绑定尚未绑定的协议，并应用每个协议的草稿。'
+                    : undefined
                 }
               >
                 <div className="flex flex-wrap items-center gap-2">
@@ -1313,29 +1304,31 @@ function NodeProtocolsDrawer({
               </FieldGroup>
 
               {!isBatchMode && activeProfile && activeDraft && (
-                <FieldGroup title="参数与端口" description="保存空对象 `{}` 表示继承协议默认参数；端口填 0 表示继承协议模板端口。">
+                <FieldGroup title="节点覆盖">
                   <Field
-                    label={`监听端口（留空继承模板 ${activeProfile.port}）`}
+                    label={`${activeProfile.protocol === 'hysteria2' ? 'UDP' : 'TCP'} 监听端口（留空或填 0 继承模板 ${activeProfile.port}）`}
                     value={String(activeDraft.port || '')}
                     onChange={(e) => updateDraft(activeProfileId!, { port: Number(e.target.value) || 0 })}
                     placeholder={`${activeProfile.port}`}
                     type="number"
                   />
-                  {portConflict && <p className="text-xs text-[var(--danger)]">端口冲突：{portConflict}（保存会被后端拒绝）</p>}
+                  {portConflict && <p role="alert" className="text-sm text-[var(--danger)]">端口冲突：{portConflict}</p>}
+                  <label htmlFor="node-protocol-settings" className="block text-sm font-medium text-soft">协议参数（{'{}'} 继承模板）</label>
                   <textarea
+                    id="node-protocol-settings"
                     value={activeDraft.settings}
                     onChange={(e) => updateDraft(activeProfileId!, { settings: e.target.value })}
                     rows={12}
                     disabled={activeLocked}
-                    className="min-h-[240px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
-                    placeholder='{} 表示继承协议默认参数'
+                    className="min-h-[240px] w-full rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 font-mono text-sm text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+                    placeholder="{}"
                   />
-                  {activeLocked && <p className="text-xs text-[var(--warning)]">当前节点协议已锁定，需先解锁才能修改、删除或重新生成。</p>}
+                  {activeLocked && <p className="text-sm text-[var(--warning)]">协议已锁定。修改参数、生成密钥或移除绑定前，请先解除锁定。</p>}
                 </FieldGroup>
               )}
 
               {isBatchMode && (
-                <FieldGroup title="批量草稿预览" description="每个协议保有独立草稿；按钮（如填充模板）的效果会写入所有选中协议。">
+                <FieldGroup title="批量草稿预览">
                   <div className="space-y-2">
                     {selectedProfileIds.map((id) => {
                       const p = activeProfiles.find((x) => x.id === id)
@@ -1343,7 +1336,7 @@ function NodeProtocolsDrawer({
                       const hasDraft = !!draftByProfile[id]
                       const bound = keyByProfileId.has(id)
                       return (
-                        <div key={id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-xs">
+                        <div key={id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-sm">
                           <div className="flex min-w-0 items-center gap-2">
                             <span className="truncate font-medium">{p?.name ?? `#${id}`}</span>
                             {p && <Badge label={protocolLabel(p.protocol)} variant={protocolBadgeVariant(p.protocol)} />}
@@ -1395,14 +1388,14 @@ function HealthDot({ node }: { node: Node }) {
 
 // CopyableAddress 连接地址单元格的一行（IP 或域名），带快速复制按钮
 function CopyableAddress({ value, strong }: { value: string; strong?: boolean }) {
-  if (!value) return <div className="text-xs text-soft">—</div>
+  if (!value) return <div className="text-sm text-soft">—</div>
   return (
     <div
-      className={`flex items-center gap-1.5 ${
-        strong ? 'font-medium text-[var(--text)]' : 'text-xs text-soft'
+      className={`flex w-max max-w-56 items-center gap-1.5 ${
+        strong ? 'font-medium text-[var(--text)]' : 'text-sm text-soft'
       }`}
     >
-      <span className="truncate">{value}</span>
+      <span className="truncate" title={value}>{value}</span>
       <button
         type="button"
         title={`复制 ${value}`}

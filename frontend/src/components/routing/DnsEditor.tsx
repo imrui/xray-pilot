@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowDown, ArrowUp, Globe, Info, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Globe, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Btn, Field, FieldGroup, SelectField, Switch } from '@/components/ui/Form'
 import { createDefaultDNSConfig, domainLines } from '@/lib/routing-model'
@@ -328,13 +328,13 @@ export function DnsEditor({
     <div className="space-y-4">
       {!hideEnableToggle && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-3">
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-1.5 text-sm font-semibold">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-base font-semibold">
               <Globe className="h-4 w-4 text-[var(--accent)]" />
               启用服务端自定义 DNS
             </div>
-            <p className="text-xs text-soft">
-              管控节点服务端 Xray 内部域名解析（防污染、分域名流媒体/AI 解锁 DNS、静态 Hosts）；关闭时完全走节点系统默认解析。
+            <p className="text-sm leading-6 text-soft">
+              {enabled ? '默认直连出站使用下方的 DNS 与 Hosts 配置。' : '当前使用节点系统 DNS。启用后可按域名指定上游。'}
             </p>
           </div>
           <Switch checked={enabled} onChange={toggleEnabled} />
@@ -564,12 +564,7 @@ export function DnsEditor({
         </>
       ) : null}
 
-      <div className="flex items-start gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-3.5 py-2.5 text-xs text-soft">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
-        <span>
-          启用自定义 DNS 后，默认直连出站将自动使用 Xray 内置解析结果以使分流 DNS 与 Hosts 生效。
-        </span>
-      </div>
+      {hideEnableToggle && enabled && <p className="text-sm leading-6 text-soft">默认直连出站使用这里的 DNS 与 Hosts 配置。</p>}
     </div>
   )
 }

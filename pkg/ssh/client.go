@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"bytes"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -151,37 +150,30 @@ func (c *Client) ReadRemoteFile(remotePath string) (string, error) {
 	}
 	defer sess.Close()
 
-	var stdout bytes.Buffer
-	var stderr limitedOutput
-	sess.Stdout = &stdout
-	sess.Stderr = &stderr
-
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("无法读取 SSH 会话输出: %w", err)
+	}
+	const maxBytes = 16 << 20
 	quotedPath := shellQuote(remotePath)
-	// Limit the remote read to 16 MiB + 1 byte, and reject truncated files.
-	cmd := "test -s " + quotedPath + " && head -c 16777217 -- " + quotedPath + " | base64 | tr -d '\\n'"
+	// 保留原始字节。空的普通文件可以核对，缺失、不可读或超限时拒绝。
+	cmd := fmt.Sprintf("test -f %s && head -c %d -- %s", quotedPath, maxBytes+1, quotedPath)
 	timer := time.AfterFunc(30*time.Second, func() { _ = sess.Close() })
 	defer timer.Stop()
-	if err := sess.Run(cmd); err != nil {
-		return "", fmt.Errorf("读取远端文件失败 (%s): %w", remotePath, err)
+	if err := sess.Start(cmd); err != nil {
+		return "", fmt.Errorf("无法启动远端文件读取: %w", err)
 	}
-
-	encoded := strings.TrimSpace(stdout.String())
-	if encoded == "" {
-		return "", fmt.Errorf("读取远端文件失败 (%s): 远端内容为空", remotePath)
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	raw, err := io.ReadAll(io.LimitReader(stdout, maxBytes+1))
 	if err != nil {
-		return "", fmt.Errorf("读取远端文件失败 (%s): base64 解码失败: %w", remotePath, err)
+		return "", fmt.Errorf("读取远端文件中断 (%s)", remotePath)
 	}
-	if len(decoded) > 16*1024*1024 {
+	if len(raw) > maxBytes {
 		return "", fmt.Errorf("远端配置超过 16 MiB 限制")
 	}
-	if len(decoded) == 0 {
-		return "", fmt.Errorf("读取远端文件失败 (%s): 解码后内容为空", remotePath)
+	if err := sess.Wait(); err != nil {
+		return "", fmt.Errorf("远端文件不存在或不可读 (%s)", remotePath)
 	}
-
-	return string(decoded), nil
+	return string(raw), nil
 }
 
 // ReloadXray 重载 Xray 服务（systemctl 优先，回退 service）

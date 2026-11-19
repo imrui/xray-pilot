@@ -5,6 +5,7 @@ import { adminApi } from '@/lib/api'
 import type { Admin, AdminRole } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { Modal } from '@/components/ui/Modal'
+import { Pagination } from '@/components/ui/Table'
 import { Btn, Field, SelectField } from '@/components/ui/Form'
 import { Badge } from '@/components/ui/Badge'
 import { useConfirm } from '@/lib/confirm-context'
@@ -27,6 +28,8 @@ export function AdminManager() {
   const qc = useQueryClient()
   const confirm = useConfirm()
   const selfID = useAuthStore((s) => s.username)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [createOpen, setCreateOpen] = useState(false)
   const [resetTarget, setResetTarget] = useState<Admin | null>(null)
 
@@ -48,15 +51,14 @@ export function AdminManager() {
     },
   })
 
-  const admins = data ?? []
+  const pageAdmins = data?.slice((page - 1) * pageSize, page * pageSize) ?? []
 
   return (
     <Section
       title="管理员账号"
-      description="登录面板的管理员。首次启动从 config.yaml 的 admins 段种入，之后以此处为准。"
       actions={
         <>
-          <HintTip content="超级管理员可管理其他账号，对自己只能修改密码。普通管理员拥有全部业务操作权限，仅可修改自己的密码。系统至少保留一个启用的超级管理员。" />
+          <HintTip content="仅超级管理员可以管理其他账号。自己的密码可在头像菜单中修改。系统至少保留一名启用的超级管理员。" />
           <Btn variant="secondary" className="shrink-0 whitespace-nowrap" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" />
             新建管理员
@@ -69,7 +71,7 @@ export function AdminManager() {
           <div className="py-6 text-sm text-soft">加载中…</div>
         ) : (
           <ul className="divide-y divide-[var(--border)]">
-            {admins.map((a) => {
+            {pageAdmins.map((a) => {
               const isSelf = a.username === selfID
               return (
                 <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
@@ -140,6 +142,7 @@ export function AdminManager() {
           </ul>
         )}
       </div>
+      <Pagination page={page} pageSize={pageSize} total={data?.length} onChange={setPage} onPageSizeChange={setPageSize} />
 
       <CreateAdminModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={invalidate} />
       <ResetPasswordModal target={resetTarget} onClose={() => setResetTarget(null)} />

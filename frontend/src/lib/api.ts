@@ -1,4 +1,5 @@
 import request from './axios'
+import { PROTOCOL_OPTIONS } from './protocol'
 import type { TrafficAnalytics, TrafficAnalyticsQuery } from '@/types/traffic'
 import type { ApiResponse, PageResult, User, Group, Node, InboundProfile, NodeKey, SyncLog, DiagnosticsResult, SyncSummary, FeishuStatus, FeishuChat, FeishuPushResult, TrafficSummary, Admin, AdminRole, LoginResponse } from '@/types'
 
@@ -10,7 +11,7 @@ interface PageParams {
 
 // ---- 用户 API ----
 export const userApi = {
-  list: (params?: PageParams) =>
+  list: (params?: PageParams & { keyword?: string; status?: 'active' | 'inactive' | 'expired'; group_id?: number }) =>
     request.get<ApiResponse<PageResult<User>>>('/users', { params }),
 
   create: (data: {
@@ -67,7 +68,7 @@ export const userApi = {
 
 // ---- 分组 API ----
 export const groupApi = {
-  list: (params?: PageParams) =>
+  list: (params?: PageParams & { keyword?: string; active?: boolean }) =>
     request.get<ApiResponse<PageResult<Group>>>('/groups', { params }),
 
   create: (data: { name: string; description?: string; node_ids?: number[] }) =>
@@ -168,8 +169,16 @@ export const nodeApi = {
 
 // ---- 协议配置 API ----
 export const profileApi = {
-  list: (params?: PageParams) =>
-    request.get<ApiResponse<PageResult<InboundProfile>>>('/profiles', { params }),
+  list: (params?: PageParams & { keyword?: string; protocol?: string }) => {
+    const keyword = params?.keyword?.trim().toLowerCase()
+    const matchingProtocols = keyword
+      ? PROTOCOL_OPTIONS.filter(({ label }) => label.toLowerCase().includes(keyword)).map(({ value }) => value)
+      : undefined
+    return request.get<ApiResponse<PageResult<InboundProfile>>>('/profiles', {
+      params: { ...params, keyword_protocol: matchingProtocols },
+      paramsSerializer: { indexes: null },
+    })
+  },
 
   create: (data: {
     name: string
@@ -196,7 +205,7 @@ export const profileApi = {
 // ---- 日志 API ----
 export const logApi = {
   // actor 为前缀过滤：如 "admin:" 只看人工操作，"system:scheduler:" 只看调度器
-  list: (params?: PageParams & { actor?: string; important?: boolean }) =>
+  list: (params?: PageParams & { actor?: string; important?: boolean; keyword?: string }) =>
     request.get<ApiResponse<PageResult<SyncLog>>>('/logs', { params }),
 
   cleanup: (days: number) =>

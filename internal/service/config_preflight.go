@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -284,7 +285,9 @@ func scrubConfigSecretsFromMessage(msg, renderedConfig string) string {
 // Redact recursively, including proxy account passwords, outbound secrets and user UUIDs.
 func redactConfig(raw string) string {
 	var obj any
-	if json.Unmarshal([]byte(raw), &obj) != nil {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if decoder.Decode(&obj) != nil || decoder.Decode(new(json.RawMessage)) != io.EOF {
 		return "<invalid config>"
 	}
 	var walk func(any)
@@ -292,7 +295,7 @@ func redactConfig(raw string) string {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, y := range x {
-				if xray.IsSensitiveConfigKey(k) {
+				if isSensitivePreviewKey(k) {
 					x[k] = "<masked>"
 				} else {
 					walk(y)
@@ -311,4 +314,17 @@ func redactConfig(raw string) string {
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(obj)
 	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+// 手工维护的远端配置还可能内联 TLS 私钥、传输层认证头或使用下划线字段。
+func isSensitivePreviewKey(key string) bool {
+	if xray.IsSensitiveConfigKey(strings.ReplaceAll(key, "_", "")) {
+		return true
+	}
+	switch strings.ToLower(key) {
+	case "key", "token", "uuid", "authorization", "proxy-authorization", "cookie", "set-cookie", "decryption":
+		return true
+	default:
+		return false
+	}
 }

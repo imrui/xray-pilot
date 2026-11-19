@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Code2, FlaskConical, Globe, Network, Route, Scale, SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, Code2, FlaskConical, Globe, Network, Route, Scale, SlidersHorizontal } from 'lucide-react'
 import { Drawer } from '@/components/ui/Drawer'
-import { Btn, Field, FieldGroup, SelectField } from '@/components/ui/Form'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { Btn, Field, SelectField } from '@/components/ui/Form'
 import { JsonEditor } from '@/components/ui/JsonEditor'
 import { DraftPreflightModal } from './DraftPreflightModal'
 import { useConfirm } from '@/lib/confirm-context'
@@ -66,6 +67,7 @@ export function TemplateEditor({
   const [base, setBase] = useState(template)
   const [name, setName] = useState(template.name)
   const [description, setDescription] = useState(template.description)
+  const [infoOpen, setInfoOpen] = useState(!template.id)
 
   const initial = upgradeRoutingPolicy(template.edit_payload ?? template.draft)
   const [domainStrategy, setDomainStrategy] = useState<DomainStrategy>(
@@ -113,12 +115,13 @@ export function TemplateEditor({
     viewMode === 'json' ? policyJsonText : JSON.stringify(buildCurrentPolicy(), null, 2)
   const originalSerialized = JSON.stringify(original, null, 2)
 
-  const dirty =
+  const dirty = writable && (
     hasRuleCardError || hasOutboundCardError ||
     name !== base.name ||
     description !== base.description ||
     legacyV1 ||
     currentSerialized !== originalSerialized
+  )
 
   const applyUpgradedPolicyToState = (p: RoutingPolicy) => {
     setDomainStrategy(p.domain_strategy ?? 'IPIfNonMatch')
@@ -167,7 +170,10 @@ export function TemplateEditor({
     setError('')
     setMessage('')
     try {
-      if (!name.trim()) throw new Error('请填写模板名称。')
+      if (!name.trim()) {
+        setInfoOpen(true)
+        throw new Error('请填写模板名称。')
+      }
       if (viewMode === 'structured' && (hasRuleCardError || hasOutboundCardError)) {
         throw new Error('存在尚未修正的单条 JSON 语法错误，请先修正后再保存。')
       }
@@ -227,10 +233,9 @@ export function TemplateEditor({
   return (
     <Drawer
       open
-      width="xl"
       onClose={onClose}
-      title={template.id ? `编辑路由模板 · ${template.name}` : '新增路由模板'}
-      description="支持结构化卡片编排与策略 JSON 源码双向无损切换；发布版本后方可绑定节点。"
+      title={base.id ? `${writable ? '编辑' : '查看'}路由模板 · ${base.name}` : '新增路由模板'}
+      idleStatus={base.latest_revision ? `最新发布版本 v${base.latest_revision}` : '发布后可绑定节点'}
       dirty={dirty}
       saving={busy}
       onBeforeClose={close}
@@ -260,196 +265,155 @@ export function TemplateEditor({
         </>
       }
     >
-      <fieldset disabled={!writable || busy} className="space-y-4">
-        <FieldGroup title="基本信息">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="模板名称 *" value={name} onChange={(e) => setName(e.target.value)} />
-            <Field
-              label="说明"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
+      <div className="min-w-0 space-y-5 [&_label]:text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div role="tablist" aria-label="编辑器视图切换" className="inline-flex rounded-lg bg-[var(--panel-muted)] p-1">
+            {([
+              { mode: 'structured', label: '结构化视图', Icon: SlidersHorizontal },
+              { mode: 'json', label: '策略 JSON 源码', Icon: Code2 },
+            ] as const).map(({ mode, label, Icon }) => (
+              <button
+                key={mode}
+                type="button"
+                role="tab"
+                aria-selected={viewMode === mode}
+                disabled={busy}
+                onClick={() => switchViewMode(mode)}
+                className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-soft hover:text-[var(--text)] aria-selected:bg-[var(--panel-strong)] aria-selected:text-[var(--text)] aria-selected:shadow-[var(--shadow-card)]"
+              >
+                <Icon className="size-4" />
+                {label}
+              </button>
+            ))}
           </div>
-        </FieldGroup>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] px-3.5 py-2.5">
-          <div
-            role="tablist"
-            aria-label="编辑器视图切换"
-            className="inline-flex rounded-md border border-[var(--border)] bg-[var(--panel)] p-0.5 text-xs"
-          >
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              role="tab"
-              aria-selected={viewMode === 'structured'}
-              onClick={() => switchViewMode('structured')}
-              className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 font-medium transition ${
-                viewMode === 'structured'
-                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
-                  : 'text-soft hover:text-[var(--text)]'
-              }`}
+              aria-expanded={infoOpen}
+              aria-controls="routing-template-info"
+              onClick={() => setInfoOpen(!infoOpen)}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-2 text-sm text-soft hover:text-[var(--text)]"
             >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              结构化视图
+              模板信息
+              <ChevronDown className={`size-4 transition-transform ${infoOpen ? 'rotate-180' : ''}`} />
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'json'}
-              onClick={() => switchViewMode('json')}
-              className={`inline-flex items-center gap-1.5 rounded px-3 py-1.5 font-medium transition ${
-                viewMode === 'json'
-                  ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
-                  : 'text-soft hover:text-[var(--text)]'
-              }`}
-            >
-              <Code2 className="h-3.5 w-3.5" />
-              策略 JSON 源码
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2" data-slot="sandbox-preflight">
             {headerActions}
             {writable && (
-              <Btn
-                variant="accent"
-                disabled={busy}
-                onClick={() => setSandboxOpen(true)}
-                className="h-8 px-3 text-xs"
-              >
-                <FlaskConical className="h-3.5 w-3.5" />
+              <Btn variant="secondary" disabled={busy} onClick={() => setSandboxOpen(true)} className="h-9 px-3">
+                <FlaskConical className="size-4" />
                 节点沙箱预检
               </Btn>
             )}
           </div>
         </div>
 
+        <fieldset
+          id="routing-template-info"
+          hidden={!infoOpen}
+          disabled={!writable || busy}
+          aria-label="模板信息"
+          className="rounded-lg border border-[var(--border)] p-4 sm:p-5"
+        >
+          <div className="grid gap-4 sm:grid-cols-[1fr_2fr]">
+            <Field label="模板名称 *" value={name} onChange={(e) => setName(e.target.value)} />
+            <label className="grid gap-1.5 font-medium text-soft">
+              说明
+              <textarea
+                rows={2}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-normal leading-5 text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
+              />
+            </label>
+          </div>
+        </fieldset>
+
         {viewMode === 'structured' ? (
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div
               role="tablist"
               aria-label="策略功能分区"
-              className="flex flex-wrap gap-2 border-b border-[var(--border)] pb-2"
+              className="grid grid-cols-2 gap-1 border-b border-[var(--border)] pb-2 sm:flex sm:gap-2"
             >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'rules'}
-                onClick={() => setActiveTab('rules')}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium transition ${
-                  activeTab === 'rules'
-                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                    : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
-                }`}
-              >
-                <Route className="h-4 w-4" />
-                路由规则（{customRules.length}）
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'outbounds'}
-                onClick={() => setActiveTab('outbounds')}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium transition ${
-                  activeTab === 'outbounds'
-                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                    : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
-                }`}
-              >
-                <Network className="h-4 w-4" />
-                自定义出站（{customOutbounds.length}）
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'balancers'}
-                onClick={() => setActiveTab('balancers')}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium transition ${
-                  activeTab === 'balancers'
-                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                    : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
-                }`}
-              >
-                <Scale className="h-4 w-4" />
-                负载均衡（{balancers.length}）
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'dns'}
-                onClick={() => setActiveTab('dns')}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium transition ${
-                  activeTab === 'dns'
-                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                    : 'text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]'
-                }`}
-              >
-                <Globe className="h-4 w-4" />
-                DNS 设置（{dns?.enabled ? `${dns.servers?.length ?? 0}` : '关'}）
-              </button>
+              {([
+                { tab: 'rules', label: '路由规则', Icon: Route, count: customRules.length },
+                { tab: 'outbounds', label: '自定义出站', Icon: Network, count: customOutbounds.length },
+                { tab: 'balancers', label: '负载均衡', Icon: Scale, count: balancers.length },
+                { tab: 'dns', label: 'DNS 设置', Icon: Globe, count: dns?.enabled ? dns.servers?.length : 0 },
+              ] as const).map(({ tab, label, Icon, count }) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab}
+                  onClick={() => setActiveTab(tab)}
+                  className="inline-flex items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-soft hover:bg-[var(--panel-muted)] aria-selected:bg-[var(--accent-soft)] aria-selected:text-[var(--accent)]"
+                >
+                  <Icon className="size-4 shrink-0" />
+                  {label}
+                  {!!count && <span className="tabular-nums">{count}</span>}
+                </button>
+              ))}
             </div>
 
-            <div hidden={activeTab !== 'rules'}>
-              <RuleWaterfallEditor
-                domainStrategy={domainStrategy}
-                onDomainStrategyChange={setDomainStrategy}
-                rules={customRules}
-                onRulesChange={setCustomRules}
-                outbounds={customOutbounds}
-                balancers={balancers}
-                v4Text={v4}
-                onV4Change={setV4}
-                v6Text={v6}
-                onV6Change={setV6}
-                legacyV1={legacyV1}
-                preset4={preset4}
-                preset6={preset6}
-                hasReferencePreset={!!referencePolicy}
-                disabled={!writable || busy}
-                onPendingErrorChange={setHasRuleCardError}
-              />
-            </div>
-            <div hidden={activeTab !== 'outbounds'}>
-              <OutboundListEditor
-                outbounds={customOutbounds}
-                rules={customRules}
-                balancers={balancers}
-                disabled={!writable || busy}
-                onChange={setCustomOutbounds}
-                onPendingErrorChange={setHasOutboundCardError}
-              />
-            </div>
-            <div hidden={activeTab !== 'balancers'}>
-              <BalancerListEditor
-                balancers={balancers}
-                observatory={observatory}
-                outbounds={customOutbounds}
-                rules={customRules}
-                disabled={!writable || busy}
-                onBalancersChange={setBalancers}
-                onObservatoryChange={setObservatory}
-              />
-            </div>
-            <div hidden={activeTab !== 'dns'}>
-              <DnsEditor dns={dns} disabled={!writable || busy} onChange={setDns} />
-            </div>
+            <fieldset disabled={!writable || busy} className="min-w-0">
+              <div hidden={activeTab !== 'rules'}>
+                <RuleWaterfallEditor
+                  domainStrategy={domainStrategy}
+                  onDomainStrategyChange={setDomainStrategy}
+                  rules={customRules}
+                  onRulesChange={setCustomRules}
+                  outbounds={customOutbounds}
+                  balancers={balancers}
+                  v4Text={v4}
+                  onV4Change={setV4}
+                  v6Text={v6}
+                  onV6Change={setV6}
+                  legacyV1={legacyV1}
+                  preset4={preset4}
+                  preset6={preset6}
+                  hasReferencePreset={!!referencePolicy}
+                  disabled={!writable || busy}
+                  onPendingErrorChange={setHasRuleCardError}
+                />
+              </div>
+              <div hidden={activeTab !== 'outbounds'}>
+                <OutboundListEditor
+                  outbounds={customOutbounds}
+                  rules={customRules}
+                  balancers={balancers}
+                  disabled={!writable || busy}
+                  onChange={setCustomOutbounds}
+                  onPendingErrorChange={setHasOutboundCardError}
+                />
+              </div>
+              <div hidden={activeTab !== 'balancers'}>
+                <BalancerListEditor
+                  balancers={balancers}
+                  observatory={observatory}
+                  outbounds={customOutbounds}
+                  rules={customRules}
+                  disabled={!writable || busy}
+                  onBalancersChange={setBalancers}
+                  onObservatoryChange={setObservatory}
+                />
+              </div>
+              <div hidden={activeTab !== 'dns'}>
+                <DnsEditor dns={dns} disabled={!writable || busy} onChange={setDns} />
+              </div>
+            </fieldset>
           </div>
         ) : (
-          <FieldGroup
-            title="策略 JSON 源码（Schema v3）"
-            description="可直接粘贴或编辑完整策略 JSON。未知合法高级字段（如 mux、sockopt）在切回结构化视图与保存时无损保留；系统入站与管理端口由面板在合并期强制保护。"
-          >
-            <JsonEditor
-              ariaLabel="策略 JSON 源码"
-              value={policyJsonText}
-              readOnly={!writable || busy}
-              minHeight="420px"
-              maxHeight="62vh"
-              onChange={setPolicyJsonText}
-            />
-          </FieldGroup>
+          <JsonEditor
+            ariaLabel="策略 JSON 源码"
+            value={policyJsonText}
+            readOnly={!writable || busy}
+            minHeight="420px"
+            maxHeight="62vh"
+            onChange={setPolicyJsonText}
+          />
         )}
-      </fieldset>
+      </div>
 
       {error && (
         <p role="alert" className="mt-4 text-sm text-[var(--danger)]">
@@ -516,7 +480,6 @@ export function TemplateHistory({
   return (
     <Drawer
       open
-      width="lg"
       onClose={onClose}
       title={`版本历史与引用 · ${template.name}`}
       footer={
@@ -675,7 +638,6 @@ export function TemplateNodes({
     <>
       <Drawer
         open
-        width="xl"
         saving={busy}
         dirty={dirty}
         onBeforeClose={close}
@@ -728,7 +690,7 @@ export function TemplateNodes({
           className="grid gap-5 md:grid-cols-[280px_minmax(0,1fr)]"
         >
           <div className="space-y-3">
-            <Field label="搜索节点" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <SearchInput label="搜索节点" placeholder="搜索节点名称或 IP" value={search} onChange={setSearch} />
             <button
               className="text-xs text-[var(--accent)]"
               onClick={() =>

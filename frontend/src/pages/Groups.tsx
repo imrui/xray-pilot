@@ -6,7 +6,9 @@ import type { Group } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
 import { Field, Btn, FieldGroup, Switch } from '@/components/ui/Form'
-import { PageShell, SurfaceCard } from '@/components/ui/Page'
+import { PageShell } from '@/components/ui/Page'
+import { HelpPopover } from '@/components/ui/HelpPopover'
+import { fetchAllPages } from '@/lib/pagination'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
 import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
@@ -15,7 +17,6 @@ import { Tooltip } from '@/components/ui/Tooltip'
 import { BindingEditor } from '@/components/routing/BindingEditor'
 
 const DEFAULT_PAGE_SIZE = 10
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const DESCRIPTION_PREVIEW_LIMIT = 24
 
 interface FormState {
@@ -61,13 +62,19 @@ export default function Groups() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['groups', page, pageSize],
-    queryFn: () => groupApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
+    queryKey: ['groups', page, pageSize, search.trim(), statusFilter],
+    queryFn: () => groupApi.list({
+      page,
+      page_size: pageSize,
+      keyword: search.trim() || undefined,
+      active: statusFilter === 'all' ? undefined : statusFilter === 'active',
+    }).then((r) => r.data.data!),
   })
 
   const { data: allNodes } = useQuery({
     queryKey: ['nodes-all'],
-    queryFn: () => nodeApi.list({ page: 1, page_size: 200 }).then((r) => r.data.data?.list ?? []),
+    queryFn: () => fetchAllPages((page, pageSize) =>
+      nodeApi.list({ page, page_size: pageSize }).then((r) => r.data.data!)),
   })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['groups'] })
@@ -129,13 +136,11 @@ export default function Groups() {
       node_ids: prev.node_ids.includes(nodeId) ? prev.node_ids.filter((id) => id !== nodeId) : [...prev.node_ids, nodeId],
     }))
 
-  const filteredGroups = (data?.list ?? []).filter((g) => {
-    const keyword = search.trim().toLowerCase()
-    const matchesKeyword =
-      keyword === '' || g.name.toLowerCase().includes(keyword) || g.description.toLowerCase().includes(keyword)
-    const matchesStatus = statusFilter === 'all' || (statusFilter === 'active' && g.active) || (statusFilter === 'inactive' && !g.active)
-    return matchesKeyword && matchesStatus
-  })
+  const filteredGroups = data?.list ?? []
+  const changeStatus = (value: typeof statusFilter) => {
+    setStatusFilter(value)
+    setPage(1)
+  }
   const allVisibleSelected = filteredGroups.length > 0 && filteredGroups.every((g) => selectedIds.includes(g.id))
   const dirty = JSON.stringify(form) !== JSON.stringify(initialForm) && drawer.open
 
@@ -263,12 +268,21 @@ export default function Groups() {
         }
         searchValue={search}
         searchPlaceholder="搜索分组名或描述"
-        onSearchChange={setSearch}
+        onSearchChange={(value) => {
+          setSearch(value)
+          setPage(1)
+        }}
+        meta={
+          <HelpPopover title="分组说明">
+            <p>分组用于组织同一地区、线路或用途的节点，供订阅用户按组使用。</p>
+            <p>编辑分组时可以调整成员，并选择继承全局路由或指定一个模板版本。</p>
+          </HelpPopover>
+        }
         filters={
           <>
-            <FilterChip active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>全部</FilterChip>
-            <FilterChip active={statusFilter === 'active'} onClick={() => setStatusFilter('active')}>启用</FilterChip>
-            <FilterChip active={statusFilter === 'inactive'} onClick={() => setStatusFilter('inactive')}>禁用</FilterChip>
+            <FilterChip active={statusFilter === 'all'} onClick={() => changeStatus('all')}>全部</FilterChip>
+            <FilterChip active={statusFilter === 'active'} onClick={() => changeStatus('active')}>启用</FilterChip>
+            <FilterChip active={statusFilter === 'inactive'} onClick={() => changeStatus('inactive')}>禁用</FilterChip>
           </>
         }
         bulkBar={
@@ -302,52 +316,14 @@ export default function Groups() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0 space-y-3">
-          <Table columns={columns} data={filteredGroups} loading={isLoading} />
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <label className="inline-flex items-center gap-2 text-sm text-soft">
-              分页
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value))
-                  setPage(1)
-                }}
-                className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-              >
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size} / 页
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
-          </div>
-        </div>
-
-        <SurfaceCard className="p-5">
-          <div className="mb-4">
-            <div className="text-sm font-semibold">分组说明</div>
-            <p className="mt-2 text-sm leading-6 text-soft">
-              建议把分组用于表达线路池、地区池或特定分发策略。这样用户和订阅逻辑在后续配置里会更清晰。
-            </p>
-          </div>
-          <div className="space-y-3">
-            <div className="border-t border-[var(--border)] pt-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Node Pool</div>
-              <div className="mt-2 text-sm font-semibold">节点按职责归类</div>
-              <p className="mt-2 text-xs leading-5 text-soft">比如海外中转、高可用入口、实验线路，不需要把这些语义散落在节点备注里。</p>
-            </div>
-            <div className="border-t border-[var(--border)] pt-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Distribution</div>
-              <div className="mt-2 text-sm font-semibold">为订阅分发做准备</div>
-              <p className="mt-2 text-xs leading-5 text-soft">后续用户绑定分组后，订阅生成会更自然，排障时也更容易回溯。</p>
-            </div>
-          </div>
-        </SurfaceCard>
-      </div>
+      <Table columns={columns} data={filteredGroups} loading={isLoading} />
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={data?.total}
+        onChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       <Drawer
         open={drawer.open}

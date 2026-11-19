@@ -3,6 +3,7 @@ package repository
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"gorm.io/gorm"
@@ -25,14 +26,22 @@ func (r *GroupRepository) FindByID(id uint) (*entity.Group, error) {
 	return &group, err
 }
 
-func (r *GroupRepository) List(page, pageSize int) ([]entity.Group, int64, error) {
+func (r *GroupRepository) List(page, pageSize int, keyword string, active *bool) ([]entity.Group, int64, error) {
+	query := DB.Model(&entity.Group{})
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + escapeLike(strings.ToLower(keyword)) + "%"
+		query = query.Where("LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(description) LIKE ? ESCAPE '\\'", like, like)
+	}
+	if active != nil {
+		query = query.Where("active = ?", *active)
+	}
 	var total int64
-	if err := DB.Model(&entity.Group{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var groups []entity.Group
 	offset := (page - 1) * pageSize
-	err := DB.Preload("Nodes").Order("id desc").Offset(offset).Limit(pageSize).Find(&groups).Error
+	err := query.Preload("Nodes").Order("id desc").Offset(offset).Limit(pageSize).Find(&groups).Error
 	return groups, total, err
 }
 

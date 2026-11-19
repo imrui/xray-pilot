@@ -83,12 +83,12 @@ func (s *GroupService) ToggleActive(id uint) error {
 	return s.groupRepo.UpdateActive(id, !group.Active)
 }
 
-func (s *GroupService) List(page, pageSize int) ([]dto.GroupResponse, int64, error) {
-	groups, total, err := s.groupRepo.List(page, pageSize)
+func (s *GroupService) List(page, pageSize int, keyword string, active *bool) ([]dto.GroupResponse, int64, error) {
+	groups, total, err := s.groupRepo.List(page, pageSize, keyword, active)
 	if err != nil {
 		return nil, 0, err
 	}
-	var result []dto.GroupResponse
+	result := make([]dto.GroupResponse, 0, len(groups))
 	for _, g := range groups {
 		g := g
 		result = append(result, *s.toResponse(&g))

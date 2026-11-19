@@ -34,7 +34,7 @@ func (h *ProfileHandler) Create(c *gin.Context) {
 func (h *ProfileHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	profiles, total, err := h.svc.List(page, pageSize)
+	profiles, total, err := h.svc.List(page, pageSize, c.Query("keyword"), c.Query("protocol"), c.QueryArray("keyword_protocol"))
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return

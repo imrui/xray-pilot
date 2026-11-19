@@ -114,13 +114,13 @@ export function BalancerListEditor({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-4 py-3">
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-1.5 text-sm font-semibold">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-base font-semibold">
             <Scale className="h-4 w-4 text-[var(--accent)]" />
-            负载均衡组（Balancers）
+            负载均衡组
           </div>
-          <p className="text-xs text-soft">
-            将多个自定义落地出站编组，按随机、轮询或实时最低延迟自动选路；支持配置全部故障时的兜底直连/备用出站。
+          <p className="text-sm leading-6 text-soft">
+            在多个出站之间按延迟、轮询或随机策略选路。
           </p>
         </div>
         <Btn
@@ -129,13 +129,13 @@ export function BalancerListEditor({
           onClick={addBalancer}
         >
           <Plus className="h-4 w-4" />
-          添加负载均衡组（{balancers.length}/16）
+          添加负载均衡组
         </Btn>
       </div>
 
       {balancers.length === 0 ? (
         <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--panel-muted)] p-6 text-center text-sm text-soft">
-          当前模板未定义负载均衡组。先在「自定义出站」添加至少 1 个落地出站后，可在此创建自动择优或轮询均衡池，并在路由规则中直接选用。
+          {outboundTags.length ? '暂无负载均衡组。' : '先添加自定义出站，即可在这里创建均衡组。'}
         </div>
       ) : (
         <div className="space-y-4">

@@ -211,8 +211,15 @@ test('删除前方出站不串用后方卡片 JSON，修复后表单与保存保
   fireEvent.change(screen.getAllByLabelText('落地服务器地址 *')[0], { target: { value: 'edited.test' } })
   fireEvent.click(screen.getAllByRole('button', { name: '表单' })[0])
   assert.equal((screen.getAllByLabelText('落地服务器地址 *')[0] as HTMLInputElement).value, 'edited.test')
+  const secondHeading = screen.getByLabelText('出站 second')
+  const secondCard = secondHeading.closest('details')!
+  assert.equal(secondCard.open, false)
+  fireEvent.click(secondHeading)
   fireEvent.click(screen.getAllByRole('button', { name: 'JSON' })[1])
   fireEvent.change(screen.getByLabelText('自定义出站 second JSON'), { target: { value: '{"tag":' } })
+  fireEvent.click(secondHeading)
+  assert.equal(secondCard.open, false)
+  fireEvent.click(secondHeading)
   fireEvent.click(screen.getAllByRole('button', { name: '删除' })[0])
   assert.equal((screen.getByLabelText('自定义出站 second JSON') as HTMLTextAreaElement).value, '{"tag":')
   fireEvent.change(screen.getByLabelText('自定义出站 second JSON'), { target: { value: JSON.stringify(second) } })
@@ -229,7 +236,8 @@ test('WireGuard Reserved 校验三个字节并写入 settings，保留未知参�
   const outbound = { tag: 'warp', protocol: 'wireguard', settings: { secretKey: 'key', address: ['172.16.0.2/32'], peers: [{ endpoint: 'warp.test:2408', publicKey: 'public', keepAlive: 25 }], noKernelTun: true } }
   mount(<TemplateEditor template={{ ...template, draft: JSON.stringify({ ...emptyPolicy, custom_outbounds: [outbound] }) }} onClose={() => {}} onConfigure={() => {}} />)
   fireEvent.click(screen.getByRole('tab', { name: /自定义出站/ }))
-  const field = screen.getByLabelText('WARP Reserved（可选，如 0,0,0）')
+  fireEvent.click(screen.getByText('WireGuard 高级设置'))
+  const field = screen.getByLabelText('WARP Reserved')
   for (const value of ['1,2', '1,2,256', '1,2,-1', '1,,3', '1,2,3.5']) {
     fireEvent.change(field, { target: { value } })
     assert.ok(screen.getByText(/Reserved 必须是 3 个/))
@@ -367,7 +375,42 @@ test('路由页采用列表和抽屉，不提供节点同步入口', async () =>
   assert.equal(screen.queryByRole('button', { name: /^同步|下发/ }), null)
   fireEvent.click(screen.getAllByRole('button', { name: '编辑' })[0])
   assert.ok(screen.getByRole('dialog', { name: '编辑路由模板 · IPv4 标准' }))
-  assert.ok(screen.getByLabelText('模板名称 *'))
+  fireEvent.click(screen.getByRole('button', { name: '模板信息', expanded: false }))
+  assert.ok(screen.getByRole('textbox', { name: '模板名称 *' }))
+})
+
+test('路由列表先搜索全部模板，再按所选页容量展示', async () => {
+  const templates = Array.from({ length: 12 }, (_, i) => ({
+    ...template, id: i + 1, name: `路由模板 ${i + 1}`,
+  }))
+  api((_method, url) => url === '/routing-overview' ? { ...overview, templates } : undefined)
+  mount(<Routing />)
+  const next = await screen.findByRole('button', { name: '下一页' })
+  await screen.findAllByRole('button', { name: '路由模板 1' })
+  assert.equal(screen.queryByRole('button', { name: '路由模板 12' }), null)
+  fireEvent.click(next)
+  assert.ok(screen.getAllByRole('button', { name: '路由模板 12' }).length)
+  const search = screen.getByPlaceholderText('搜索路由模板名称或说明')
+  fireEvent.change(search, { target: { value: '模板 12' } })
+  assert.ok(screen.getByText('共 1 条'))
+  assert.ok((next as HTMLButtonElement).disabled)
+  fireEvent.click(screen.getByRole('button', { name: '清空搜索' }))
+  assert.equal(document.activeElement, search)
+  assert.ok(screen.getAllByRole('button', { name: '路由模板 1' }).length)
+  fireEvent.change(screen.getByRole('combobox', { name: '每页条数' }), { target: { value: '20' } })
+  assert.ok(screen.getAllByRole('button', { name: '路由模板 12' }).length)
+  assert.ok((next as HTMLButtonElement).disabled)
+})
+
+test('普通管理员可以浏览策略分区与源码，模板保持只读', () => {
+  api()
+  mount(<TemplateEditor template={template} onClose={() => {}} onConfigure={() => {}} />)
+  act(() => useAuthStore.getState().setSession('test', 'reader', 'admin'))
+  fireEvent.click(screen.getByRole('tab', { name: 'DNS 设置' }))
+  assert.ok(screen.getByRole('switch').matches(':disabled'))
+  fireEvent.click(screen.getByRole('tab', { name: '策略 JSON 源码' }))
+  assert.ok((screen.getByRole('textbox', { name: '策略 JSON 源码' }) as HTMLTextAreaElement).readOnly)
+  assert.equal(screen.queryByRole('button', { name: '保存草稿' }), null)
 })
 
 test('参考域名使用后端预设目录，只填入草稿，不自动应用节点', async () => {
@@ -401,6 +444,7 @@ test('预设可复制成独立草稿，不改写源模板或节点绑定', async
   fireEvent.keyDown(screen.getAllByRole('button', { name: '更多操作' })[0], { key: 'ArrowDown' })
   fireEvent.click(await screen.findByRole('menuitem', { name: '复制草稿为新模板' }))
   assert.ok(screen.getByRole('dialog', { name: '新增路由模板' }))
+  assert.ok(screen.getByRole('button', { name: '模板信息', expanded: true }))
   assert.equal((screen.getByLabelText('模板名称 *') as HTMLInputElement).value, 'IPv4 标准 - 副本')
   fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
   await screen.findByText('草稿已保存。')
@@ -694,6 +738,7 @@ test('保存草稿成功而发布失败时，草稿与输入保留，不变更�
     if (url.endsWith('/publish')) throw new Error('模拟版本冲突')
   })
   mount(<TemplateEditor template={template} onClose={() => {}} onConfigure={() => {}} />)
+  fireEvent.click(screen.getByRole('button', { name: '模板信息' }))
   fireEvent.change(screen.getByLabelText('模板名称 *'), { target: { value: '已保存新名称' } })
   fireEvent.click(screen.getByRole('button', { name: '保存并发布版本' }))
   await screen.findByText(/模拟版本冲突/)
@@ -762,7 +807,7 @@ test('同步记录明确区分回退和未知结果，未知任务先核对', as
         }
       : undefined,
   )
-  mount(<SyncHistory onClose={() => {}} />)
+  mount(<SyncHistory onInspect={() => {}} onClose={() => {}} />)
   await screen.findByText('已回退，目标未同步')
   assert.ok(screen.getByText('需要核对'))
   assert.equal(screen.getAllByRole('button', { name: '用最新配置重试' }).length, 1)
@@ -1164,12 +1209,9 @@ test('Phase 3 模板编辑器支持负载均衡组、Observatory 探测、服务
 
   // 3. 切换到「DNS 设置」标签页，启用自定义 DNS，添加分域名解锁规则与静态 Hosts
   fireEvent.click(screen.getByRole('tab', { name: /DNS 设置/ }))
-  assert.ok(
-    screen.getByText(
-      '启用自定义 DNS 后，默认直连出站将自动使用 Xray 内置解析结果以使分流 DNS 与 Hosts 生效。',
-    ),
-  )
+  assert.ok(screen.getByRole('switch', { checked: false }))
   fireEvent.click(screen.getByRole('switch'))
+  assert.ok(screen.getByText('默认直连出站使用下方的 DNS 与 Hosts 配置。'))
   fireEvent.click(screen.getByRole('button', { name: /添加分域名解锁 DNS 规则/ }))
   fireEvent.change(screen.getByLabelText('上游 DNS 地址 #2 *'), {
     target: { value: '8.8.8.8' },

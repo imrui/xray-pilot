@@ -118,14 +118,40 @@ func (r *UserRepository) FindAll() ([]entity.User, error) {
 	return users, err
 }
 
-func (r *UserRepository) List(page, pageSize int) ([]entity.User, int64, error) {
+type UserListFilter struct {
+	Keyword string
+	Status  string
+	GroupID uint
+}
+
+func (r *UserRepository) List(page, pageSize int, filter UserListFilter) ([]entity.User, int64, error) {
+	query := DB.Model(&entity.User{})
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		pattern := "%" + escapeLike(strings.ToLower(keyword)) + "%"
+		query = query.Where(`(LOWER(users.username) LIKE ? ESCAPE '\' OR LOWER(users.real_name) LIKE ? ESCAPE '\'
+			OR LOWER(users.feishu_email) LIKE ? ESCAPE '\' OR LOWER(users.remark) LIKE ? ESCAPE '\'
+			OR EXISTS (SELECT 1 FROM user_groups ug JOIN groups g ON g.id = ug.group_id
+				WHERE ug.user_id = users.id AND LOWER(g.name) LIKE ? ESCAPE '\'))`,
+			pattern, pattern, pattern, pattern, pattern)
+	}
+	if filter.GroupID != 0 {
+		query = query.Where("EXISTS (SELECT 1 FROM user_groups ug WHERE ug.user_id = users.id AND ug.group_id = ?)", filter.GroupID)
+	}
+	switch filter.Status {
+	case "active":
+		query = query.Where("active = ? AND (expires_at IS NULL OR expires_at > ?)", true, time.Now())
+	case "inactive":
+		query = query.Where("active = ?", false)
+	case "expired":
+		query = query.Where("expires_at <= ?", time.Now())
+	}
 	var total int64
-	if err := DB.Model(&entity.User{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var users []entity.User
 	offset := (page - 1) * pageSize
-	err := preloadUserGroups(DB).Order("id desc").Offset(offset).Limit(pageSize).Find(&users).Error
+	err := preloadUserGroups(query).Order("id desc").Offset(offset).Limit(pageSize).Find(&users).Error
 	return users, total, err
 }
 

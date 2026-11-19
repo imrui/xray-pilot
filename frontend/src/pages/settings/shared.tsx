@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { SurfaceCard } from '@/components/ui/Page'
 
@@ -8,20 +9,20 @@ export function Section({
   actions,
 }: {
   title: string
-  description?: string
+  description?: React.ReactNode
   children: React.ReactNode
   actions?: React.ReactNode
 }) {
   return (
-    <SurfaceCard className="p-6">
-      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h3 className="text-base font-semibold tracking-[-0.03em]">{title}</h3>
-          {description && <p className="mt-2 text-sm leading-6 text-soft">{description}</p>}
+    <SurfaceCard className="p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold">{title}</h3>
+          {description && <p className="mt-1 text-sm leading-6 text-soft">{description}</p>}
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
-      <div className="space-y-4">{children}</div>
+      <div className="space-y-4 [&:not(:empty)]:mt-4 [&_label]:text-sm">{children}</div>
     </SurfaceCard>
   )
 }
@@ -41,11 +42,13 @@ export function SecretField({
   revealed: boolean
   onToggleReveal: () => void
 }) {
+  const id = useId()
   return (
     <div className="flex flex-col space-y-1.5">
-      <label className="text-[12px] font-medium text-soft">{label}</label>
+      <label htmlFor={id} className="text-sm font-medium text-soft">{label}</label>
       <div className="relative">
         <input
+          id={id}
           type={revealed ? 'text' : 'password'}
           value={value}
           onChange={onChange}

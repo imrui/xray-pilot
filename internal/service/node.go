@@ -215,7 +215,7 @@ func (s *NodeService) toNodeResponse(n *entity.Node) *dto.NodeResponse {
 		resp.LastSyncAt = n.LastSyncAt.Format(time.RFC3339)
 	}
 	if n.LastCheckAt != nil {
-		resp.LastCheckAt = n.LastCheckAt.Format(time.RFC3339)
+		resp.LastCheckAt = n.LastCheckAt.Format(time.RFC3339Nano)
 	}
 	return resp
 }

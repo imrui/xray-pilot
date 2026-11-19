@@ -232,11 +232,6 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
               生成接入命令
             </Btn>
           </>
-        ) : step === 'waiting' ? (
-          <>
-            <Btn variant="secondary" onClick={handleCancel}>关闭</Btn>
-            <span className="text-xs text-soft">在目标机器上执行命令，注册回 panel 后自动关闭</span>
-          </>
         ) : step === 'expired' ? (
           <>
             <Btn variant="secondary" onClick={handleCancel}>关闭</Btn>
@@ -249,10 +244,9 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
     >
       {step === 'mode' && replaceNode && (
         <div className="space-y-4">
-          <p className="text-xs text-soft">
-            当前节点 IP <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">{replaceNode.ip}</code>
-            {replaceNode.domain && <>，域名 <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">{replaceNode.domain}</code></>}。
-            两种更换方式均保留节点的分组、协议密钥与端口/SNI 覆盖，客户端订阅无需更换。
+          <p className="text-sm leading-6 text-soft">
+            当前地址 <code className="wrap-anywhere">{replaceNode.ip}</code>
+            {replaceNode.domain && <>（<code className="wrap-anywhere">{replaceNode.domain}</code>）</>}。两种方式都沿用原有分组、协议密钥、端口、SNI 和订阅链接。
           </p>
           <button
             type="button"
@@ -262,8 +256,8 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
             <PencilLine className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent)]" />
             <span>
               <span className="block text-sm font-semibold">仅更换 IP</span>
-              <span className="mt-1 block text-xs text-soft">
-                服务器本身没换（如迁移弹性 IP）。直接改节点 IP 并标记待同步{replaceNode.domain ? '，域名解析需手动改 DNS' : ''}。
+              <span className="mt-1 block text-sm text-soft">
+                原服务器更改地址后手动同步{replaceNode.domain ? '，并更新域名解析' : ''}。
               </span>
             </span>
           </button>
@@ -275,8 +269,8 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
             <ArrowLeftRight className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent)]" />
             <span>
               <span className="block text-sm font-semibold">更换服务器（重装接入）</span>
-              <span className="mt-1 block text-xs text-soft">
-                换了一台新机器。生成一次性命令在新机执行：装 xray、写入 panel 公钥、注册回本节点并自动同步配置。
+              <span className="mt-1 block text-sm text-soft">
+                在新服务器运行一次性接入命令。注册并通过 SSH 检查后，面板会触发配置同步。
               </span>
             </span>
           </button>
@@ -284,36 +278,26 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
       )}
 
       {step === 'ip' && replaceNode && (
-        <div className="space-y-4">
+        <div className="space-y-4 [&_label]:text-sm">
           <Field label="当前 IP" value={replaceNode.ip} disabled readOnly />
           <Field label="新 IP *" value={newIP} onChange={(e) => setNewIP(e.target.value)} placeholder="如：34.21.157.200" />
-          {replaceNode.domain && (
-            <p className="text-xs text-[var(--warning)]">
-              <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />该节点配置了域名 <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono">{replaceNode.domain}</code>，
-              保存后请手动将 DNS 解析指向新 IP，客户端订阅才能正常连接。
-            </p>
-          )}
-          <p className="text-xs text-soft">保存后节点进入待同步状态，请在节点列表点「同步」推送配置到新 IP。</p>
+          <p className={replaceNode.domain ? 'text-sm leading-6 text-[var(--warning)]' : 'text-sm leading-6 text-soft'}>
+            {replaceNode.domain && <><AlertTriangle className="mr-1 inline h-4 w-4" />请将 <code className="wrap-anywhere">{replaceNode.domain}</code> 的 DNS 解析指向新 IP。</>}
+            保存后，请在节点列表点击「同步」推送配置。
+          </p>
           {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
         </div>
       )}
 
       {step === 'form' && (
-        <div className="space-y-4">
-          {isReplace ? (
-            <p className="text-xs text-soft">
-              在<span className="font-semibold">新机器</span>上执行生成的命令：脚本自动装 xray、写入 panel 公钥、注册回节点
-              「{replaceNode!.name}」。注册成功后自动推送原有配置（Reality 密钥不变），节点 ID 与订阅均不变。
-            </p>
-          ) : (
-            <p className="text-xs text-soft">
-              填写节点元数据，后端生成一次性 token（默认 10 分钟、绑定首次访问 IP），返回完整 curl 命令供你在目标机器上执行。
-              脚本自动拉取 panel 公钥、装 xray、回填节点信息。
-            </p>
-          )}
-          <p className="text-xs text-soft">Xray 安装版本使用「系统设置 → 节点与同步」中保存的稳定版本。</p>
+        <div className="space-y-4 [&_label]:text-sm [&_h4]:text-base">
+          <p className="text-sm leading-6 text-soft">
+            命令会安装「节点与同步」中指定的 Xray 版本，{replaceNode
+              ? <>并将新服务器注册到「{replaceNode.name}」。原有节点 ID、密钥和订阅继续使用。</>
+              : '并将服务器注册为新节点。'}
+          </p>
           {!isReplace && (
-            <FieldGroup title="节点元数据" description="脚本注册时用这里的信息创建节点记录。">
+            <FieldGroup title="节点信息">
               <Field label="节点名 *" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} placeholder="如：tw03-lk" />
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="地区" value={form.region} onChange={(e) => setForm((p) => ({ ...p, region: e.target.value }))} placeholder="如：台北" />
@@ -323,21 +307,23 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
             </FieldGroup>
           )}
 
-          <FieldGroup title="SSH 参数" description={isReplace ? '新机器的 SSH 用户与端口；脚本会把 panel 公钥写入该用户的 authorized_keys。' : '脚本会把 panel 自身的 SSH 公钥写入该用户的 authorized_keys。'}>
+          <FieldGroup title="SSH 连接">
+            <p className="text-sm text-soft">接入脚本会将面板公钥写入此用户的 <code>authorized_keys</code>。</p>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="SSH 用户" value={form.ssh_user} onChange={(e) => setForm((p) => ({ ...p, ssh_user: e.target.value }))} />
               <Field label="SSH 端口" type="number" value={form.ssh_port} onChange={(e) => setForm((p) => ({ ...p, ssh_port: e.target.value }))} />
             </div>
           </FieldGroup>
 
-          <FieldGroup title="Token 有效期">
+          <div>
             <SelectField
-              label="过期时长"
+              label="接入命令有效期"
               value={form.ttl_seconds}
               onChange={(v) => setForm((p) => ({ ...p, ttl_seconds: v }))}
               options={TTL_OPTIONS}
             />
-          </FieldGroup>
+            <p className="mt-1.5 text-sm text-soft">命令仅可使用一次，首次执行后绑定源 IP。</p>
+          </div>
 
           {err && <p className="text-sm text-[var(--danger)]">{err}</p>}
         </div>
@@ -347,34 +333,30 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
         <div className="space-y-4">
           <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-muted)] p-4">
             <div className="flex items-center justify-between text-sm">
-              <span className="font-semibold">等待节点执行中…</span>
+              <span className="font-semibold">等待节点注册</span>
               <span className="font-mono text-soft">剩余 {remainingLabel}</span>
             </div>
-            <p className="mt-2 text-xs text-soft">
-              请在{isReplace ? '新机器' : '目标机器'}上以 root 用户执行下面这行命令（若当前为普通用户，先执行 <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">sudo su -</code> 切换）。脚本完成自检后会自动注册回 panel，该对话框会自动关闭并刷新节点列表。
-            </p>
             {token.xray_version && (
-              <p className="mt-2 text-xs text-soft">
-                本次安装 Xray <code className="rounded bg-[var(--panel-strong)] px-1 font-mono">{token.xray_version}</code>。如需更换版本，请在系统设置保存后重新生成命令。
+              <p className="mt-2 text-sm text-soft">
+                安装版本 <code>Xray {token.xray_version}</code>。更改版本后需重新生成命令。
               </p>
             )}
-            <p className="mt-2 text-xs text-[var(--warning)]">
-              ⚠️ 同时确保节点防火墙允许面板{token.panel_outbound_ip ? (
-                <> IP <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono text-[var(--warning)]">{token.panel_outbound_ip}</code></>
-              ) : ' 出网 IP'}通过 SSH 端口访问（云厂商安全组 / ufw / firewalld / iptables 任一层拦截都会让后续同步失败）
+            <p className="mt-2 text-sm leading-6 text-[var(--warning)]">
+              <AlertTriangle className="mr-1 inline h-4 w-4" />请在安全组和防火墙放行面板出网 IP
+              {token.panel_outbound_ip && <> <code>{token.panel_outbound_ip}</code></>} 对 SSH 端口的访问，否则后续同步会失败。
             </p>
           </div>
 
           <div className="rounded-xl border border-[var(--border)] bg-[var(--code-bg)] p-4">
-            <div className="mb-2 flex items-center justify-between text-xs text-soft">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm text-soft">
               <span className="inline-flex items-center gap-1.5">
                 <Terminal className="h-3.5 w-3.5" />
-                目标机器执行
+                在{isReplace ? '新服务器' : '目标服务器'}上以 root 身份执行
               </span>
               <button
                 type="button"
                 onClick={handleCopyCommand}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white shadow-sm transition ${
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-white shadow-sm transition ${
                   copied
                     ? 'bg-[var(--success)]'
                     : 'bg-[var(--accent)] hover:brightness-110'
@@ -384,13 +366,13 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
                 {copied ? '已复制' : '复制命令'}
               </button>
             </div>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-[var(--code-text)]">
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-sm text-[var(--code-text)]">
               {token.curl_command}
             </pre>
           </div>
 
           {token.used_by_ip && (
-            <p className="text-xs text-soft">已绑定源 IP：<span className="font-mono">{token.used_by_ip}</span>（异地执行将被拒绝）</p>
+            <p className="text-sm text-soft">此命令已绑定源 IP <code>{token.used_by_ip}</code>，仅可从该地址执行。</p>
           )}
         </div>
       )}
@@ -400,35 +382,35 @@ export function OneClickInstallDialog({ open, onClose, onRegistered, replaceNode
           <Sparkles className="mx-auto h-10 w-10 text-[var(--success)]" />
           <p className="text-base font-semibold">{isReplace ? '新机器已注册，节点更换完成' : '节点已成功注册'}</p>
           {token.reachable === true && (
-            <p className="text-xs text-[var(--success)]">
-              ✅ panel 已可正常 SSH 到节点{typeof token.reachable_latency_ms === 'number' && token.reachable_latency_ms > 0
+            <p className="text-sm text-[var(--success)]">
+              面板已连通节点 SSH{typeof token.reachable_latency_ms === 'number' && token.reachable_latency_ms > 0
                 ? `（延迟 ${token.reachable_latency_ms} ms）`
                 : ''}
               {isReplace && '，已自动触发配置同步'}
             </p>
           )}
           {isReplace && replaceNode?.domain && (
-            <p className="text-xs text-[var(--warning)]">
+            <p className="text-sm text-[var(--warning)]">
               <AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />请将域名 <code className="mx-1 rounded bg-[var(--panel-strong)] px-1 font-mono">{replaceNode.domain}</code> 的 DNS 解析指向新 IP
             </p>
           )}
           {token.reachable === false && (
             <div className="mx-auto max-w-md space-y-2 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-soft)] p-3 text-left">
-              <p className="text-xs font-semibold text-[var(--warning)]"><AlertTriangle className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />panel 暂时无法 SSH 到节点</p>
-              <p className="text-xs text-[var(--warning)]">
+              <p className="text-sm font-semibold text-[var(--warning)]"><AlertTriangle className="mr-1 inline h-4 w-4" />面板暂时无法连接节点 SSH</p>
+              <p className="text-sm text-[var(--warning)]">
                 {token.reachable_message || 'SSH 端口探针失败，可能是防火墙未放行。'}
               </p>
-              <p className="text-[11px] text-soft">放行后回节点列表点「同步」即可使配置生效。</p>
+              <p className="text-sm text-soft">放行后，在节点列表点击「同步」推送配置。</p>
             </div>
           )}
-          <p className="text-xs text-soft">正在刷新节点列表，自动关闭…</p>
+          <p className="text-sm text-soft">即将返回节点列表。</p>
         </div>
       )}
 
       {step === 'expired' && (
         <div className="space-y-3 py-6 text-center">
-          <p className="text-base font-semibold text-[var(--warning)]">Token 已过期</p>
-          <p className="text-xs text-soft">如果脚本尚未执行完毕，请重新生成 token；已经执行成功的节点会被保留。</p>
+          <p className="text-base font-semibold text-[var(--warning)]">接入命令已过期</p>
+          <p className="text-sm text-soft">尚未完成注册时，请重新生成命令。已注册的节点会保留。</p>
         </div>
       )}
     </Modal>

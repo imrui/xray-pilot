@@ -422,10 +422,11 @@ func (s *RoutingService) saveBinding(b entity.RoutingBinding, expected uint, act
 			if old.ConfigPath != b.ConfigPath {
 				return fmt.Errorf("配置路径仅超级管理员可修改")
 			}
-			var prev, next map[string]json.RawMessage
+			var prev map[string]json.RawMessage
 			_ = json.Unmarshal([]byte(old.Overrides), &prev)
-			if json.Unmarshal([]byte(b.Overrides), &next) != nil || next == nil {
-				return fmt.Errorf("覆盖必须是 JSON 对象")
+			next, err := xray.DecodeRoutingOverrideFields(b.Overrides)
+			if err != nil {
+				return err
 			}
 			var previousRules, nextRules any
 			_ = json.Unmarshal(prev["custom_rules"], &previousRules)

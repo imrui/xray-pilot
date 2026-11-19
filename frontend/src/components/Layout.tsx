@@ -13,7 +13,6 @@ import {
   Menu,
   Moon,
   ScrollText,
-  Search,
   Server,
   Settings,
   Shield,
@@ -31,6 +30,7 @@ import { APP_VERSION } from '@/lib/version'
 import { systemApi } from '@/lib/api'
 import { SyncStatusPill } from '@/components/SyncStatusPill'
 import { ChangelogDrawer } from '@/components/ChangelogDrawer'
+import { HeaderSearch } from '@/components/HeaderSearch'
 import { ChangePasswordModal } from '@/components/ChangePasswordModal'
 import { useConfirm } from '@/lib/confirm-context'
 import { useSettingsDraft } from '@/store/settingsDraft'
@@ -368,16 +368,7 @@ export default function Layout() {
               </div>
               <div className="flex h-full items-center gap-2.5">
                 {syncSummary && <SyncStatusPill summary={syncSummary} />}
-                <label className="relative hidden lg:block">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
-                  <input
-                    placeholder="搜索节点、用户..."
-                    className="h-9 w-64 rounded-md border border-[var(--border)] bg-[var(--panel)] pl-10 pr-14 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-[0.12em] text-faint">
-                    ⌘K
-                  </span>
-                </label>
+                <HeaderSearch key={location.key} pathname={location.pathname} onNavigate={goChild} />
                 <a
                   href="https://github.com/imrui/xray-pilot"
                   target="_blank"

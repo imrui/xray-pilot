@@ -147,6 +147,8 @@ export type RoutingNode = {
   active: boolean
   sync_status: string
   job_status?: string
+  last_sync_error?: string
+  last_sync_error_at?: string
   routing: EffectiveRouting | null
   error?: string
 }

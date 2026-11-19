@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Lock, PencilLine, Plus, Sparkles } from 'lucide-react'
+import { ChevronDown, KeyRound, Lock, PencilLine, Plus, Sparkles } from 'lucide-react'
 import { nodeApi, profileApi } from '@/lib/api'
 import { generateShortIds } from '@/lib/keygen'
 import { PROTOCOL_OPTIONS, protocolBadgeVariant, protocolLabel } from '@/lib/protocol'
@@ -8,16 +8,18 @@ import type { InboundProfile, NodeKey, Protocol } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
 import { Badge } from '@/components/ui/Badge'
 import { Field, SelectField, Btn, FieldGroup, Switch } from '@/components/ui/Form'
-import { PageShell, SurfaceCard } from '@/components/ui/Page'
+import { PageShell } from '@/components/ui/Page'
+import { HelpPopover } from '@/components/ui/HelpPopover'
+import { fetchAllPages } from '@/lib/pagination'
 import { Drawer } from '@/components/ui/Drawer'
 import { ActionMenu } from '@/components/ui/ActionMenu'
-import { BulkBar, FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
+import { BulkBar, ListToolbar } from '@/components/ui/ListToolbar'
+import { SearchInput } from '@/components/ui/SearchInput'
 import { useConfirm } from '@/lib/confirm-context'
 import { useRoutingOverview, invalidateRouting } from '@/lib/routing'
 import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 10
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 const protocolOptions = PROTOCOL_OPTIONS
 
@@ -88,7 +90,8 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
 
   const { data: nodes } = useQuery({
     queryKey: ['nodes-all'],
-    queryFn: () => nodeApi.list({ page: 1, page_size: 200 }).then((r) => r.data.data?.list ?? []),
+    queryFn: () => fetchAllPages((page, pageSize) =>
+      nodeApi.list({ page, page_size: pageSize }).then((r) => r.data.data!)),
   })
   const sortedNodes = [...(nodes ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }))
   const filteredNodes = sortedNodes.filter((n) => {
@@ -280,19 +283,11 @@ function NodeKeyDrawer({ profile, onClose }: { profile: InboundProfile; onClose:
           </Btn>
         </>
       }
-      width="xl"
     >
       <div className="grid h-full gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
         {/* 左侧节点列表 */}
         <div className="flex h-full min-h-0 flex-col space-y-3">
-          <div>
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="搜索节点 名称/IP/地区"
-              className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none"
-            />
-          </div>
+          <SearchInput value={filter} onChange={setFilter} placeholder="搜索节点 名称/IP/地区" className="w-full" />
           <div className="flex items-center justify-between text-xs text-soft">
             <span>共 {filteredNodes.length} 个</span>
             <button
@@ -489,8 +484,13 @@ export default function Profiles() {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['profiles', page, pageSize],
-    queryFn: () => profileApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
+    queryKey: ['profiles', page, pageSize, search.trim(), protocolFilter],
+    queryFn: () => profileApi.list({
+      page,
+      page_size: pageSize,
+      keyword: search.trim() || undefined,
+      protocol: protocolFilter === 'all' ? undefined : protocolFilter,
+    }).then((r) => r.data.data!),
   })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['profiles'] })
@@ -580,12 +580,7 @@ export default function Profiles() {
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [k]: e.target.value }))
 
-  const filteredProfiles = (data?.list ?? []).filter((p) => {
-    const keyword = search.trim().toLowerCase()
-    const matchesKeyword = keyword === '' || p.name.toLowerCase().includes(keyword) || p.protocol.toLowerCase().includes(keyword)
-    const matchesProtocol = protocolFilter === 'all' || p.protocol === protocolFilter
-    return matchesKeyword && matchesProtocol
-  })
+  const filteredProfiles = data?.list ?? []
   const allVisibleSelected = filteredProfiles.length > 0 && filteredProfiles.every((p) => selectedIds.includes(p.id))
   const dirty = JSON.stringify(form) !== JSON.stringify(initialForm) && drawer.open
 
@@ -697,16 +692,34 @@ export default function Profiles() {
         }
         searchValue={search}
         searchPlaceholder="搜索协议名或协议类型"
-        onSearchChange={setSearch}
+        onSearchChange={(value) => {
+          setSearch(value)
+          setPage(1)
+        }}
+        meta={
+          <HelpPopover title="协议提示">
+            <p>协议模板保存共用的监听端口、SNI 和传输参数。</p>
+            <p>在「密钥 / 锁定」中设置每台节点的密钥或覆盖端口。</p>
+          </HelpPopover>
+        }
         filters={
-          <>
-            <FilterChip active={protocolFilter === 'all'} onClick={() => setProtocolFilter('all')}>全部</FilterChip>
-            {protocolOptions.map((option) => (
-              <FilterChip key={option.value} active={protocolFilter === option.value} onClick={() => setProtocolFilter(option.value as Protocol)}>
-                {option.label}
-              </FilterChip>
-            ))}
-          </>
+          <div className="relative">
+            <select
+              aria-label="筛选协议类型"
+              value={protocolFilter}
+              onChange={(e) => {
+                setProtocolFilter(e.target.value as typeof protocolFilter)
+                setPage(1)
+              }}
+              className="block h-10 appearance-none rounded-md border border-[var(--border)] bg-[var(--panel-strong)] pl-3 pr-9 text-sm text-[var(--text)] focus-visible:outline-[var(--accent)] forced-colors:appearance-auto"
+            >
+              <option value="all">全部协议</option>
+              {protocolOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[var(--text)] forced-colors:hidden" />
+          </div>
         }
         bulkBar={
           selectedProfiles.length > 0 ? (
@@ -739,59 +752,20 @@ export default function Profiles() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0 space-y-3">
-          <Table columns={columns} data={filteredProfiles} loading={isLoading} />
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <label className="inline-flex items-center gap-2 text-sm text-soft">
-              分页
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value))
-                  setPage(1)
-                }}
-                className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-              >
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size} / 页
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
-          </div>
-        </div>
-
-        <SurfaceCard className="p-5">
-          <div className="mb-4">
-            <div className="text-sm font-semibold">协议提示</div>
-            <p className="mt-2 text-sm leading-6 text-soft">
-              协议配置负责定义模板，节点密钥负责补齐每台机器的差异化参数。把这两层拆开后，维护复杂 Reality 或 TLS 场景会更稳。
-            </p>
-          </div>
-          <div className="space-y-3">
-            <div className="border-t border-[var(--border)] pt-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Template</div>
-              <div className="mt-2 text-sm font-semibold">协议模板管理</div>
-              <p className="mt-2 text-xs leading-5 text-soft">统一维护端口、SNI、传输参数等共性配置，减少节点端重复输入。</p>
-            </div>
-            <div className="border-t border-[var(--border)] pt-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">Node Keys</div>
-              <div className="mt-2 text-sm font-semibold">节点密钥独立配置</div>
-              <p className="mt-2 text-xs leading-5 text-soft">将节点专属密钥放进单独抽屉管理，避免把敏感值混进大表单里。</p>
-            </div>
-          </div>
-        </SurfaceCard>
-      </div>
+      <Table columns={columns} data={filteredProfiles} loading={isLoading} />
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={data?.total}
+        onChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       <Drawer
         open={drawer.open}
         onClose={closeDrawer}
         title={drawer.profile ? `编辑协议 · ${drawer.profile.name}` : '新增协议'}
         description="保持列表在左侧可见，右侧专注于协议参数、端口和备注配置。"
-        width="lg"
         dirty={dirty}
         saving={save.isPending}
         onBeforeClose={confirmCloseDrawer}

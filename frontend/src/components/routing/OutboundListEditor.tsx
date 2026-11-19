@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Code2, KeyRound, Link2, Plus, ShieldCheck, SlidersHorizontal, Sparkles, Trash2 } from 'lucide-react'
+import { type ReactNode, useId, useState } from 'react'
+import { ChevronRight, Code2, KeyRound, Link2, Plus, ShieldCheck, SlidersHorizontal, Sparkles, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Btn, Field, SelectField } from '@/components/ui/Form'
 import { JsonEditor } from '@/components/ui/JsonEditor'
@@ -47,11 +47,11 @@ function SecretInput({
   if (encrypted && !editingCipher) {
     return (
       <div className="flex flex-col space-y-1.5">
-        <span className="text-[12px] font-medium text-soft">{label}</span>
-        <div className="flex h-10 items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-3 text-xs">
+        <span className="text-sm font-medium text-soft">{label}</span>
+        <div className="flex h-10 items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-3 text-sm">
           <span className="inline-flex items-center gap-1.5 text-soft">
             <KeyRound className="h-3.5 w-3.5 text-[var(--accent)]" />
-            已加密保存（未修改将复用原密文）
+            已加密保存
           </span>
           {!disabled && (
             <button
@@ -60,7 +60,7 @@ function SecretInput({
                 setEditingCipher(true)
                 onChange('')
               }}
-              className="text-xs font-medium text-[var(--accent)] hover:underline"
+              className="font-medium text-[var(--accent)] hover:underline"
             >
               重新输入
             </button>
@@ -85,6 +85,7 @@ function SecretInput({
 
 export function SingleOutboundFields({
   outbound,
+  action,
   lockedTag,
   peerOutboundTags = [],
   disabled = false,
@@ -92,6 +93,7 @@ export function SingleOutboundFields({
   onRawErrorChange,
 }: {
   outbound: CustomOutbound
+  action?: ReactNode
   lockedTag?: string
   peerOutboundTags?: string[]
   disabled?: boolean
@@ -147,7 +149,7 @@ export function SingleOutboundFields({
   }
 
   const dialerOptions = [
-    { value: '', label: '不使用前置链式代理（节点直接拨号）' },
+    { value: '', label: '节点直接拨号' },
     { value: 'direct', label: 'direct（默认直连）' },
     { value: 'direct-v4', label: 'direct-v4（强制 IPv4 拨号）' },
     { value: 'direct-v6', label: 'direct-v6（强制 IPv6 拨号）' },
@@ -155,6 +157,14 @@ export function SingleOutboundFields({
       .filter((t) => t && t !== outbound.tag)
       .map((t) => ({ value: t, label: `${t}（链式出站）` })),
   ]
+  const dialerField = (
+    <SelectField
+      label="前置出站（可选）"
+      value={extractDialerProxy(outbound)}
+      onChange={(dp) => onChange(patchDialerProxy(outbound, dp))}
+      options={dialerOptions}
+    />
+  )
 
   const settings = (outbound.settings && typeof outbound.settings === 'object' ? outbound.settings : {}) as Record<
     string,
@@ -235,7 +245,7 @@ export function SingleOutboundFields({
           }
         />
         <SecretInput
-          label="密码（可选，AES-GCM 加密存储）"
+          label="密码（可选）"
           placeholder="留空为无认证"
           disabled={disabled}
           value={typeof firstUser.pass === 'string' ? firstUser.pass : ''}
@@ -253,8 +263,8 @@ export function SingleOutboundFields({
     return (
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
-          label="指定出口源 IP（sendThrough，可选）"
-          placeholder="如多 IP 机器副 IP：198.51.100.25"
+          label="出口源 IP（可选）"
+          placeholder="如 198.51.100.25"
           value={outbound.sendThrough ?? ''}
           onChange={(e) => {
             const val = e.target.value.trim()
@@ -265,7 +275,7 @@ export function SingleOutboundFields({
           }}
         />
         <SelectField
-          label="出站域名策略（domainStrategy）"
+          label="出站域名策略"
           value={ds}
           onChange={(v) =>
             onChange({
@@ -309,7 +319,7 @@ export function SingleOutboundFields({
       <div className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
           <SecretInput
-            label="本机私钥（secretKey *，AES-GCM 加密存储）"
+            label="本机私钥 *"
             placeholder="Base64 WireGuard 私钥"
             disabled={disabled}
             value={typeof settings.secretKey === 'string' ? settings.secretKey : ''}
@@ -331,65 +341,73 @@ export function SingleOutboundFields({
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
-            label="对端 Endpoint（含端口） *"
+            label="对端地址与端口 *"
             placeholder="engage.cloudflareclient.com:2408"
             value={typeof peer0.endpoint === 'string' ? peer0.endpoint : ''}
             onChange={(e) => patchPeer0({ endpoint: e.target.value.trim() })}
           />
           <Field
-            label="对端公钥（publicKey） *"
+            label="对端公钥 *"
             placeholder="bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
             value={typeof peer0.publicKey === 'string' ? peer0.publicKey : ''}
             onChange={(e) => patchPeer0({ publicKey: e.target.value.trim() })}
           />
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <SecretInput
-            label="预共享密钥（preSharedKey，可选）"
-            placeholder="留空不启用"
-            disabled={disabled}
-            value={typeof peer0.preSharedKey === 'string' ? peer0.preSharedKey : ''}
-            onChange={(v) => {
-              if (!v.trim()) {
-                const rest = { ...peer0 }
-                delete rest.preSharedKey
-                patchWG({ peers: [rest, ...peers.slice(1)] })
-              } else {
-                patchPeer0({ preSharedKey: v.trim() })
-              }
-            }}
-          />
-          <Field
-            label="MTU"
-            type="number"
-            placeholder="1280"
-            value={typeof settings.mtu === 'number' ? settings.mtu : 1280}
-            onChange={(e) => patchWG({ mtu: Number(e.target.value) || 1280 })}
-          />
-          <Field
-            label="WARP Reserved（可选，如 0,0,0）"
-            placeholder="留空或填 3 个字节整数"
-            value={reservedDraft ?? reservedArr.join(',')}
-            error={reservedError || undefined}
-            onChange={(e) => {
-              const raw = e.target.value.trim()
-              setReservedDraft(e.target.value)
-              if (!raw) {
-                const rest = { ...settings }
-                delete rest.reserved
-                setReservedError('')
-                onRawErrorChange?.('')
-                onChange({ ...outbound, settings: rest })
-                return
-              }
-              const nums = raw.split(',').map((x) => x.trim() === '' ? NaN : Number(x.trim()))
-              const error = wireGuardReservedError(nums)
-              setReservedError(error)
-              onRawErrorChange?.(error)
-              if (!error) patchWG({ reserved: nums })
-            }}
-          />
-        </div>
+        <details className="group/wg">
+          <summary className="flex min-h-9 cursor-pointer list-none flex-wrap items-center gap-2 rounded text-sm font-medium text-soft hover:text-[var(--text)] [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="h-4 w-4 transition-transform group-open/wg:rotate-90" />
+            WireGuard 高级设置
+            {reservedError && <span className="text-[var(--danger)]">Reserved 格式有误</span>}
+          </summary>
+          <div className="grid gap-4 py-3 sm:grid-cols-3">
+            <SecretInput
+              label="预共享密钥"
+              placeholder="留空不启用"
+              disabled={disabled}
+              value={typeof peer0.preSharedKey === 'string' ? peer0.preSharedKey : ''}
+              onChange={(v) => {
+                if (!v.trim()) {
+                  const rest = { ...peer0 }
+                  delete rest.preSharedKey
+                  patchWG({ peers: [rest, ...peers.slice(1)] })
+                } else {
+                  patchPeer0({ preSharedKey: v.trim() })
+                }
+              }}
+            />
+            <Field
+              label="MTU"
+              type="number"
+              placeholder="1280"
+              value={typeof settings.mtu === 'number' ? settings.mtu : 1280}
+              onChange={(e) => patchWG({ mtu: Number(e.target.value) || 1280 })}
+            />
+            <Field
+              label="WARP Reserved"
+              placeholder="3 个字节，如 0,0,0"
+              value={reservedDraft ?? reservedArr.join(',')}
+              error={reservedError || undefined}
+              onChange={(e) => {
+                const raw = e.target.value.trim()
+                setReservedDraft(e.target.value)
+                if (!raw) {
+                  const rest = { ...settings }
+                  delete rest.reserved
+                  setReservedError('')
+                  onRawErrorChange?.('')
+                  onChange({ ...outbound, settings: rest })
+                  return
+                }
+                const nums = raw.split(',').map((x) => x.trim() === '' ? NaN : Number(x.trim()))
+                const error = wireGuardReservedError(nums)
+                setReservedError(error)
+                onRawErrorChange?.(error)
+                if (!error) patchWG({ reserved: nums })
+              }}
+            />
+          </div>
+          {dialerField}
+        </details>
       </div>
     )
   }
@@ -454,14 +472,14 @@ export function SingleOutboundFields({
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <SecretInput
-            label="用户 UUID（id *，AES-GCM 加密存储）"
+            label="用户 UUID *"
             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
             disabled={disabled}
             value={typeof user0.id === 'string' ? user0.id : ''}
             onChange={(id) => patchUser({ id: id.trim() })}
           />
           <SelectField
-            label="XTLS 流控（flow）"
+            label="XTLS 流控"
             value={typeof user0.flow === 'string' ? user0.flow : ''}
             onChange={(flow) => {
               if (!flow) {
@@ -480,7 +498,7 @@ export function SingleOutboundFields({
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <SelectField
-            label="传输层（network）"
+            label="传输方式"
             value={network}
             onChange={(v) => patchStream({ network: v })}
             options={[
@@ -490,7 +508,7 @@ export function SingleOutboundFields({
             ]}
           />
           <SelectField
-            label="传输安全（security）"
+            label="传输安全"
             value={security}
             onChange={(v) => patchStream({ security: v })}
             options={[
@@ -502,7 +520,7 @@ export function SingleOutboundFields({
         </div>
         {security === 'tls' && (
           <Field
-            label="TLS SNI（serverName）"
+            label="TLS SNI"
             placeholder="landing.example.com"
             value={typeof tlsSettings.serverName === 'string' ? tlsSettings.serverName : ''}
             onChange={(e) =>
@@ -513,7 +531,7 @@ export function SingleOutboundFields({
         {security === 'reality' && (
           <div className="grid gap-3 sm:grid-cols-3">
             <Field
-              label="Reality SNI（serverName）"
+              label="Reality SNI"
               placeholder="www.microsoft.com"
               value={typeof realitySettings.serverName === 'string' ? realitySettings.serverName : ''}
               onChange={(e) =>
@@ -523,7 +541,7 @@ export function SingleOutboundFields({
               }
             />
             <Field
-              label="Reality 公钥（publicKey）"
+              label="Reality 公钥"
               placeholder="远端节点公钥"
               value={typeof realitySettings.publicKey === 'string' ? realitySettings.publicKey : ''}
               onChange={(e) =>
@@ -549,17 +567,14 @@ export function SingleOutboundFields({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-soft">
-          {structuredSupported
-            ? '支持结构化表单与原始 JSON 无损切换，JSON 中添加的高级字段会自动保留。'
-            : `当前协议（${outbound.protocol}）使用单条 JSON 模式配置。`}
-        </span>
-        <div className="inline-flex rounded-md border border-[var(--border)] bg-[var(--panel)] p-0.5 text-xs">
+    <div className="space-y-4 [&_label]:text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="group" aria-label="出站编辑方式" className="inline-flex shrink-0 rounded-md border border-[var(--border)] bg-[var(--panel)] p-0.5 text-sm">
           <button
             type="button"
             disabled={!structuredSupported}
+            title={structuredSupported ? undefined : `${outbound.protocol} 仅支持 JSON 编辑`}
+            aria-pressed={activeMode === 'form'}
             onClick={() => switchMode('form')}
             className={`inline-flex items-center gap-1 rounded px-2.5 py-1 font-medium transition ${
               activeMode === 'form'
@@ -572,6 +587,7 @@ export function SingleOutboundFields({
           </button>
           <button
             type="button"
+            aria-pressed={activeMode === 'json'}
             onClick={() => switchMode('json')}
             className={`inline-flex items-center gap-1 rounded px-2.5 py-1 font-medium transition ${
               activeMode === 'json'
@@ -583,11 +599,12 @@ export function SingleOutboundFields({
             JSON
           </button>
         </div>
+        {action}
       </div>
 
       {activeMode === 'form' ? (
-        <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-3">
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-3">
             <Field
               label="出站 Tag *"
               value={lockedTag ?? outbound.tag}
@@ -603,8 +620,8 @@ export function SingleOutboundFields({
               options={ALL_PROTOCOL_OPTIONS}
             />
             <Field
-              label="面板备注（下发时自动剥离）"
-              placeholder="如 香港解锁落地"
+              label="面板备注"
+              placeholder="仅在面板中显示"
               value={outbound.remark ?? ''}
               onChange={(e) => {
                 const next = { ...outbound }
@@ -620,14 +637,7 @@ export function SingleOutboundFields({
           {outbound.protocol === 'wireguard' && renderWireGuardFields()}
           {outbound.protocol === 'vless' && renderVlessFields()}
 
-          <div className="pt-1">
-            <SelectField
-              label="前置链式拨号出站（sockopt.dialerProxy，可选）"
-              value={extractDialerProxy(outbound)}
-              onChange={(dp) => onChange(patchDialerProxy(outbound, dp))}
-              options={dialerOptions}
-            />
-          </div>
+          {outbound.protocol !== 'wireguard' && dialerField}
         </div>
       ) : (
         <div className="space-y-2">
@@ -661,13 +671,60 @@ export function SingleOutboundFields({
             }}
           />
           {rawError && (
-            <p role="alert" className="text-xs text-[var(--danger)]">
+            <p role="alert" className="text-sm text-[var(--danger)]">
               {rawError}
             </p>
           )}
         </div>
       )}
     </div>
+  )
+}
+
+function OutboundCard({
+  outbound,
+  refCount,
+  error,
+  initiallyOpen,
+  children,
+}: {
+  outbound: CustomOutbound
+  refCount: number
+  error: string
+  initiallyOpen: boolean
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(initiallyOpen)
+  const statusId = useId()
+  const name = outbound.tag || '未命名出站'
+  const dialer = extractDialerProxy(outbound)
+  return (
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      className="group/card rounded-lg border border-[var(--border)] bg-[var(--panel-muted)]"
+    >
+      <summary
+        aria-label={`出站 ${name}`}
+        aria-describedby={statusId}
+        className="flex min-h-14 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-4 py-3 hover:bg-[var(--panel-strong)] sm:px-5 [&::-webkit-details-marker]:hidden"
+      >
+        <ChevronRight className="h-4 w-4 shrink-0 text-soft transition-transform group-open/card:rotate-90" />
+        <span className="break-all font-mono text-base font-semibold">{name}</span>
+        <span id={statusId} className="contents">
+          <Badge label={outbound.protocol.toUpperCase()} variant="blue" />
+          <span className="text-sm text-soft">{refCount > 0 ? `被引用 ${refCount} 次` : '未被引用'}</span>
+          {dialer && (
+            <span className="inline-flex min-w-0 items-center gap-1 break-all text-sm text-soft">
+              <Link2 className="h-3.5 w-3.5 shrink-0" />
+              前置 {dialer}
+            </span>
+          )}
+          {error && <span className="text-sm font-medium text-[var(--danger)]">{error}</span>}
+        </span>
+      </summary>
+      <div className="px-4 pb-4 sm:px-5 sm:pb-5">{children}</div>
+    </details>
   )
 }
 
@@ -689,6 +746,7 @@ export function OutboundListEditor({
   const [newProtocol, setNewProtocol] = useState<string>('socks')
   const [snippetsOpen, setSnippetsOpen] = useState(false)
   const [cardErrors, setCardErrors] = useState<Record<number, string>>({})
+  const [newCardKey, setNewCardKey] = useState<number>()
 
   const updateCardError = (idx: number, err: string) => {
     const next = { ...cardErrors }
@@ -696,6 +754,11 @@ export function OutboundListEditor({
     else delete next[idx]
     setCardErrors(next)
     onPendingErrorChange?.(Object.keys(next).length > 0)
+  }
+
+  const appendOutbound = (item: CustomOutbound) => {
+    setNewCardKey(editorItemKey(item))
+    onChange([...outbounds, item])
   }
 
   const addOutbound = () => {
@@ -706,40 +769,32 @@ export function OutboundListEditor({
       idx += 1
       candidate = createDefaultOutbound(newProtocol, idx)
     }
-    onChange([...outbounds, candidate])
+    appendOutbound(candidate)
   }
 
   const allTags = outbounds.map((o) => o.tag)
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-4">
-        <div className="flex items-start gap-2.5">
-          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
-          <div className="space-y-1.5 text-xs">
-            <p className="font-semibold text-[var(--text)]">系统内置出站（自动受控生成，无需重复定义）</p>
-            <div className="flex flex-wrap gap-2 pt-0.5">
-              {BUILTIN_OUTBOUNDS.map((item) => (
-                <span
-                  key={item.tag}
-                  className="rounded border border-[var(--border)] bg-[var(--panel-strong)] px-2 py-1 font-mono text-[11px]"
-                >
-                  {item.label}
-                </span>
-              ))}
-            </div>
-            <p className="text-soft">
-              未被任何启用规则或链式代理（dialerProxy）引用的自定义出站，在生成节点最终配置时会自动剔除。
-            </p>
-          </div>
+    <div className="space-y-5">
+      <details className="group/builtins border-b border-[var(--border)] pb-3">
+        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded text-sm font-medium hover:text-[var(--accent)] [&::-webkit-details-marker]:hidden">
+          <ShieldCheck className="h-4 w-4 text-[var(--accent)]" />
+          系统内置出站
+          <ChevronRight className="h-4 w-4 text-soft transition-transform group-open/builtins:rotate-90" />
+        </summary>
+        <div className="space-y-2 py-2 pl-6 text-sm leading-6 text-soft">
+          <ul className="flex flex-wrap gap-x-5 gap-y-1">
+            {BUILTIN_OUTBOUNDS.map((item) => <li key={item.tag}>{item.label}</li>)}
+          </ul>
+          <p>系统自动生成内置出站，只下发实际使用的自定义出站。</p>
         </div>
-      </section>
+      </details>
 
-      <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
+      <div className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="w-full sm:w-72">
+          <div className="w-full sm:w-64 [&_label]:text-sm">
             <SelectField
-              label="选择要添加的出站类型"
+              label="出站类型"
               value={newProtocol}
               onChange={setNewProtocol}
               options={STRUCTURED_OUTBOUND_PROTOCOLS.map((p) => ({ value: p.value, label: p.label }))}
@@ -760,7 +815,8 @@ export function OutboundListEditor({
               onClick={addOutbound}
             >
               <Plus className="h-4 w-4" />
-              添加自定义出站（{outbounds.length}/32）
+              添加自定义出站
+              <span className="tabular-nums text-soft">{outbounds.length}/32</span>
             </Btn>
           </div>
         </div>
@@ -773,13 +829,13 @@ export function OutboundListEditor({
                 type="button"
                 disabled={disabled || outbounds.length >= 32}
                 onClick={() => {
-                  onChange([...outbounds, snippet.build(allTags)])
+                  appendOutbound(snippet.build(allTags))
                   setSnippetsOpen(false)
                 }}
                 className="flex flex-col items-start gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--panel-strong)] disabled:opacity-50"
               >
-                <span className="text-xs font-semibold text-[var(--accent)]">{snippet.name}</span>
-                <span className="text-[11px] leading-4 text-soft">{snippet.description}</span>
+                <span className="text-sm font-semibold text-[var(--accent)]">{snippet.name}</span>
+                <span className="text-sm leading-5 text-soft">{snippet.description}</span>
               </button>
             ))}
           </div>
@@ -788,69 +844,50 @@ export function OutboundListEditor({
 
       {outbounds.length === 0 ? (
         <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--panel-muted)] p-6 text-center text-sm text-soft">
-          当前模板未定义自定义出站。如需配置外部落地机、Cloudflare WARP 出口或多 IP 指定源地址，请点击上方“添加自定义出站”。
+          尚未添加自定义出站
         </div>
       ) : (
         <div className="space-y-4">
           {outbounds.map((item, idx) => {
+            const key = editorItemKey(item)
             const refCount = countOutboundReferences(item.tag, rules, outbounds, balancers)
             const duplicateCount = outbounds.filter((o) => o.tag && o.tag === item.tag).length
+            const tagError = duplicateCount > 1 ? 'Tag 重复' : validateOutboundTag(item.tag)
             return (
-              <div
-                key={editorItemKey(item)}
-                className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-4"
+              <OutboundCard
+                key={key}
+                outbound={item}
+                refCount={refCount}
+                error={tagError || (cardErrors[key] ? '输入有误' : '')}
+                initiallyOpen={idx === 0 || key === newCardKey}
               >
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm font-semibold text-[var(--text)]">
-                      {item.tag || '未命名出站'}
-                    </span>
-                    <Badge label={item.protocol.toUpperCase()} variant="blue" />
-                    <Badge
-                      label={refCount > 0 ? `被引用 ${refCount} 次` : '未被引用'}
-                      variant={refCount > 0 ? 'green' : 'gray'}
-                    />
-                    {extractDialerProxy(item) && (
-                      <span className="inline-flex items-center gap-1 text-xs text-soft">
-                        <Link2 className="h-3.5 w-3.5" />
-                        前置: {extractDialerProxy(item)}
-                      </span>
-                    )}
-                    {duplicateCount > 1 && (
-                      <span className="text-xs font-medium text-[var(--danger)]">Tag 重复</span>
-                    )}
-                  </div>
-                  <Btn
-                    variant="danger"
-                    disabled={disabled || refCount > 0}
-                    title={
-                      refCount > 0
-                        ? '该出站正被分流规则或 dialerProxy 引用，请先解除引用后再删除'
-                        : '删除此自定义出站'
-                    }
-                    onClick={() => {
-                      updateCardError(editorItemKey(item), '')
-                      onChange(outbounds.filter((_, i) => i !== idx))
-                    }}
-                    className="h-8 px-3 text-xs"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {refCount > 0 ? '使用中禁删' : '删除'}
-                  </Btn>
-                </div>
-
                 <SingleOutboundFields
+                  action={
+                    <Btn
+                      variant="ghost"
+                      disabled={disabled || refCount > 0}
+                      title={refCount > 0 ? '请先解除出站引用' : '删除此自定义出站'}
+                      onClick={() => {
+                        updateCardError(key, '')
+                        onChange(outbounds.filter((_, i) => i !== idx))
+                      }}
+                      className="h-9 px-2 hover:text-[var(--danger)]"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {refCount > 0 ? '使用中禁删' : '删除'}
+                    </Btn>
+                  }
                   outbound={item}
                   peerOutboundTags={allTags}
                   disabled={disabled}
-                  onRawErrorChange={(err) => updateCardError(editorItemKey(item), err)}
+                  onRawErrorChange={(err) => updateCardError(key, err)}
                   onChange={(updated) => {
                     const next = [...outbounds]
                     next[idx] = retainEditorItemKey(item, updated)
                     onChange(next)
                   }}
                 />
-              </div>
+              </OutboundCard>
             )
           })}
         </div>

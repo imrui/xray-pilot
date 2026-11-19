@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Copy } from 'lucide-react'
 import { nodeApi, profileApi } from '@/lib/api'
+import { fetchAllPages } from '@/lib/pagination'
 import { copyText } from '@/lib/clipboard'
 import { pushToast } from '@/lib/notify'
 import { routingGet, useRoutingOverview } from '@/lib/routing'
@@ -23,12 +24,15 @@ export function PreviewConfigModal({
 }) {
   const profiles = useQuery({
     queryKey: ['profiles', 'preview'],
-    queryFn: () =>
-      profileApi
-        .list({ page: 1, page_size: 200 })
-        .then((r) => r.data.data?.list.filter((p) => p.active) ?? []),
+    queryFn: async () => {
+      const all = await fetchAllPages((page, pageSize) =>
+        profileApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
+      )
+      return all.filter((profile) => profile.active)
+    },
     enabled: activeProfiles === undefined,
   })
+  const availableProfiles = activeProfiles ?? profiles.data
   const [copied, setCopied] = useState(false)
   const [tab, setTab] = useState<'config' | 'source' | 'comparison'>('config')
   const source = useQuery({
@@ -95,34 +99,33 @@ export function PreviewConfigModal({
       }
     >
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="space-y-1">
-            <p className="text-xs text-soft">
-              预览已保存设置生成的完整期望配置，包含协议、用户和路由；敏感字段已脱敏。不是节点当前配置文件。
-            </p>
-            <ProtocolSummary
-              nodeKeys={nodeKeys ?? []}
-              activeProfiles={activeProfiles ?? profiles.data ?? []}
-            />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ['config', '完整配置'],
+                ['source', '配置来源'],
+                ['comparison', '变更对比'],
+              ] as const
+            ).map(([id, label]) => (
+              <Btn key={id} variant={tab === id ? 'primary' : 'secondary'} onClick={() => setTab(id)}>
+                {label}
+              </Btn>
+            ))}
           </div>
           <Btn variant="secondary" onClick={() => void handleCopy()} disabled={!data?.config}>
             <Copy className="h-4 w-4" />
-            {copied ? '已复制' : '快速复制'}
+            {copied ? '已复制' : '复制脱敏配置'}
           </Btn>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              ['config', '完整配置'],
-              ['source', '配置来源'],
-              ['comparison', '变更对比'],
-            ] as const
-          ).map(([id, label]) => (
-            <Btn key={id} variant={tab === id ? 'primary' : 'secondary'} onClick={() => setTab(id)}>
-              {label}
-            </Btn>
-          ))}
-        </div>
+        {tab === 'config' && (
+          <div className="space-y-2">
+            <p className="text-sm leading-6 text-soft">面板按已保存的协议、用户和路由生成期望配置。敏感字段已脱敏。</p>
+            {nodeKeys && availableProfiles && (
+              <ProtocolSummary nodeKeys={nodeKeys} activeProfiles={availableProfiles} />
+            )}
+          </div>
+        )}
         {tab === 'source' && (
           <div className="space-y-3 text-sm">
             {source.error ? (
@@ -139,7 +142,7 @@ export function PreviewConfigModal({
                     )}
                 </p>
                 {source.data.routing.mode === 'legacy' && (
-                  <p className="text-xs text-soft">{basicRoutingDescription}</p>
+                  <p className="text-sm text-soft">{basicRoutingDescription}</p>
                 )}
                 {Object.entries(source.data.routing.sources)
                   .filter(([key]) => key !== 'schema_version')
@@ -165,8 +168,11 @@ export function PreviewConfigModal({
         )}
         {tab === 'comparison' && (
           <div className="space-y-3 text-sm">
-            {state.error ? (
-              <Btn variant="secondary" onClick={() => void state.refetch()}>
+            {state.error || source.error ? (
+              <Btn variant="secondary" onClick={() => {
+                if (state.error) void state.refetch()
+                if (source.error) void source.refetch()
+              }}>
                 确认状态加载失败，重试
               </Btn>
             ) : state.data && source.data ? (
@@ -174,10 +180,10 @@ export function PreviewConfigModal({
                 <p>
                   {configConfirmed(state.data, source.data.desired_hash)
                     ? '期望配置与最近确认的磁盘、运行版本一致。'
-                    : '当前期望配置尚未完整确认生效，或与最近确认记录不同。'}
+                    : '期望配置与最近记录不同，或仍待确认。'}
                 </p>
                 <p className="text-soft">
-                  系统目前没有完整历史配置快照，无法提供可靠的逐行差异。上方「完整配置」是本次准备同步的内容，不能当作远端当前文件。
+                  对比依据是最近确认的磁盘和运行记录。系统未保留历史配置快照，无法逐行比较。
                 </p>
                 {state.data.last_error && (
                   <p className="text-[var(--danger)]">{state.data.last_error}</p>
@@ -191,27 +197,25 @@ export function PreviewConfigModal({
         {tab === 'config' && isLoading && (
           <p className="py-8 text-center text-sm text-soft">生成中…</p>
         )}
-        {error && (
-          <div className="rounded-2xl border border-[var(--danger-border)] bg-[var(--danger-soft)] p-4">
+        {tab === 'config' && error && (
+          <div role="alert" className="rounded-lg border border-[var(--danger-border)] bg-[var(--danger-soft)] p-4">
             <p className="text-sm font-medium text-[var(--danger)]">生成失败</p>
-            <p className="mt-1 text-xs text-[var(--danger)]">{(error as Error).message}</p>
+            <p className="mt-1 wrap-anywhere text-sm text-[var(--danger)]">{(error as Error).message}</p>
           </div>
         )}
         {data && tab === 'config' && (
           <>
             {(data.warnings ?? []).length > 0 && (
-              <div className="rounded-2xl border border-[var(--warning-border)] bg-[var(--warning-soft)] p-4">
-                <p className="mb-2 text-xs font-medium text-[var(--warning)]">
-                  部分协议生成失败，不影响其他协议：
+              <div className="rounded-lg border border-[var(--warning-border)] bg-[var(--warning-soft)] p-4 text-sm text-[var(--warning)]">
+                <p className="font-semibold">
+                  以下协议生成失败，其余配置可预览
                 </p>
-                {data.warnings.map((w, i) => (
-                  <p key={i} className="text-xs text-[var(--warning)]">
-                    {w}
-                  </p>
-                ))}
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  {data.warnings.map((w, i) => <li key={i} className="wrap-anywhere">{w}</li>)}
+                </ul>
               </div>
             )}
-            <pre className="max-h-[68vh] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--code-bg)] p-4 font-mono text-xs leading-5 text-[var(--code-text)] whitespace-pre">
+            <pre className="max-h-[68vh] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--code-bg)] p-4 font-mono text-[13px] leading-5 text-[var(--code-text)] whitespace-pre">
               {data.config}
             </pre>
           </>
@@ -234,12 +238,12 @@ function ProtocolSummary({
     .filter((item): item is InboundProfile => Boolean(item))
 
   if (matchedProfiles.length === 0) {
-    return <p className="text-xs text-soft">当前节点未绑定任何协议，预览只会包含系统基础入站。</p>
+    return <p className="text-sm text-soft">未绑定已启用的协议模板，仅生成系统基础入站。</p>
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-soft">
-      <span>当前绑定协议 {matchedProfiles.length} 个：</span>
+    <div className="flex flex-wrap items-center gap-2 text-sm text-soft">
+      <span>绑定协议（{matchedProfiles.length}）</span>
       {matchedProfiles.map((profile) => (
         <Badge key={profile.id} label={profile.name} variant="blue" />
       ))}

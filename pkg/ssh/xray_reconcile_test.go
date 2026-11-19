@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	gossh "golang.org/x/crypto/ssh"
@@ -101,12 +100,12 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 							response := ""
 							status := uint32(0)
 							switch {
-							case strings.HasPrefix(cmd.Command, "test -s "):
+							case strings.HasPrefix(cmd.Command, "test -f "):
 								data := []byte(raw)
 								if strings.Contains(cmd.Command, ".pilot-config-state") {
 									data = receipt
 								}
-								response = base64.StdEncoding.EncodeToString(data)
+								response = string(data)
 							case strings.HasPrefix(cmd.Command, "systemctl is-active --quiet xray && systemctl show"):
 								response = "17\n123"
 								if tc.changedProcess {

@@ -1,7 +1,7 @@
 # Xray 灵活配置与路由出站策略演进方案（Schema v3 全阶段完整版）
 
 - **日期**：2026-11-17
-- **状态**：Approved（Phase 1 / Phase 2 / Phase 3 边界已全部对齐，待进入编码阶段）
+- **状态**：Implemented（v0.8.0）
 - **基线版本**：v0.7.2
 - **关联模块**：`internal/xray`、`internal/entity`、`internal/service`、`internal/handler`、`pkg/ssh`、`frontend/src/components/routing`、`frontend/src/pages/Routing.tsx`
 

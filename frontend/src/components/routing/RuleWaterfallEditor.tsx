@@ -3,14 +3,13 @@ import {
   ArrowDown,
   ArrowUp,
   Code2,
-  Lock,
   Plus,
   SlidersHorizontal,
   Sparkles,
   Trash2,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
-import { Btn, Field, FieldGroup, SelectField, Switch } from '@/components/ui/Form'
+import { Btn, Field, SelectField, Switch } from '@/components/ui/Form'
 import { Modal } from '@/components/ui/Modal'
 import { JsonEditor } from '@/components/ui/JsonEditor'
 import { RULE_SNIPPETS } from '@/lib/routing-snippets'
@@ -70,7 +69,7 @@ function RuleTargetSelect({
 
   return (
     <div className="flex flex-col space-y-1.5">
-      <label htmlFor={id} className="text-[12px] font-medium text-soft">
+      <label htmlFor={id} className="text-sm font-medium text-soft">
         {label}
       </label>
       <select
@@ -107,7 +106,7 @@ function RuleTargetSelect({
 }
 
 const controlTextarea =
-  'w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-2.5 text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]'
+  'w-full min-w-0 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-sm leading-6 text-[var(--text)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]'
 
 const QUICK_DOMAINS = [
   'geosite:openai',
@@ -151,6 +150,7 @@ function SingleRuleCard({
   const [rawError, setRawError] = useState('')
   const [domainDraft, setDomainDraft] = useState<string | null>(null)
   const [ipDraft, setIpDraft] = useState<string | null>(null)
+  const fieldId = useId()
 
   const enabled = !rule.disabled
   const hasTargetFilter =
@@ -225,7 +225,7 @@ function SingleRuleCard({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
         <fieldset disabled={disabled || mode === 'json'} className="flex flex-wrap items-center gap-2">
           <Badge label={`#${index + 1}`} variant={enabled ? 'blue' : 'gray'} />
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="flex items-center gap-1.5 text-sm">
             <Switch
               checked={enabled}
               onChange={(nextEnabled) => {
@@ -240,7 +240,7 @@ function SingleRuleCard({
           <input
             type="text"
             aria-label={`规则 #${index + 1} 备注`}
-            placeholder="填写规则备注（如 AI 分流 / 屏蔽 BT）"
+            placeholder="规则备注"
             value={rule.remark ?? ''}
             onChange={(e) => {
               const next = { ...rule }
@@ -248,15 +248,16 @@ function SingleRuleCard({
               else delete next.remark
               onChange(next)
             }}
-            className="h-8 w-52 rounded border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 text-xs text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none"
+            className="h-9 w-48 max-w-full rounded border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none"
           />
         </fieldset>
 
         <div className="flex items-center gap-1.5">
-          <div className="inline-flex rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-0.5 text-xs">
+          <div className="inline-flex rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-0.5 text-sm">
             <button
               type="button"
               onClick={() => switchMode('form')}
+              aria-pressed={mode === 'form'}
               className={`inline-flex items-center gap-1 rounded px-2 py-1 font-medium transition ${
                 mode === 'form'
                   ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
@@ -269,6 +270,7 @@ function SingleRuleCard({
             <button
               type="button"
               onClick={() => switchMode('json')}
+              aria-pressed={mode === 'json'}
               className={`inline-flex items-center gap-1 rounded px-2 py-1 font-medium transition ${
                 mode === 'json'
                   ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
@@ -331,7 +333,7 @@ function SingleRuleCard({
               }}
             />
             <SelectField
-              label="传输协议（network）"
+              label="传输协议"
               value={rule.network ?? ''}
               onChange={(net) => {
                 const next = { ...rule, type: 'field' }
@@ -347,7 +349,7 @@ function SingleRuleCard({
               ]}
             />
             <Field
-              label="目标端口（port，可选）"
+              label="目标端口"
               placeholder="如 80,443 或 1000-2000"
               value={rule.port ?? ''}
               onChange={(e) => {
@@ -361,11 +363,12 @@ function SingleRuleCard({
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1.5">
-              <label className="block text-[12px] font-medium text-soft">
-                域名匹配（每行一项，支持 geosite: / domain: / full: / keyword: / regexp:）
+            <div className="min-w-0 space-y-2">
+              <label htmlFor={fieldId + '-domain'} className="block text-sm font-medium">
+                域名匹配
               </label>
               <textarea
+                id={fieldId + '-domain'}
                 rows={3}
                 aria-label={`规则 #${index + 1} 域名匹配`}
                 placeholder={'geosite:openai\ndomain:example.com'}
@@ -377,25 +380,30 @@ function SingleRuleCard({
                 }}
                 onBlur={() => setDomainDraft(null)}
               />
-              <div className="flex flex-wrap gap-1.5">
-                {QUICK_DOMAINS.map((tok) => (
-                  <button
-                    key={tok}
-                    type="button"
-                    onClick={() => appendQuickToken('domain', tok)}
-                    className="rounded border border-[var(--border)] bg-[var(--panel-muted)] px-2 py-0.5 font-mono text-[11px] text-soft hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                  >
-                    + {tok}
-                  </button>
-                ))}
-              </div>
+              <details>
+                <summary className="cursor-pointer text-sm text-soft">域名格式与常用条目</summary>
+                <p className="my-2 text-sm leading-6 text-soft">每行一项，支持 domain、full、keyword、regexp 和 geosite 前缀。</p>
+                <div className="flex flex-wrap gap-2">
+                  {QUICK_DOMAINS.map((tok) => (
+                    <button
+                      key={tok}
+                      type="button"
+                      onClick={() => appendQuickToken('domain', tok)}
+                      className="rounded border border-[var(--border)] bg-[var(--panel-muted)] px-2 py-1 font-mono text-sm text-soft hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    >
+                      + {tok}
+                    </button>
+                  ))}
+                </div>
+              </details>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-[12px] font-medium text-soft">
-                目标 IP / CIDR / GeoIP（每行一项，支持 geoip: 与 !geoip:）
+            <div className="min-w-0 space-y-2">
+              <label htmlFor={fieldId + '-ip'} className="block text-sm font-medium">
+                IP 匹配
               </label>
               <textarea
+                id={fieldId + '-ip'}
                 rows={3}
                 aria-label={`规则 #${index + 1} IP 匹配`}
                 placeholder={'geoip:telegram\n!geoip:cn\n203.0.113.0/24'}
@@ -407,24 +415,28 @@ function SingleRuleCard({
                 }}
                 onBlur={() => setIpDraft(null)}
               />
-              <div className="flex flex-wrap gap-1.5">
-                {QUICK_IPS.map((tok) => (
-                  <button
-                    key={tok}
-                    type="button"
-                    onClick={() => appendQuickToken('ip', tok)}
-                    className="rounded border border-[var(--border)] bg-[var(--panel-muted)] px-2 py-0.5 font-mono text-[11px] text-soft hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                  >
-                    + {tok}
-                  </button>
-                ))}
-              </div>
+              <details>
+                <summary className="cursor-pointer text-sm text-soft">IP 格式与常用条目</summary>
+                <p className="my-2 text-sm leading-6 text-soft">每行一项，支持 IP、CIDR、geoip: 和 !geoip:。</p>
+                <div className="flex flex-wrap gap-2">
+                  {QUICK_IPS.map((tok) => (
+                    <button
+                      key={tok}
+                      type="button"
+                      onClick={() => appendQuickToken('ip', tok)}
+                      className="rounded border border-[var(--border)] bg-[var(--panel-muted)] px-2 py-1 font-mono text-sm text-soft hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    >
+                      + {tok}
+                    </button>
+                  ))}
+                </div>
+              </details>
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <span className="block text-[12px] font-medium text-soft">
-              嗅探应用层协议匹配（protocol，多选）
+            <span className="block text-sm font-medium">
+              嗅探协议（多选）
             </span>
             <div className="flex flex-wrap gap-2">
               {PROTOCOLS.map((proto) => {
@@ -435,7 +447,7 @@ function SingleRuleCard({
                     type="button"
                     aria-pressed={active}
                     onClick={() => toggleProtocol(proto)}
-                    className={`rounded-md border px-2.5 py-1 font-mono text-xs transition ${
+                    className={`rounded-md border px-2.5 py-1 font-mono text-sm transition ${
                       active
                         ? 'border-[var(--accent)] bg-[var(--accent-soft)] font-medium text-[var(--accent)]'
                         : 'border-[var(--border)] bg-[var(--panel-strong)] text-soft hover:text-[var(--text)]'
@@ -449,8 +461,8 @@ function SingleRuleCard({
           </div>
 
           {!hasTargetFilter && (
-            <p className="text-xs text-[var(--warning)]">
-              提示：请至少限定域名、目标 IP、端口或应用层协议中的一项（面板禁止保存无过滤条件的全量兜底规则）。
+            <p className="text-sm text-[var(--warning)]">
+              保存前请至少设置一项匹配条件：域名、目标 IP、端口或嗅探协议。
             </p>
           )}
         </div>
@@ -478,7 +490,7 @@ function SingleRuleCard({
             }}
           />
           {rawError && (
-            <p role="alert" className="text-xs text-[var(--danger)]">
+            <p role="alert" className="text-sm text-[var(--danger)]">
               {rawError}
             </p>
           )}
@@ -528,6 +540,7 @@ export function RuleWaterfallEditor({
   const [pendingSnippet, setPendingSnippet] = useState<RuleSnippet | null>(null)
   const [snippetTargetTag, setSnippetTargetTag] = useState('block')
   const [ruleErrors, setRuleErrors] = useState<Record<number, string>>({})
+  const v6DomainCount = domainLines(v6Text).length
 
   const updateRuleError = (idx: number, err: string) => {
     const next = { ...ruleErrors }
@@ -560,54 +573,102 @@ export function RuleWaterfallEditor({
   }
 
   return (
-    <div className="space-y-4">
-      <FieldGroup
-        title="全局路由解析策略与系统保护规则"
-        description="节点最终路由按「系统置顶保护规则 → 自定义分流规则 → 强制 IPv4 域名 → 强制 IPv6 域名 → 默认首项 direct 兜底」顺序执行。"
-      >
-        <SelectField
-          label="路由域名解析策略（routing.domainStrategy）"
-          value={domainStrategy}
-          onChange={(v) => onDomainStrategyChange(v as DomainStrategy)}
-          options={[
-            { value: 'IPIfNonMatch', label: 'IPIfNonMatch（默认：域名未命中时解析 IP 再匹配规则）' },
-            { value: 'AsIs', label: 'AsIs（仅按域名或已知目标 IP 匹配，不在路由阶段主动解析）' },
-            { value: 'IPOnDemand', label: 'IPOnDemand（存在 IP 规则时按需触发域名解析）' },
-          ]}
-        />
+    <div className="space-y-5">
+      <section className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">域名分流</h3>
+            <p className="mt-1 text-sm text-soft">每行填写一项。未命中自定义规则时按域名选择出口。</p>
+          </div>
+          <Btn
+            variant="secondary"
+            disabled={disabled || !hasReferencePreset}
+            aria-expanded={importOpen}
+            onClick={() => setImportOpen(!importOpen)}
+          >
+            导入参考域名
+          </Btn>
+        </div>
+        {importOpen && (
+          <div className="space-y-3 break-words rounded border border-[var(--border)] bg-[var(--panel-strong)] p-4 text-sm">
+            <p>起始列表不代表完整服务域名库。google.com 覆盖范围较广，默认不包含，可按需添加。</p>
+            <p>IPv4：{preset4.join('、')}</p>
+            <p>IPv6：{preset6.join('、')}</p>
+            <div className="flex flex-wrap gap-2">
+              {[false, true].map((replace) => (
+                <Btn
+                  key={String(replace)}
+                  variant="secondary"
+                  onClick={() => {
+                    onV4Change(
+                      domainLines(
+                        [...(replace ? [] : domainLines(v4Text)), ...preset4].join('\n'),
+                      ).join('\n'),
+                    )
+                    onV6Change(
+                      domainLines(
+                        [...(replace ? [] : domainLines(v6Text)), ...preset6].join('\n'),
+                      ).join('\n'),
+                    )
+                    setImportOpen(false)
+                  }}
+                >
+                  {replace ? '替换现有列表' : '追加到现有列表'}
+                </Btn>
+              ))}
+            </div>
+          </div>
+        )}
+        {legacyV1 && (
+          <p className="text-sm text-[var(--warning)]">
+            正在转换旧版草稿：原先实际走 IPv4 的域名已归入 IPv4
+            列表。保存并发布新版本、重新绑定后生效，旧版本不变。
+          </p>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block min-w-0 space-y-2 text-sm font-medium">
+            <span className="flex items-baseline gap-2">
+              强制 IPv4 域名
+              <span className="font-normal text-soft">{domainLines(v4Text).length} 条</span>
+            </span>
+            <textarea
+              rows={10}
+              placeholder="domain:example.com"
+              className={controlTextarea + ' font-mono font-normal'}
+              value={v4Text}
+              onChange={(e) => onV4Change(e.target.value)}
+            />
+          </label>
+          <label className="block min-w-0 space-y-2 text-sm font-medium">
+            <span className="flex items-baseline gap-2">
+              强制 IPv6 域名
+              <span className="font-normal text-soft">{v6DomainCount} 条</span>
+            </span>
+            <textarea
+              rows={10}
+              placeholder="geosite:netflix"
+              className={controlTextarea + ' font-mono font-normal'}
+              value={v6Text}
+              onChange={(e) => onV6Change(e.target.value)}
+            />
+          </label>
+        </div>
+        {v6DomainCount > 0 && (
+          <p className="text-sm text-[var(--warning)]">节点须有 IPv6 出口才能同步，连接失败时不会回退到 IPv4。</p>
+        )}
+      </section>
 
-        <details className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-xs">
-          <summary className="flex cursor-pointer items-center gap-2 font-medium text-[var(--text)]">
-            <Lock className="h-3.5 w-3.5 text-[var(--accent)]" />
-            查看面板强制置顶的系统保护规则（只读，不可覆盖）
-          </summary>
-          <ol className="mt-2.5 list-decimal space-y-1 pl-5 text-soft">
-            <li>
-              <code className="font-mono">inboundTag: [&quot;api-inbound&quot;] → api</code>（保障本地 127.0.0.1:10085 gRPC 热更新与流量统计）
-            </li>
-            <li>
-              显式开启 <code className="font-mono">allow_private</code> 的受控运维 HTTP/SOCKS 入站直连规则
-            </li>
-            <li>
-              <code className="font-mono">ip: [&quot;geoip:private&quot;] → block</code>（阻断代理访问节点私网/内网服务）
-            </li>
-            <li>普通 HTTP/SOCKS 运维代理源 IP 白名单与兜底拦截规则</li>
-          </ol>
-        </details>
-      </FieldGroup>
-
-      <FieldGroup
-        title={`自定义分流规则 · ${rules.length} 条`}
-        description="按从上到下顺序优先匹配，优先级高于下方强制 IPv4 / IPv6 快捷域名列表。"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-soft">
-            支持 geosite / geoip / 协议嗅探与自定义出站联动；暂停的规则在节点下发时自动跳过。
-          </span>
+      <section className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-baseline gap-2">
+            <h3 className="text-base font-semibold">自定义分流规则</h3>
+            <span className="text-sm text-soft">{rules.length} 条</span>
+          </div>
           <div className="flex flex-wrap gap-2">
             <Btn
               variant="secondary"
               disabled={disabled || rules.length >= 200}
+              aria-expanded={snippetsOpen}
               onClick={() => setSnippetsOpen(!snippetsOpen)}
             >
               <Sparkles className="h-4 w-4" />
@@ -633,19 +694,16 @@ export function RuleWaterfallEditor({
                 }}
                 className="flex flex-col items-start gap-1 rounded border border-[var(--border)] bg-[var(--panel-muted)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--panel)]"
               >
-                <span className="text-xs font-semibold text-[var(--accent)]">{snippet.name}</span>
-                <span className="text-[11px] leading-4 text-soft">{snippet.description}</span>
+                <span className="text-sm font-semibold">{snippet.name}</span>
+                <span className="text-sm leading-5 text-soft">{snippet.description}</span>
               </button>
             ))}
           </div>
         )}
 
-        {rules.length === 0 ? (
-          <p className="rounded-md border border-dashed border-[var(--border-strong)] bg-[var(--panel-strong)] p-4 text-center text-xs text-soft">
-            暂无自定义分流规则。可直接添加规则卡片，或在下方快速填写强制 IPv4 / IPv6 域名列表。
-          </p>
-        ) : (
+        {rules.length > 0 && (
           <div className="space-y-3">
+            <p className="text-sm text-soft">从上到下匹配，跳过已暂停的规则。</p>
             {rules.map((rule, idx) => (
               <SingleRuleCard
                 key={editorItemKey(rule)}
@@ -670,83 +728,38 @@ export function RuleWaterfallEditor({
             ))}
           </div>
         )}
-      </FieldGroup>
+      </section>
 
-      <FieldGroup
-        title="快捷域名地址族分流（强制 IPv4 / IPv6）"
-        description="未命中规则保持默认直连。每行一条，例如 domain:example.com 或 geosite:openai；自定义规则优先于域名列表，两组域名重叠时 IPv4 优先。"
-      >
-        <p className="text-xs text-soft">
-          默认出站：正常直连，不强制 IPv4 或 IPv6。两组列表留空时保持默认行为。
-        </p>
-        {legacyV1 && (
-          <p className="text-xs text-[var(--warning)]">
-            正在转换旧版草稿：原先实际走 IPv4 的域名已归入 IPv4
-            列表。保存并发布新版本、重新绑定后生效，旧版本不变。
-          </p>
-        )}
-        <label className="block space-y-2 text-sm">
-          <span>强制 IPv4 域名 · {domainLines(v4Text).length} 条</span>
-          <textarea
-            rows={4}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 font-mono text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            value={v4Text}
-            onChange={(e) => onV4Change(e.target.value)}
+      <details className="rounded-lg border border-[var(--border)] bg-[var(--panel-muted)] px-4 sm:px-5">
+        <summary className="cursor-pointer py-4 text-base font-semibold">
+          解析策略与保护规则
+          {domainStrategy !== 'IPIfNonMatch' && (
+            <span className="ml-2 text-sm font-normal text-soft">{domainStrategy}</span>
+          )}
+        </summary>
+        <div className="space-y-4 border-t border-[var(--border)] py-4 text-sm">
+          <SelectField
+            label="路由域名解析策略（routing.domainStrategy）"
+            value={domainStrategy}
+            onChange={(v) => onDomainStrategyChange(v as DomainStrategy)}
+            options={[
+              { value: 'IPIfNonMatch', label: '域名未命中时解析 IP（IPIfNonMatch，默认）' },
+              { value: 'AsIs', label: '使用原始域名或 IP（AsIs）' },
+              { value: 'IPOnDemand', label: '遇到 IP 规则时解析（IPOnDemand）' },
+            ]}
           />
-        </label>
-        <label className="block space-y-2 text-sm">
-          <span>强制 IPv6 域名 · {domainLines(v6Text).length} 条</span>
-          <textarea
-            rows={4}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 font-mono text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            value={v6Text}
-            onChange={(e) => onV6Change(e.target.value)}
-          />
-        </label>
-        <p className="text-xs text-soft">
-          强制 IPv6 需要节点有 IPv6 出口，失败不回退
-          IPv4；无出口的节点会在同步前被拦截。策略与客户端使用 IPv4 或 IPv6 连接节点无关。
-        </p>
-        <div>
-          <Btn
-            variant="secondary"
-            disabled={!hasReferencePreset}
-            onClick={() => setImportOpen(!importOpen)}
-          >
-            导入参考域名
-          </Btn>
-        </div>
-        {importOpen && (
-          <div className="space-y-3 rounded border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-xs">
-            <p>起始列表不代表完整服务域名库。google.com 覆盖范围较广，默认不包含，可按需添加。</p>
-            <p>IPv4：{preset4.join('、')}</p>
-            <p>IPv6：{preset6.join('、')}</p>
-            <div className="flex gap-2">
-              {[false, true].map((replace) => (
-                <Btn
-                  key={String(replace)}
-                  variant="secondary"
-                  onClick={() => {
-                    onV4Change(
-                      domainLines(
-                        [...(replace ? [] : domainLines(v4Text)), ...preset4].join('\n'),
-                      ).join('\n'),
-                    )
-                    onV6Change(
-                      domainLines(
-                        [...(replace ? [] : domainLines(v6Text)), ...preset6].join('\n'),
-                      ).join('\n'),
-                    )
-                    setImportOpen(false)
-                  }}
-                >
-                  {replace ? '替换现有列表' : '追加到现有列表'}
-                </Btn>
-              ))}
-            </div>
+          <p className="leading-6 text-soft">先执行系统保护规则，再匹配自定义规则、IPv4 域名和 IPv6 域名。全部未命中时使用默认直连。</p>
+          <div className="border-t border-[var(--border)] pt-3">
+            <h4 className="font-medium">系统保护规则（只读）</h4>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 leading-6 text-soft">
+              <li>允许 <code>api-inbound → api</code>，用于本地 gRPC 热更新和流量统计。</li>
+              <li>允许已开启 <code>allow_private</code> 的受控运维代理直连。</li>
+              <li>通过 <code>geoip:private → block</code> 阻止访问节点私网。</li>
+              <li>对普通 HTTP / SOCKS 运维代理执行源 IP 白名单和兜底拦截。</li>
+            </ol>
           </div>
-        )}
-      </FieldGroup>
+        </div>
+      </details>
 
       <Modal
         open={!!pendingSnippet}
@@ -782,7 +795,7 @@ export function RuleWaterfallEditor({
         }
       >
         <div className="space-y-3">
-          <p className="text-xs leading-5 text-soft">{pendingSnippet?.description}</p>
+          <p className="text-sm leading-6 text-soft">{pendingSnippet?.description}</p>
           <RuleTargetSelect
             label="选择片段命中的目标出站 / 均衡组"
             value={snippetTargetTag}

@@ -56,7 +56,7 @@ func (r *NodeRepository) FindByName(name string) (*entity.Node, error) {
 // 筛选必须在 DB 层做：前端拿到的只是当前页数据，客户端过滤会漏掉其他页。
 type NodeListFilter struct {
 	IDs        []uint
-	Keyword    string // 模糊匹配 name/ip/domain/region/owner
+	Keyword    string // 模糊匹配名称、地址、地区、所有者及备注
 	SyncStatus string // 精确匹配同步状态
 	Region     string
 	Owner      string
@@ -70,11 +70,12 @@ func (f NodeListFilter) apply(db *gorm.DB) *gorm.DB {
 	if f.IDs != nil {
 		db = db.Where("id IN ?", f.IDs)
 	}
-	if f.Keyword != "" {
-		kw := "%" + strings.ToLower(f.Keyword) + "%"
+	if keyword := strings.TrimSpace(f.Keyword); keyword != "" {
+		kw := "%" + escapeLike(strings.ToLower(keyword)) + "%"
 		db = db.Where(
-			"LOWER(name) LIKE ? OR LOWER(ip) LIKE ? OR LOWER(domain) LIKE ? OR LOWER(region) LIKE ? OR LOWER(owner) LIKE ?",
-			kw, kw, kw, kw, kw,
+			`(LOWER(name) LIKE ? ESCAPE '\' OR LOWER(ip) LIKE ? ESCAPE '\' OR LOWER(domain) LIKE ? ESCAPE '\'
+				OR LOWER(region) LIKE ? ESCAPE '\' OR LOWER(owner) LIKE ? ESCAPE '\' OR LOWER(remark) LIKE ? ESCAPE '\')`,
+			kw, kw, kw, kw, kw, kw,
 		)
 	}
 	if f.SyncStatus == "needs_sync" {

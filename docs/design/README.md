@@ -21,4 +21,5 @@
 | 2026-09-10 | [2026-09-10-v0.5-admin-auth-alerts-and-ui-system.md](./2026-09-10-v0.5-admin-auth-alerts-and-ui-system.md) | Implemented | v0.5.0 ~ v0.5.2 | 多管理员两级权限模型、全仓 Actor 审计、飞书节点告警持久化状态机与单源 CSS 变量主题 |
 | 2026-11-14 | [2026-11-14-v0.6-traffic-analytics-and-dashboard.md](./2026-11-14-v0.6-traffic-analytics-and-dashboard.md) | Implemented | v0.6.0 ~ v0.6.1 / v0.7.2 | 区间流量时间序列聚合、真实零值与缺采断点证据集模型、响应式仪表盘布局 |
 | 2026-11-16 | [2026-11-16-v0.7-routing-templates-and-transactional-sync.md](./2026-11-16-v0.7-routing-templates-and-transactional-sync.md) | Implemented | v0.7.0 ~ v0.7.2 | 版本化路由模板（Schema v1/v2）、三级继承与覆盖、远端预检/真实握手探测与不复活旧权限的安全回滚 |
-| 2026-11-17 | [2026-11-17-xray-flexible-config-and-routing-v3.md](./2026-11-17-xray-flexible-config-and-routing-v3.md) | Approved | v0.8.0+（待实施） | 统一 `SchemaVersion: 3` 全三期设计：自定义出站、路由全面放开、表单/JSON 双模式、节点按 Tag 覆盖、草稿沙箱预检、DNS 与负载均衡 |
+| 2026-11-17 | [2026-11-17-xray-flexible-config-and-routing-v3.md](./2026-11-17-xray-flexible-config-and-routing-v3.md) | Implemented | v0.8.0 | 路由策略 v3、自定义出站、表单与 JSON 编辑、节点按 Tag 覆盖、草稿预检、DNS 与负载均衡 |
+| 2026-11-19 | [远端配置核对与基线接管](./2026-11-19-remote-config-baseline.md) | Implemented | v0.8.0 | 精确字节核对、接管与任务原子入队、按同步失败阶段引导诊断 |

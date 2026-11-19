@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "tsx --tsconfig tsconfig.app.json --test tests/*.test.tsx tests/*.test.mjs",
+    "test": "tsx --tsconfig tsconfig.app.json --test tests/*.test.tsx tests/*.test.mjs && vitest run tests/vitest",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -58,6 +58,7 @@
     "tsx": "^4.20.5",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.0",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "vitest": "^4.1.12"
   }
 }

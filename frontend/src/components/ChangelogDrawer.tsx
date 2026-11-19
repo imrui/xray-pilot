@@ -41,7 +41,7 @@ export function ChangelogDrawer({ open, onClose }: { open: boolean; onClose: () 
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title="更新日志" description="版本发布记录，随当前运行版本内置。点击左侧版本号快速定位。" width="xl">
+    <Drawer open={open} onClose={onClose} title="更新日志" description="版本发布记录，随当前运行版本内置。点击左侧版本号快速定位。">
       {isLoading && <p className="py-10 text-center text-sm text-soft">加载中…</p>}
       {error && <p className="py-10 text-center text-sm text-[var(--danger)]">{(error as Error).message}</p>}
       {data && data.length === 0 && <p className="py-10 text-center text-sm text-soft">暂无更新日志</p>}

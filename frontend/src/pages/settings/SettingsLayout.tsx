@@ -76,11 +76,8 @@ export default function SettingsLayout() {
 
         {current.form && (
           <SurfaceCard className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 p-4">
-            <div className="flex items-center gap-3 text-sm text-soft">
-              <Badge label={saved ? '已保存' : dirty ? '待保存' : '未修改'} variant={saved ? 'green' : dirty ? 'yellow' : 'gray'} />
-              <span>
-                {saved ? '最近一次更新已写入系统配置。' : dirty ? '有未保存的改动，切换分组前请先保存。' : '当前没有新的配置改动。'}
-              </span>
+            <div role="status">
+              <Badge label={dirty ? '有未保存的修改' : saved ? '已保存' : '未修改'} variant={dirty ? 'yellow' : saved ? 'green' : 'gray'} />
             </div>
             <div className="flex items-center gap-2">
               <Btn variant="secondary" disabled={!dirty || update.isPending} onClick={() => setDraft(null)}>

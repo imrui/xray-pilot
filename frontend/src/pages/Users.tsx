@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarDays, ChevronDown, ChevronUp, Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, RefreshCw, Search, Send, Unplug, X } from 'lucide-react'
+import { CalendarDays, Check, ChevronDown, ChevronUp, Copy, ExternalLink, Filter, PencilLine, Plus, QrCode, RefreshCw, Send, Unplug, X } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { userApi, groupApi } from '@/lib/api'
+import { fetchAllPages } from '@/lib/pagination'
+import { useListSearch } from '@/lib/use-list-search'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { Pagination } from '@/components/ui/Table'
 import { formatBytes } from '@/lib/utils'
 import type { FeishuPushResult, User } from '@/types'
 import { Badge } from '@/components/ui/Badge'
@@ -19,7 +23,6 @@ import { copyText } from '@/lib/clipboard'
 const isExpired = (u: User) => (u.expires_at ? new Date(u.expires_at) < new Date() : false)
 
 const DEFAULT_PAGE_SIZE = 10
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 interface FormState {
   username: string
@@ -52,39 +55,41 @@ function isFeishuBound(user: User) {
 }
 
 function isFeishuMessagingEnabled(user: User) {
-  return Boolean(user.feishu_enabled) && isFeishuBound(user)
+  return Boolean(user.feishu_enabled && (user.feishu_open_id?.trim() || user.feishu_chat_id?.trim()))
 }
 
 function isFeishuAuthorized(user: User) {
   return Boolean(user.feishu_enabled && user.feishu_email)
 }
 
-function getFeishuEmailMeta(user: User) {
-  const email = user.feishu_email?.trim() || ''
-  const bound = isFeishuBound(user)
-
-  return {
-    emailLabel: email,
-    emailClassName: email
-      ? bound
-        ? 'text-[var(--text)]'
-        : 'text-[var(--warning)]'
-      : 'text-soft',
-    tooltipContent: email
-      ? bound
-        ? (
-            <span className="block space-y-1 whitespace-nowrap">
-              <span className="block">
-                <span className="font-medium text-[var(--success)]">已绑定</span>
-                <span className="text-[var(--text)]">，点击可发送飞书订阅</span>
-              </span>
-              <span className="block">Open ID: {user.feishu_open_id ? 'ok' : '—'}</span>
-              <span className="block">Union ID: {user.feishu_union_id ? 'ok' : '—'}</span>
-            </span>
-          )
-        : <span className="block whitespace-nowrap font-medium text-[var(--warning)]">待绑定</span>
-      : null,
+function feishuBindingStatus(user?: User) {
+  if (!user) return '保存用户后可校验邮箱并绑定飞书。'
+  if (user.feishu_open_id?.trim() || user.feishu_chat_id?.trim()) {
+    return user.feishu_bound_at
+      ? `已绑定飞书身份 · ${new Date(user.feishu_bound_at).toLocaleString('zh-CN')}`
+      : '已绑定飞书身份'
   }
+  return isFeishuAuthorized(user) || user.feishu_union_id ? '用户需先私聊机器人完成接收身份绑定。' : '飞书身份尚未绑定'
+}
+
+function FeishuContact({ user, onSend }: { user: User; onSend: () => void }) {
+  const email = user.feishu_email?.trim() || ''
+  const canSend = isFeishuMessagingEnabled(user)
+  let status = '未绑定'
+  if (canSend) status = '已绑定 · 可推送'
+  else if (!user.feishu_enabled && isFeishuBound(user)) status = '已绑定 · 消息已关闭'
+  else if (user.feishu_union_id || isFeishuAuthorized(user)) status = '待私聊绑定'
+
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-0.5 text-sm">
+      {email && (canSend ? (
+        <button type="button" title={`发送飞书订阅给 ${email}`} onClick={onSend} className="max-w-52 truncate text-left text-[var(--accent)] hover:underline">
+          {email}
+        </button>
+      ) : <span title={email} className="max-w-52 truncate">{email}</span>)}
+      <span className="whitespace-nowrap text-soft">{status}</span>
+    </div>
+  )
 }
 
 function maskIdentifier(value?: string) {
@@ -156,7 +161,7 @@ function openNativePicker(input: HTMLInputElement | null) {
 
 function renderUserGroups(user: User) {
   const groups = user.groups ?? []
-  if (groups.length === 0) return <span className="text-xs text-soft">未分组</span>
+  if (groups.length === 0) return <span className="text-sm text-soft">未分组</span>
 
   const visible = groups.slice(0, 2)
   const hiddenCount = groups.length - visible.length
@@ -204,7 +209,8 @@ function GroupMultiSelect({
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          className="flex min-h-11 w-full items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-left text-sm text-[var(--text)] transition hover:bg-[var(--panel-muted)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
+          id="user-subscription-groups"
+          className="flex min-h-10 w-full items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-1.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--panel-muted)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
         >
           <div className="flex min-h-6 flex-1 flex-wrap items-center gap-1.5">
             {selectedOptions.length === 0 ? (
@@ -256,12 +262,12 @@ function GroupMultiSelect({
           className="z-50 w-[var(--radix-dropdown-menu-trigger-width)] max-w-[min(32rem,90vw)] rounded-xl border border-[var(--border)] bg-[var(--panel-strong)] p-2 shadow-[var(--shadow-soft)]"
         >
           <div className="flex items-center justify-between px-2 py-1">
-            <div className="text-xs text-soft">已选 {selectedOptions.length} 个分组</div>
+            <div className="text-sm text-soft">已选 {selectedOptions.length} 个分组</div>
             {selectedOptions.length > 0 && (
               <button
                 type="button"
                 onClick={() => onChange([])}
-                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-sm text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
               >
                 <X className="h-3.5 w-3.5" />
                 清空
@@ -312,6 +318,7 @@ function ExpiryDateTimeField({
   onChange: (next: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const fieldId = useId()
   const [draftValue, setDraftValue] = useState(value)
   const dateInputRef = useRef<HTMLInputElement | null>(null)
   const timeInputRef = useRef<HTMLInputElement | null>(null)
@@ -332,19 +339,20 @@ function ExpiryDateTimeField({
 
   return (
     <div className="flex flex-col space-y-1.5">
-      <label className="text-[12px] font-medium text-soft">{label}</label>
+      <label htmlFor={fieldId} className="text-sm font-medium text-soft">{label}</label>
 
       <DropdownMenu.Root modal={false} open={open} onOpenChange={next => { if (next) setDraftValue(value); setOpen(next) }}>
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
+            id={fieldId}
             className={`flex h-10 w-full items-center justify-between rounded-md border bg-[var(--panel-strong)] px-3 text-left text-sm transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)] ${
               currentExpired
                 ? 'border-[var(--danger)] text-[var(--danger)] focus:border-[var(--danger)]'
                 : 'border-[var(--border)] text-[var(--text)] focus:border-[var(--accent)]'
             }`}
           >
-            <span className={value ? '' : 'text-faint'}>{currentDisplay}</span>
+            <span className={value ? '' : 'text-faint'}>{currentDisplay}{currentExpired && '（已过期）'}</span>
             <span className="ml-3 flex items-center gap-1">
               {value && (
                 <span
@@ -386,7 +394,7 @@ function ExpiryDateTimeField({
             <div className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-[1.45fr_1fr]">
                 <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-medium text-soft">日期</span>
+                  <span className="text-sm font-medium text-soft">日期</span>
                   <button
                     type="button"
                     onClick={() => openNativePicker(dateInputRef.current)}
@@ -404,7 +412,7 @@ function ExpiryDateTimeField({
                   </button>
                 </label>
                 <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-medium text-soft">时间</span>
+                  <span className="text-sm font-medium text-soft">时间</span>
                   <button
                     type="button"
                     onClick={() => openNativePicker(timeInputRef.current)}
@@ -424,13 +432,7 @@ function ExpiryDateTimeField({
                 </label>
               </div>
 
-              <div className={`text-xs ${draftExpired ? 'text-[var(--danger)]' : 'text-soft'}`}>
-                {draftValue
-                  ? draftExpired
-                    ? '该时间早于当前时间，保存后用户会被视为已过期。'
-                    : `当前选择：${formatDateTimeLocalDisplay(draftValue)}`
-                  : '未设置过期时间时，用户将保持永久有效。'}
-              </div>
+              {draftExpired && <p className="text-sm text-[var(--danger)]">此时间已过，保存后订阅将过期。</p>}
 
               <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] pt-3">
                 <div className="flex items-center gap-2">
@@ -479,21 +481,35 @@ export default function Users() {
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm())
   const [err, setErr] = useState('')
   const [qrUser, setQrUser] = useState<User | null>(null)
-  const [search, setSearch] = useState('')
+  const { search, setSearch, keyword } = useListSearch()
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'expired'>('all')
   const [groupFilter, setGroupFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [copiedUserId, setCopiedUserId] = useState<number | null>(null)
   const [showFeishuDetails, setShowFeishuDetails] = useState(false)
 
+  const filterKey = JSON.stringify([keyword, statusFilter, groupFilter])
+  const [pageFilterKey, setPageFilterKey] = useState(filterKey)
+  if (pageFilterKey !== filterKey) {
+    setPageFilterKey(filterKey)
+    setPage(1)
+    setSelectedIds([])
+  }
   const { data, isLoading } = useQuery({
-    queryKey: ['users', page, pageSize],
-    queryFn: () => userApi.list({ page, page_size: pageSize }).then((r) => r.data.data!),
+    queryKey: ['users', page, pageSize, keyword, statusFilter, groupFilter],
+    queryFn: () => userApi.list({
+      page,
+      page_size: pageSize,
+      keyword: keyword || undefined,
+      status: statusFilter === 'all' ? undefined : statusFilter,
+      group_id: groupFilter === 'all' ? undefined : Number(groupFilter),
+    }).then((r) => r.data.data!),
   })
 
   const { data: groups } = useQuery({
     queryKey: ['groups-all'],
-    queryFn: () => groupApi.list({ page: 1, page_size: 100 }).then((r) => r.data.data?.list ?? []),
+    queryFn: () => fetchAllPages((page, pageSize) =>
+      groupApi.list({ page, page_size: pageSize }).then((r) => r.data.data!)),
   })
 
   const sortedGroups = useMemo(
@@ -631,27 +647,7 @@ export default function Users() {
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [k]: e.target.value }))
 
-  const filteredUsers = useMemo(() => {
-    return (data?.list ?? []).filter((u) => {
-      const keyword = search.trim().toLowerCase()
-      const matchesKeyword =
-        keyword === '' ||
-        u.username.toLowerCase().includes(keyword) ||
-        u.real_name.toLowerCase().includes(keyword) ||
-        (u.feishu_email ?? '').toLowerCase().includes(keyword) ||
-        (u.group_names ?? []).join(' ').toLowerCase().includes(keyword)
-
-      const matchesStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' && u.active) ||
-        (statusFilter === 'inactive' && !u.active) ||
-        (statusFilter === 'expired' && isExpired(u))
-
-      const matchesGroup = groupFilter === 'all' || (u.group_ids ?? []).some((id) => String(id) === groupFilter)
-
-      return matchesKeyword && matchesStatus && matchesGroup
-    })
-  }, [data?.list, search, statusFilter, groupFilter])
+  const filteredUsers = data?.list ?? []
 
   const allVisibleSelected = filteredUsers.length > 0 && filteredUsers.every((u) => selectedIds.includes(u.id))
   const dirty = JSON.stringify(form) !== JSON.stringify(initialForm) && drawer.open
@@ -736,19 +732,18 @@ export default function Users() {
     <PageShell className="space-y-6">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex flex-1 flex-col gap-3 md:flex-row">
-          <label className="relative min-w-0 flex-1 md:max-w-[380px]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索用户名、飞书邮箱..."
-              className="h-11 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] pl-10 pr-3 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
-            />
-          </label>
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="搜索用户名、姓名、飞书邮箱、分组或备注"
+            className="min-w-0 flex-1 md:max-w-[380px]"
+            inputClassName="h-11"
+          />
           <label className="flex h-11 min-w-[130px] items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm">
             <Filter className="h-4 w-4 text-faint" />
             <select
               value={statusFilter}
+              aria-label="用户状态"
               onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
               className="w-full bg-transparent text-sm outline-none"
             >
@@ -762,6 +757,7 @@ export default function Users() {
             <Filter className="h-4 w-4 text-faint" />
             <select
               value={groupFilter}
+              aria-label="用户分组"
               onChange={(e) => setGroupFilter(e.target.value)}
               className="w-full bg-transparent text-sm outline-none"
             >
@@ -786,8 +782,9 @@ export default function Users() {
       {selectedUsers.length > 0 && (
         <SurfaceCard className="p-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="text-sm text-soft">
-              已选择 <span className="font-semibold text-[var(--text)]">{selectedUsers.length}</span> 个用户
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">本页已选 {selectedUsers.length} 个用户</p>
+              <p className="text-soft">重置订阅后，所选用户的旧链接立即失效。</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Btn variant="secondary" onClick={() => runBulk((u) => userApi.resetToken(u.id))}>批量重置订阅</Btn>
@@ -799,7 +796,7 @@ export default function Users() {
                   onClick={() => pushFeishuBatch.mutate(selectedBoundUsers.map((u) => u.id))}
                 >
                   <Send className="h-4 w-4" />
-                  批量发送飞书订阅
+                  发送飞书订阅（{selectedBoundUsers.length} 人）
                 </Btn>
               )}
               <Btn
@@ -807,7 +804,7 @@ export default function Users() {
                 onClick={async () => {
                   const ok = await confirm({
                     title: `删除已选中的 ${selectedUsers.length} 个用户？`,
-                    description: '该操作不可撤销。',
+                    description: '所选用户的订阅将失效，删除后无法恢复。',
                     confirmText: '批量删除',
                     cancelText: '取消',
                     tone: 'danger',
@@ -824,9 +821,9 @@ export default function Users() {
       )}
 
       <SurfaceCard className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1140px] text-left text-sm">
-            <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
+        <div className="relative overflow-x-auto">
+          <table className="w-full min-w-[990px] text-left text-sm">
+            <thead className="border-b border-[var(--border)] bg-[var(--panel-muted)] text-soft [&_th]:whitespace-nowrap [&_th]:px-4 [&_th]:py-3 [&_th]:font-medium">
               <tr>
                 <th className="w-10 px-4 py-3">
                   <input
@@ -837,24 +834,23 @@ export default function Users() {
                     aria-label="选择当前页可见用户"
                   />
                 </th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">用户名</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">分组</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">到期时间</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">状态</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">累计流量</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">飞书消息</th>
-                <th className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">飞书邮箱</th>
-                <th className="px-4 py-3 text-right text-[11px] font-medium uppercase tracking-[0.12em] text-faint">操作</th>
+                <th>用户</th>
+                <th>分组</th>
+                <th>到期时间</th>
+                <th>启用状态</th>
+                <th>累计流量</th>
+                <th>飞书消息</th>
+                <th className="text-right">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={8} className="px-4 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-soft">暂无用户数据</td>
+                  <td colSpan={8} className="px-4 py-10 text-center text-soft">暂无用户数据</td>
                 </tr>
               ) : (
                 filteredUsers.map((u) => (
@@ -873,93 +869,82 @@ export default function Users() {
                         <span className="font-semibold">{u.username}</span>
                         <span className="text-xs text-faint">#{u.id}</span>
                       </div>
-                      <div className="text-xs text-soft">
-                        {u.real_name || '--'}
-                      </div>
+                      {u.real_name && <div className="mt-1 text-sm text-soft">{u.real_name}</div>}
                     </td>
                     <td className="px-4 py-3.5">
                       {renderUserGroups(u)}
                     </td>
                     <td className="px-4 py-3.5">
                       {u.expires_at ? (
-                        <span className={isExpired(u) ? 'text-[var(--danger)]' : 'text-soft'}>
+                        <span className="flex flex-col gap-0.5 whitespace-nowrap text-soft">
                           {formatDateTimeLocalDisplay(toDateTimeLocalValue(u.expires_at))}
+                          {isExpired(u) && <span className="font-medium text-[var(--danger)]">已过期</span>}
                         </span>
                       ) : (
                         <span className="text-soft">永久</span>
                       )}
                     </td>
                     <td className="px-4 py-3.5">
-                      <Switch checked={u.active} onChange={() => void toggleUserActive(u)} />
+                      <label className="inline-flex">
+                        <span className="sr-only">{u.username} 的启用状态</span>
+                        <Switch checked={u.active} onChange={() => void toggleUserActive(u)} />
+                      </label>
                     </td>
                     <td className="px-4 py-3.5">
-                      <div className="space-y-0.5 text-xs leading-tight">
+                      <div className="space-y-0.5 whitespace-nowrap text-sm tabular-nums">
                         <div className="text-soft" title="累计上行字节">↑ {formatBytes(u.traffic_up_bytes)}</div>
                         <div className="text-soft" title="累计下行字节">↓ {formatBytes(u.traffic_down_bytes)}</div>
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
-                      <Switch
-                        checked={Boolean(u.feishu_enabled)}
-                        onChange={(next) => toggleFeishuEnabled.mutate({ id: u.id, enabled: next })}
-                      />
+                      <div className="flex items-center gap-2.5">
+                        <label className="inline-flex shrink-0">
+                          <span className="sr-only">{u.username} 的飞书消息</span>
+                          <Switch
+                            checked={Boolean(u.feishu_enabled)}
+                            onChange={(next) => toggleFeishuEnabled.mutate({ id: u.id, enabled: next })}
+                          />
+                        </label>
+                        <FeishuContact user={u} onSend={() => void confirmAndPushFeishu(u)} />
+                      </div>
                     </td>
                     <td className="px-4 py-3.5">
-                      {(() => {
-                        const feishu = getFeishuEmailMeta(u)
-                        if (!feishu.emailLabel) return null
-
-                        const emailNode = isFeishuMessagingEnabled(u) ? (
+                      <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                        <div role="group" aria-label={`${u.username} 的订阅链接`} className="inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)]">
                           <button
                             type="button"
-                            onClick={() => void confirmAndPushFeishu(u)}
-                            className={`inline-block max-w-[220px] truncate text-left text-xs underline-offset-2 transition hover:underline ${feishu.emailClassName}`}
+                            title="复制订阅链接"
+                            onClick={() => void copySubscribeUrl(u)}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-l-md px-2.5 text-sm font-medium text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
                           >
-                            {feishu.emailLabel}
+                            {copiedUserId === u.id ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                            {copiedUserId === u.id ? '已复制' : '复制链接'}
                           </button>
-                        ) : (
-                          <span className={`inline-block max-w-[220px] truncate text-xs ${feishu.emailClassName}`}>
-                            {feishu.emailLabel}
-                          </span>
-                        )
-
-                        return feishu.tooltipContent ? (
-                          <Tooltip content={feishu.tooltipContent} side="right" className="whitespace-nowrap">
-                            {emailNode}
-                          </Tooltip>
-                        ) : emailNode
-                      })()}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => void copySubscribeUrl(u)}
-                          className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                          {copiedUserId === u.id ? '已复制' : '复制'}
-                        </button>
-                        <button
-                          onClick={() => setQrUser(u)}
-                          className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--panel-muted)]"
-                        >
-                          <QrCode className="h-3.5 w-3.5" />
-                          二维码
-                        </button>
-                        <a
-                          href={u.subscribe_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          订阅页
-                        </a>
+                          <button
+                            type="button"
+                            aria-label={`查看 ${u.username} 的订阅二维码`}
+                            title="查看订阅二维码"
+                            onClick={() => setQrUser(u)}
+                            className="inline-flex size-9 items-center justify-center text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--accent)]"
+                          >
+                            <QrCode className="h-4 w-4" />
+                          </button>
+                          <a
+                            aria-label={`打开 ${u.username} 的订阅页`}
+                            title="打开订阅页"
+                            href={u.subscribe_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex size-9 items-center justify-center rounded-r-md text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--accent)]"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </div>
                         <button
                           onClick={() => openEdit(u)}
-                          className="inline-flex h-9 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
                         >
-                          <PencilLine className="h-3.5 w-3.5" />
+                          <PencilLine className="h-4 w-4" />
                           编辑
                         </button>
                         <ActionMenu
@@ -992,7 +977,7 @@ export default function Users() {
                               onSelect: async () => {
                                 const ok = await confirm({
                                   title: `删除用户 ${u.username}？`,
-                                  description: '该操作不可撤销。',
+                                  description: '该用户的订阅将失效，删除后无法恢复。',
                                   confirmText: '删除用户',
                                   cancelText: '取消',
                                   tone: 'danger',
@@ -1012,43 +997,19 @@ export default function Users() {
         </div>
       </SurfaceCard>
 
-      <div className="flex items-center justify-between text-sm text-soft">
-        <span>共 {data?.total ?? 0} 条</span>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-2 text-sm text-soft">
-            分页
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value))
-                setPage(1)
-              }}
-              className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            >
-              {PAGE_SIZE_OPTIONS.map((size) => (
-                <option key={size} value={size}>
-                  {size} / 页
-                </option>
-              ))}
-            </select>
-          </label>
-          <Btn variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>上一页</Btn>
-          <span>{page}</span>
-          <Btn
-            variant="secondary"
-            disabled={page >= Math.max(1, Math.ceil((data?.total ?? 0) / pageSize))}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            下一页
-          </Btn>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={data?.total}
+        onChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       <Drawer
         open={drawer.open}
         onClose={closeDrawer}
         title={drawer.user ? `编辑用户 · ${drawer.user.username}` : '新增用户'}
-        description={drawer.user ? '调整分组、有效期和订阅信息。' : '快速创建新的订阅用户。'}
+        idleStatus=""
         dirty={dirty}
         saving={save.isPending}
         onBeforeClose={confirmCloseDrawer}
@@ -1059,46 +1020,50 @@ export default function Users() {
           </>
         }
       >
-        <div className="space-y-4">
-          <FieldGroup title="基础信息" description="用户标识、后台识别与订阅分组。">
-            <Field label="用户名（客户端显示） *" value={form.username} onChange={f('username')} placeholder="如：alice01" />
-            <Field label="真实姓名（后台识别）" value={form.real_name} onChange={f('real_name')} placeholder="后台识别用，可留空" />
-            <div className="space-y-2">
-              <div className="text-sm font-medium text-[var(--text)]">订阅分组</div>
-              <GroupMultiSelect
-                options={groupOptions}
-                selectedValues={form.group_ids}
-                onChange={(next) => setForm((prev) => ({ ...prev, group_ids: Array.from(new Set(next)).sort() }))}
+        <div className="space-y-5 [&_h4]:text-base [&_label]:text-sm">
+          <FieldGroup title="用户资料">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="用户名（客户端显示） *" value={form.username} onChange={f('username')} placeholder="如 alice01" />
+              <Field label="真实姓名（仅后台可见）" value={form.real_name} onChange={f('real_name')} />
+            </div>
+            <Field label="备注" value={form.remark} onChange={f('remark')} />
+          </FieldGroup>
+
+          <FieldGroup title="订阅范围">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="user-subscription-groups" className="font-medium text-soft">订阅分组</label>
+                <GroupMultiSelect
+                  options={groupOptions}
+                  selectedValues={form.group_ids}
+                  onChange={(next) => setForm((prev) => ({ ...prev, group_ids: Array.from(new Set(next)).sort() }))}
+                />
+                <p className="text-sm text-soft">用户可访问所选分组中的全部订阅节点。</p>
+              </div>
+              <ExpiryDateTimeField
+                label="到期时间"
+                value={form.expires_at}
+                onChange={(next) => setForm((prev) => ({ ...prev, expires_at: next }))}
               />
-              <div className="text-xs text-soft">用户可以同时属于多个分组，将获得这些分组下节点的合集。</div>
             </div>
           </FieldGroup>
 
-          <FieldGroup title="订阅策略" description="有效期为空时视为永久有效。">
-            <ExpiryDateTimeField
-              label="过期时间"
-              value={form.expires_at}
-              onChange={(next) => setForm((prev) => ({ ...prev, expires_at: next }))}
-            />
-            <Field label="备注" value={form.remark} onChange={f('remark')} placeholder="可选备注" />
-          </FieldGroup>
-
-          <FieldGroup title="飞书消息" description="可选能力。关闭后不发送飞书消息，但绑定信息会保留。">
-            <div className="flex items-center justify-between rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2.5">
-              <div>
-                <div className="text-[12px] font-medium text-soft">启用飞书消息</div>
-                <div className="mt-1 text-xs text-soft">开启后支持机器人识别和后台主动推送。</div>
-              </div>
+          <FieldGroup title="飞书消息">
+            <label className="flex cursor-pointer items-center justify-between gap-4">
+              <span>接收飞书订阅</span>
               <Switch
                 checked={form.feishu_enabled === 'true'}
                 onChange={(next) => setForm((p) => ({ ...p, feishu_enabled: next ? 'true' : 'false' }))}
               />
-            </div>
+            </label>
+            {drawer.user && isFeishuBound(drawer.user) && form.feishu_enabled !== 'true' && (
+              <p className="text-sm text-soft">关闭消息会保留现有飞书身份绑定。</p>
+            )}
             {form.feishu_enabled === 'true' && (
               <div className="space-y-4">
-                <Field label="飞书邮箱" value={form.feishu_email} onChange={f('feishu_email')} placeholder="name@company.com" />
-                {drawer.user ? (
-                  <div className="flex flex-wrap gap-2">
+                <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <Field label="飞书邮箱" value={form.feishu_email} onChange={f('feishu_email')} placeholder="name@company.com" />
+                  {drawer.user && (
                     <Btn
                       variant="secondary"
                       onClick={() => {
@@ -1128,26 +1093,26 @@ export default function Users() {
                       <Send className="h-4 w-4" />
                       检测飞书邮箱
                     </Btn>
-                  </div>
-                ) : (
-                  <p className="text-xs text-soft">请先保存用户，再执行飞书绑定。</p>
-                )}
-                <div className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)]">
+                  )}
+                </div>
+                <p className="text-sm text-soft">{feishuBindingStatus(drawer.user)}</p>
+                <div className="border-t border-[var(--border)] pt-2">
                   <button
                     type="button"
+                    aria-expanded={showFeishuDetails}
                     onClick={() => setShowFeishuDetails((prev) => !prev)}
-                    className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium text-[var(--text)]"
+                    className="flex items-center gap-2 rounded py-2 text-sm font-medium text-soft hover:text-[var(--text)]"
                   >
-                    <span>查看绑定详情</span>
+                    <span>飞书身份详情</span>
                     {showFeishuDetails ? <ChevronUp className="h-4 w-4 text-soft" /> : <ChevronDown className="h-4 w-4 text-soft" />}
                   </button>
                   {showFeishuDetails && (
-                    <div className="space-y-4 border-t border-[var(--border)] p-3">
+                    <div className="space-y-4 pt-2">
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label="Feishu Open ID" value={form.feishu_open_id} onChange={f('feishu_open_id')} placeholder="可手动填写" />
-                        <Field label="Feishu Union ID" value={form.feishu_union_id} onChange={f('feishu_union_id')} placeholder="可手动填写" />
+                        <Field label="Open ID" value={form.feishu_open_id} onChange={f('feishu_open_id')} />
+                        <Field label="Union ID" value={form.feishu_union_id} onChange={f('feishu_union_id')} />
                       </div>
-                      <Field label="Feishu Chat ID" value={form.feishu_chat_id} onChange={f('feishu_chat_id')} placeholder="可手动填写" />
+                      <Field label="Chat ID" value={form.feishu_chat_id} onChange={f('feishu_chat_id')} />
                       {drawer.user && isFeishuAuthorized(drawer.user) && (
                         <div className="flex justify-start">
                           <Btn
@@ -1181,22 +1146,13 @@ export default function Users() {
                     </div>
                   )}
                 </div>
-                {drawer.user && (
-                  <p className="text-xs text-soft">
-                    当前状态：
-                    {isFeishuMessagingEnabled(drawer.user)
-                      ? ` 已完成身份绑定${drawer.user.feishu_bound_at ? `，最近更新时间 ${new Date(drawer.user.feishu_bound_at).toLocaleString('zh-CN')}` : ''}`
-                      : isFeishuAuthorized(drawer.user)
-                        ? ' 已授权飞书邮箱，等待首次私聊完成身份绑定'
-                        : ' 未绑定飞书'}
-                  </p>
-                )}
               </div>
             )}
           </FieldGroup>
 
           {drawer.user && (
-            <FieldGroup title="快捷动作" description="把高频动作前置，不需要先关闭编辑抽屉。">
+            <FieldGroup title="订阅链接">
+              <p className="text-sm text-soft">持有链接或二维码即可获取该用户的订阅。</p>
               <div className="flex flex-wrap gap-2">
                 <Btn variant="secondary" onClick={() => void copySubscribeUrl(drawer.user!)}>
                   <Copy className="h-4 w-4" />
@@ -1248,7 +1204,7 @@ export default function Users() {
         </div>
       </Drawer>
 
-      {qrUser && <QRModal open={!!qrUser} onClose={() => setQrUser(null)} url={qrUser.subscribe_url} title={`${qrUser.username} 的订阅`} />}
+      {qrUser && <QRModal open={!!qrUser} onClose={() => setQrUser(null)} url={qrUser.subscribe_url} title={`${qrUser.username} 的订阅二维码`} />}
     </PageShell>
   )
 }

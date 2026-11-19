@@ -9,10 +9,10 @@ import { useSettingsForm } from './context'
 
 // 告警类型（与后端 entity.AlertKind* 一致）
 const ALERT_KINDS = [
-  { key: 'node_unreachable', label: '服务器不可达', hint: 'SSH 端口连接失败' },
-  { key: 'xray_down', label: 'Xray 端口不通', hint: 'SSH 可达但代理端口（TCP）不通' },
-  { key: 'sync_failed', label: '配置同步失败', hint: '失败 1 次即告警，下次同步成功恢复' },
-  { key: 'panel_unreachable', label: '面板到全部节点不可达', hint: '疑似面板出网或跨境链路故障' },
+  { key: 'node_unreachable', label: '节点 SSH 不可达' },
+  { key: 'xray_down', label: 'SSH 可达，代理 TCP 端口不通' },
+  { key: 'sync_failed', label: '配置同步失败' },
+  { key: 'panel_unreachable', label: '面板到全部节点不可达' },
 ] as const
 
 // 节点异常告警：复用飞书应用机器人发群卡片（v0.5.1）
@@ -57,17 +57,17 @@ export default function AlertSettings() {
   return (
     <Section
       title="节点告警"
-      description="节点异常与恢复时，由飞书机器人推送卡片消息到指定群。同一轮检测的多条变化合并为一条消息。"
+      description="将同一轮检测的异常与恢复合并发送到指定飞书群。"
       actions={
-        <div className="flex items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2">
-          <span className="text-sm font-medium text-soft">启用告警</span>
+        <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-soft">
+          启用告警
           <Switch checked={alertEnabled} onChange={(next) => set('alert.enabled', next ? 'true' : 'false')} />
-        </div>
+        </label>
       }
     >
-      {!feishuEnabled && (
-        <div className="border-l-2 border-[var(--warning)] pl-3 text-xs text-soft">
-          告警复用上方的飞书应用机器人，需先启用飞书集成并填写 App ID / App Secret。
+      {alertEnabled && !feishuEnabled && (
+        <div className="border-l-2 border-[var(--warning)] pl-3 text-sm text-soft">
+          请先启用飞书机器人并填写 App ID 和 App Secret。
         </div>
       )}
 
@@ -84,7 +84,7 @@ export default function AlertSettings() {
                   placeholder="选择机器人所在的群"
                 />
               ) : (
-                <Field label="告警群 chat_id" value={chatID} onChange={f('alert.feishu_chat_id')} placeholder="oc_xxx，或点击右侧获取群列表" />
+                <Field label="告警群 chat_id" value={chatID} onChange={f('alert.feishu_chat_id')} placeholder="oc_xxx" />
               )}
             </div>
             <Btn variant="secondary" loading={chats.isFetching} disabled={!feishuEnabled} onClick={() => void chats.refetch()}>
@@ -92,8 +92,8 @@ export default function AlertSettings() {
               获取群列表
             </Btn>
           </div>
-          <p className="text-xs text-soft">
-            需先把机器人拉进目标群；获取群列表需为飞书应用开通 <code>im:chat:readonly</code> 权限，未开通时可手动填写 chat_id。
+          <p className="text-sm text-soft">
+            请先邀请机器人入群。{!chats.isSuccess && <>可直接填写 chat_id，或开通 <code>im:chat:readonly</code> 后获取群列表。</>}
           </p>
 
           <div className="grid gap-4 md:grid-cols-3">
@@ -102,11 +102,11 @@ export default function AlertSettings() {
             <Field label="未恢复重复提醒（小时，0 不重复）" type="number" min={0} value={form['alert.repeat_hours'] ?? '0'} onChange={f('alert.repeat_hours')} />
           </div>
           {healthInterval > 0 ? (
-            <p className="text-xs text-soft">
-              按当前健康检测间隔 {healthInterval} 秒，异常约 {delayMinutes} 分钟后告警。检测间隔在「节点与同步」中调整。
+            <p className="text-sm text-soft">
+              每 {healthInterval} 秒检测一次，异常约 {delayMinutes} 分钟后告警。间隔可在「节点与同步」调整。
             </p>
           ) : (
-            <div className="border-l-2 border-[var(--warning)] pl-3 text-xs text-soft">
+            <div className="border-l-2 border-[var(--warning)] pl-3 text-sm text-soft">
               健康检测已禁用（间隔为 0），除「配置同步失败」外的告警都不会触发。
             </div>
           )}
@@ -122,19 +122,15 @@ export default function AlertSettings() {
                     onChange={(e) => toggleKind(k.key, e.target.checked)}
                     className="mt-0.5 h-4 w-4 rounded border-[var(--border-strong)]"
                   />
-                  <span>
-                    <span className="block text-sm font-medium">{k.label}</span>
-                    <span className="block text-xs text-soft">{k.hint}</span>
-                  </span>
+                  <span className="text-sm font-medium">{k.label}</span>
                 </label>
               ))}
             </div>
+            {kinds.has('sync_failed') && <p className="mt-2 text-sm text-soft">配置同步失败一次即告警，下次同步成功后恢复。</p>}
           </div>
 
-          <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4 md:flex-row md:items-center md:justify-between">
-            <p className="text-xs text-soft">
-              {dirty ? '有未保存的改动，测试消息使用已保存的配置，请先保存。' : '向已保存的告警群发送一条测试消息。'}
-            </p>
+          <div className="flex flex-wrap items-center justify-end gap-3 border-t border-[var(--border)] pt-4">
+            {dirty && <p className="text-sm text-soft">请先保存修改，再向告警群发送测试消息。</p>}
             <Btn variant="secondary" loading={testAlert.isPending} disabled={dirty || !feishuEnabled} onClick={() => testAlert.mutate()}>
               <Send className="h-4 w-4" />
               发送测试消息

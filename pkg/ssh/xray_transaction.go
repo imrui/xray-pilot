@@ -162,8 +162,14 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 	return nil
 }
 
+// ConfigBaselineMatched 与实际下发共用校验规则，核对时不会认领初始基线。
+func ConfigBaselineMatched(old, desired string, opt TransactionOptions) bool {
+	opt.OnBaseline = nil
+	return acceptConfigBaseline(old, desired, opt) == nil
+}
+
 func acceptConfigBaseline(old, desired string, opt TransactionOptions) error {
-	if crypto.HashConfig(old) == crypto.HashConfig(desired) {
+	if desired != "" && crypto.HashConfig(old) == crypto.HashConfig(desired) {
 		return nil
 	}
 	if opt.BaselineHash != "" && crypto.HashConfig(old) == opt.BaselineHash {
@@ -173,7 +179,8 @@ func acceptConfigBaseline(old, desired string, opt TransactionOptions) error {
 	if opt.BaselineHash == "" && opt.AllowInitial && opt.InitialBaselineHash == hex.EncodeToString(raw[:]) {
 		// Establish the attested baseline before preflight. A preflight failure
 		// can then be retried without granting permission for a different file.
-		if opt.OnBaseline != nil {
+		// 空白文件没有可区分空白差异的语义哈希，直至成功应用都保留精确字节凭据。
+		if opt.OnBaseline != nil && strings.TrimSpace(old) != "" {
 			return opt.OnBaseline(crypto.HashConfig(old))
 		}
 		return nil

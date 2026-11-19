@@ -1,17 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Clock3, RefreshCcw, Trash2 } from 'lucide-react'
+import { RefreshCcw, Trash2 } from 'lucide-react'
 import { logApi } from '@/lib/api'
 import type { SyncLog } from '@/types'
 import { Table, Pagination } from '@/components/ui/Table'
+import { FilterChip, ListToolbar } from '@/components/ui/ListToolbar'
 import { Badge } from '@/components/ui/Badge'
-import { Btn } from '@/components/ui/Form'
-import { PageShell, SurfaceCard } from '@/components/ui/Page'
-import { useConfirm } from '@/lib/confirm-context'
+import { Btn, Field } from '@/components/ui/Form'
+import { Modal } from '@/components/ui/Modal'
+import { PageShell } from '@/components/ui/Page'
 import { pushToast } from '@/lib/notify'
 
 const DEFAULT_PAGE_SIZE = 20
-const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const CLEANUP_PRESETS = [1, 3, 7, 30, 90, 180]
 // actor 前缀筛选：与后端 entity.SyncLog 的 actor 格式约定一致
 const ACTOR_FILTERS: Array<{ value: string; label: string }> = [
@@ -23,17 +23,34 @@ const ACTOR_FILTERS: Array<{ value: string; label: string }> = [
 ]
 
 export default function Logs() {
-  const confirm = useConfirm()
   const qc = useQueryClient()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [cleanupOpen, setCleanupOpen] = useState(false)
   const [cleanupMode, setCleanupMode] = useState<string>('7')
   const [cleanupDays, setCleanupDays] = useState('7')
   const [actorFilter, setActorFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [keyword, setKeyword] = useState('')
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['logs', page, pageSize, actorFilter],
-    queryFn: () => logApi.list({ page, page_size: pageSize, actor: actorFilter || undefined }).then((r) => r.data.data!),
+  useEffect(() => {
+    const next = search.trim()
+    if (keyword === next) return
+    const timer = setTimeout(() => {
+      setPage(1)
+      setKeyword(next)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [keyword, search])
+
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+    queryKey: ['logs', page, pageSize, actorFilter, keyword],
+    queryFn: () => logApi.list({
+      page,
+      page_size: pageSize,
+      actor: actorFilter || undefined,
+      keyword: keyword || undefined,
+    }).then((r) => r.data.data!),
     refetchInterval: 10_000,
   })
 
@@ -47,211 +64,181 @@ export default function Logs() {
         variant: 'success',
       })
       void qc.invalidateQueries({ queryKey: ['logs'] })
-      void refetch()
+      setPage(1)
+      setCleanupOpen(false)
     },
   })
 
   const effectiveCleanupDays = cleanupMode === 'custom' ? Number(cleanupDays) : Number(cleanupMode)
-
-  const handleCleanup = async () => {
-    if (!Number.isFinite(effectiveCleanupDays) || effectiveCleanupDays < 1 || effectiveCleanupDays > 3650) {
-      pushToast({
-        title: '清理天数无效',
-        description: '请输入 1 到 3650 之间的天数。',
-        variant: 'warning',
-      })
-      return
-    }
-
-    const ok = await confirm({
-      title: `清理 ${effectiveCleanupDays} 天前的日志？`,
-      description: '该操作只删除历史操作日志，不影响当前节点、用户和协议配置。',
-      confirmText: '确认清理',
-      cancelText: '取消',
-      tone: 'danger',
-    })
-    if (!ok) return
-    cleanup.mutate(effectiveCleanupDays)
-  }
+  const validDays = Number.isInteger(effectiveCleanupDays) && effectiveCleanupDays >= 1 && effectiveCleanupDays <= 3650
 
   const columns = [
     {
       key: 'created_at',
       label: '时间',
-      render: (l: SyncLog) => <span className="whitespace-nowrap font-mono text-xs tabular-nums text-soft">{new Date(l.created_at).toLocaleString('zh-CN')}</span>,
+      render: (l: SyncLog) => <time dateTime={l.created_at} className="tabular-nums text-soft">{new Date(l.created_at).toLocaleString('zh-CN')}</time>,
     },
-    { key: 'action', label: '操作', render: (l: SyncLog) => <span className="font-mono text-xs">{l.action}</span> },
+    { key: 'action', label: '操作', render: (l: SyncLog) => <span className="wrap-anywhere font-mono">{l.action}</span> },
     { key: 'actor', label: '来源', render: (l: SyncLog) => <ActorCell actor={l.actor} /> },
-    { key: 'target', label: '目标', render: (l: SyncLog) => <span className="text-xs text-soft">{l.target}</span> },
+    { key: 'target', label: '目标', render: (l: SyncLog) => <span className="wrap-anywhere text-soft">{l.target || '—'}</span> },
     { key: 'success', label: '结果', render: (l: SyncLog) => <Badge label={l.success ? '成功' : classifyFailureReason(l.message)} variant={l.success ? 'green' : 'red'} /> },
-    { key: 'duration_ms', label: '耗时', render: (l: SyncLog) => <span className="text-xs text-soft">{l.duration_ms ? `${l.duration_ms}ms` : '—'}</span> },
+    { key: 'duration_ms', label: '耗时', render: (l: SyncLog) => <span className="whitespace-nowrap tabular-nums text-soft">{l.duration_ms ? `${l.duration_ms} ms` : '—'}</span> },
     {
       key: 'message',
       label: '消息',
-      render: (l: SyncLog) => (
-        <div className="min-w-[24rem] max-w-xl space-y-1 text-xs">
-          {!l.success && <span className="font-medium text-[var(--text)]">{classifyFailureReason(l.message)}</span>}
-          <span className="block whitespace-normal break-all text-soft">{l.message || '—'}</span>
-        </div>
-      ),
+      render: (l: SyncLog) => <LogMessage message={l.message} />,
     },
   ]
 
   return (
     <PageShell>
-      <div className="flex flex-wrap items-center gap-2">
-        {ACTOR_FILTERS.map((f) => (
-          <button
-            key={f.value}
-            type="button"
+      <ListToolbar
+        searchValue={search}
+        searchPlaceholder="搜索操作、来源、目标或消息"
+        onSearchChange={value => {
+          setSearch(value)
+          if (!value.trim()) {
+            setKeyword('')
+            setPage(1)
+          }
+        }}
+        filters={ACTOR_FILTERS.map(filter => (
+          <FilterChip
+            key={filter.value}
+            active={actorFilter === filter.value}
             onClick={() => {
-              setActorFilter(f.value)
+              setActorFilter(filter.value)
               setPage(1)
             }}
-            className={
-              actorFilter === f.value
-                ? 'inline-flex h-8 items-center rounded-md bg-[var(--accent-soft)] px-3 text-xs font-semibold text-[var(--accent)]'
-                : 'inline-flex h-8 items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-xs font-medium text-soft transition hover:text-[var(--text)]'
-            }
           >
-            {f.label}
-          </button>
+            {filter.label}
+          </FilterChip>
         ))}
-      </div>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0 space-y-3">
-          <Table columns={columns} data={data?.list ?? []} loading={isLoading} />
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <label className="inline-flex items-center gap-2 text-sm text-soft">
-              分页
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value))
-                  setPage(1)
-                }}
-                className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-              >
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size} / 页
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Pagination page={page} pageSize={pageSize} total={data?.total ?? 0} onChange={setPage} />
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Btn variant="secondary" loading={isFetching} title="每 10 秒自动刷新" onClick={() => void refetch()}>
+              <RefreshCcw className="size-4" />刷新
+            </Btn>
+            <Btn variant="secondary" onClick={() => setCleanupOpen(true)}>
+              <Trash2 className="size-4" />清理历史日志
+            </Btn>
           </div>
-        </div>
+        }
+      />
+      {isError && <p role="alert" className="text-sm text-[var(--danger)]">日志加载失败，请刷新重试。</p>}
+      {(data || !isError) && (
+        <Table columns={columns} data={data?.list ?? []} loading={isLoading} labelClassName="text-sm text-soft" />
+      )}
+      <Pagination page={page} pageSize={pageSize} total={data?.total} onChange={setPage} onPageSizeChange={setPageSize} />
 
-        <SurfaceCard className="p-5 xl:sticky xl:top-0 xl:self-start">
-          <div className="space-y-4">
-            <div className="border-t border-[var(--border)] pt-4">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Activity className="h-4 w-4 text-[var(--accent)]" />
-                观察重点
-              </div>
-              <p className="mt-2 text-sm leading-6 text-soft">优先看失败记录、异常耗时，以及重复出现的节点或动作名，这些通常能最快暴露部署问题。</p>
-            </div>
-            <div className="border-t border-[var(--border)] pt-4">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Clock3 className="h-4 w-4 text-[var(--accent)]" />
-                自动刷新
-              </div>
-              <p className="mt-2 text-sm leading-6 text-soft">页面默认每 10 秒拉取一次最新日志，适合在同步节点、测试 SSH 或排查订阅问题时并排观察。</p>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <div className="inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2.5 py-1 text-xs font-medium text-soft">
-                  刷新周期：10s
-                </div>
-                <Btn variant="secondary" loading={isFetching} onClick={() => void refetch()}>
-                  <RefreshCcw className="h-4 w-4" />
-                  立即刷新
-                </Btn>
-              </div>
-            </div>
-            <div className="border-t border-[var(--border)] pt-4">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Trash2 className="h-4 w-4 text-[var(--accent)]" />
-                清理日志
-              </div>
-              <p className="mt-2 text-sm leading-6 text-soft">建议保留最近 7 到 30 天日志用于排障。更久的历史记录可以定期清理，避免日志表持续增长。</p>
-              <div className="mt-3 space-y-3">
-                <select
-                  value={cleanupMode}
-                  onChange={(e) => {
-                    setCleanupMode(e.target.value)
-                    if (e.target.value !== 'custom') setCleanupDays(e.target.value)
-                  }}
-                  className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-                >
-                  {CLEANUP_PRESETS.map((days) => (
-                    <option key={days} value={String(days)}>
-                      清理 {days} 天前日志
-                    </option>
-                  ))}
-                  <option value="custom">自定义天数</option>
-                </select>
-                {cleanupMode === 'custom' && (
-                  <input
-                    type="number"
-                    min={1}
-                    max={3650}
-                    value={cleanupDays}
-                    onChange={(e) => setCleanupDays(e.target.value)}
-                    placeholder="输入 1 - 3650"
-                    className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-                  />
-                )}
-                <Btn variant="secondary" loading={cleanup.isPending} onClick={() => void handleCleanup()}>
-                  <Trash2 className="h-4 w-4" />
-                  清理历史日志
-                </Btn>
-              </div>
-            </div>
-          </div>
-        </SurfaceCard>
-      </div>
+      <Modal
+        open={cleanupOpen}
+        onClose={() => { if (!cleanup.isPending) setCleanupOpen(false) }}
+        size="sm"
+        title="清理历史日志"
+        footer={
+          <>
+            <Btn variant="secondary" disabled={cleanup.isPending} onClick={() => setCleanupOpen(false)}>取消</Btn>
+            <Btn variant="danger" loading={cleanup.isPending} disabled={!validDays} onClick={() => cleanup.mutate(effectiveCleanupDays)}>
+              确认清理
+            </Btn>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <label className="block space-y-2 text-sm font-medium">
+            <span>保留最近</span>
+            <select
+              value={cleanupMode}
+              disabled={cleanup.isPending}
+              onChange={e => {
+                setCleanupMode(e.target.value)
+                if (e.target.value !== 'custom') setCleanupDays(e.target.value)
+              }}
+              className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] focus:border-[var(--accent)]"
+            >
+              {CLEANUP_PRESETS.map(days => <option key={days} value={days}>{days} 天</option>)}
+              <option value="custom">自定义天数</option>
+            </select>
+          </label>
+          {cleanupMode === 'custom' && (
+            <Field
+              label="保留天数"
+              type="number"
+              min={1}
+              max={3650}
+              step={1}
+              value={cleanupDays}
+              disabled={cleanup.isPending}
+              onChange={e => setCleanupDays(e.target.value)}
+              error={validDays ? undefined : '请输入 1 到 3650 之间的整数。'}
+            />
+          )}
+          <p className="text-sm leading-6 text-[var(--danger)]">
+            {validDays ? `${effectiveCleanupDays} 天前` : '超出保留期限'}的操作日志将永久删除，范围包含所有来源和搜索结果以外的记录。
+          </p>
+        </div>
+      </Modal>
     </PageShell>
+  )
+}
+
+function LogMessage({ message }: { message: string }) {
+  const text = message?.trim()
+  if (!text) return <span className="text-faint">—</span>
+  const firstLine = text.split(/\r?\n/, 1)[0]
+  if (text.length <= 88 && firstLine === text) {
+    return <span className="block max-w-xl whitespace-normal wrap-anywhere text-soft">{text}</span>
+  }
+  return (
+    <details className="group max-w-xl whitespace-normal text-sm leading-6">
+      <summary className="cursor-pointer wrap-anywhere rounded-sm focus-visible:outline-[var(--accent)]">
+        <span className="group-open:hidden">{firstLine.slice(0, 88)}…</span>
+        <span className="hidden group-open:inline">收起完整消息</span>
+      </summary>
+      <p className="mt-1 whitespace-pre-wrap wrap-anywhere text-left text-soft">{message}</p>
+    </details>
   )
 }
 
 // ActorCell 把 actor 字符串渲染为「类型徽章 + 主体」；空值为 v0.5.0 之前的历史记录
 function ActorCell({ actor }: { actor: string }) {
-  if (!actor) return <span className="text-xs text-faint">—</span>
+  if (!actor) return <span className="text-sm text-faint">—</span>
   if (actor.startsWith('admin:')) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs">
+      <span title={actor} className="inline-flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
         <Badge label="管理员" variant="blue" />
-        <span className="font-mono">{actor.slice('admin:'.length)}</span>
+        <span className="wrap-anywhere font-mono">{actor.slice('admin:'.length)}</span>
       </span>
     )
   }
   if (actor.startsWith('system:scheduler:')) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs">
+      <span title={actor} className="inline-flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
         <Badge label="调度" variant="gray" />
-        <span className="font-mono text-soft">{actor.slice('system:scheduler:'.length)}</span>
+        <span className="wrap-anywhere font-mono text-soft">{actor.slice('system:scheduler:'.length)}</span>
       </span>
     )
   }
   if (actor.startsWith('system:install-token:')) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs">
+      <span title={actor} className="inline-flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
         <Badge label="接入" variant="gray" />
-        <span className="font-mono text-soft">{actor.slice('system:install-token:'.length)}</span>
+        <span className="wrap-anywhere font-mono text-soft">{actor.slice('system:install-token:'.length)}</span>
       </span>
     )
   }
   if (actor === 'system:feishu-webhook') {
     return <Badge label="飞书" variant="gray" />
   }
-  return <span className="font-mono text-xs text-soft">{actor}</span>
+  return <span className="wrap-anywhere font-mono text-sm text-soft">{actor}</span>
 }
 
 function classifyFailureReason(message: string) {
   const normalized = message.toLowerCase()
+  if (normalized.includes('drift_conflict') || normalized.includes('漂移')) return '配置漂移'
   if (normalized.includes('ssh')) return 'SSH 失败'
   if (normalized.includes('timeout') || normalized.includes('超时')) return '超时'
   if (normalized.includes('配置') || normalized.includes('private_key') || normalized.includes('协议') || normalized.includes('解析')) return '配置错误'
-  if (normalized.includes('漂移')) return '配置漂移'
   return '失败'
 }

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { CheckCircle2, CircleAlert, Database, ServerCog, ShieldCheck, Wrench, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronRight, CircleAlert, Database, ServerCog, ShieldCheck, XCircle } from 'lucide-react'
 import { systemApi } from '@/lib/api'
 import { Btn } from '@/components/ui/Form'
 import { SurfaceCard } from '@/components/ui/Page'
@@ -14,7 +14,7 @@ export default function StatusSection() {
     queryKey: ['system-info'],
     queryFn: () => systemApi.getInfo().then((r) => r.data.data!),
   })
-  const { data: diagnostics, refetch, isFetching } = useQuery({
+  const { data: diagnostics, refetch, isFetching, isError } = useQuery({
     queryKey: ['system-diagnostics'],
     queryFn: () => systemApi.getDiagnostics().then((r) => r.data.data!),
   })
@@ -31,34 +31,37 @@ export default function StatusSection() {
 
       <Section
         title="部署诊断"
-        description="确认服务路径、数据库目录、SSH 默认路径和订阅基址配置是否就绪。"
+        description={summary && (
+          <span className="inline-flex flex-wrap items-center gap-x-4 gap-y-1">
+            <SummaryStat icon={<CheckCircle2 className="h-4 w-4 text-[var(--success)]" />} label="正常" value={summary.ok} />
+            <SummaryStat icon={<CircleAlert className="h-4 w-4 text-[var(--warning)]" />} label="警告" value={summary.warning} />
+            <SummaryStat icon={<XCircle className="h-4 w-4 text-[var(--danger)]" />} label="错误" value={summary.error} />
+          </span>
+        )}
         actions={
           <Btn variant="secondary" loading={isFetching} onClick={() => void refetch()}>
             刷新诊断
           </Btn>
         }
       >
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-          <SummaryStat icon={<CheckCircle2 className="h-4 w-4 text-[var(--success)]" />} label="正常" value={summary?.ok ?? 0} />
-          <SummaryStat icon={<CircleAlert className="h-4 w-4 text-[var(--warning)]" />} label="警告" value={summary?.warning ?? 0} />
-          <SummaryStat icon={<XCircle className="h-4 w-4 text-[var(--danger)]" />} label="错误" value={summary?.error ?? 0} />
-        </div>
-        <ul className="divide-y divide-[var(--border)] border-t border-[var(--border)]">
-          {diagnostics?.items.map((item) => <DiagnosticRow key={item.key} item={item} />)}
-        </ul>
+        {isError && <p role="alert" className="text-sm text-[var(--danger)]">获取诊断结果失败，请刷新诊断。</p>}
+        {!diagnostics && isFetching && <p role="status" className="text-sm text-soft">正在检查部署配置…</p>}
+        {diagnostics && (
+          <ul className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
+            {diagnostics.items.map((item) => <DiagnosticRow key={item.key} item={item} />)}
+          </ul>
+        )}
+        <details className="group">
+          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm text-sm font-medium text-soft hover:text-[var(--text)] focus-visible:outline-[var(--accent)] [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />部署建议
+          </summary>
+          <ul className="mt-2 list-disc space-y-1 pl-6 text-sm leading-6 text-soft">
+            <li>systemd 部署建议使用 <code className="wrap-anywhere">/etc/xray-pilot/ssh/id_ed25519</code> 作为默认私钥，并将 <code className="wrap-anywhere">/var/lib/xray-pilot/known_hosts</code> 设为服务用户可写。</li>
+            <li>在「订阅与通知」填写公网 HTTPS 基址，作为订阅链接的前缀。</li>
+            <li>配置异常时，结合上方诊断结果和操作日志排查。</li>
+          </ul>
+        </details>
       </Section>
-
-      <SurfaceCard className="p-5">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Wrench className="h-4 w-4 text-[var(--accent)]" />
-          部署建议
-        </div>
-        <div className="mt-4 space-y-3 text-sm leading-6 text-soft">
-          <p>systemd 部署建议使用 `/etc/xray-pilot/ssh/id_ed25519` 作为默认私钥路径，并在「订阅与通知」显式配置公网 HTTPS 域名作为订阅链接前缀。</p>
-          <p>`known_hosts` 建议保持在 `/var/lib/xray-pilot/known_hosts`，方便与运行用户权限对齐。</p>
-          <p>配置保存后若未达预期，先看上方诊断项，再结合操作日志排查。</p>
-        </div>
-      </SurfaceCard>
     </>
   )
 }
@@ -66,11 +69,11 @@ export default function StatusSection() {
 function InfoCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <SurfaceCard className="p-4">
-      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-faint">
+      <div className="flex items-center gap-2 text-sm text-soft">
         <span className="text-[var(--accent)]">{icon}</span>
         {label}
       </div>
-      <div className="mt-2 font-mono text-sm">{value}</div>
+      <div className="mt-1 font-mono text-base">{value}</div>
     </SurfaceCard>
   )
 }
@@ -95,15 +98,15 @@ function DiagnosticRow({ item }: { item: DiagnosticItem }) {
   const badgeLabel = item.status === 'ok' ? '正常' : item.status === 'warning' ? '警告' : '错误'
 
   return (
-    <li className="flex flex-col gap-2 py-4 md:flex-row md:items-start md:justify-between md:gap-4">
-      <div className="min-w-0 space-y-1.5">
-        <div className="flex items-center gap-2">
-          {icon}
-          <div className="text-sm font-semibold">{item.label}</div>
-        </div>
-        {item.value && <div className="break-all font-mono text-xs text-soft">{item.value}</div>}
-        <p className="text-sm leading-6 text-soft">{item.detail}</p>
-        {item.suggestion && <p className="text-xs leading-5 text-faint">建议：{item.suggestion}</p>}
+    <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 py-3">
+      <span className="mt-1" aria-hidden="true">{icon}</span>
+      <div className="min-w-0 wrap-anywhere">
+        <p className="leading-6">
+          <span className="mr-2.5 inline-block text-[15px] font-semibold">{item.label}</span>
+          <span className="text-sm text-soft">{item.detail}</span>
+        </p>
+        {item.value && <code className="mt-0.5 block font-mono text-[13px] leading-5 text-soft">{item.value}</code>}
+        {item.suggestion && <p className="mt-1 text-sm leading-5 text-soft">{item.suggestion}</p>}
       </div>
       <Badge label={badgeLabel} variant={badgeVariant} />
     </li>

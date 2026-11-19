@@ -2,6 +2,7 @@ package xray
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/pkg/types"
 	"os"
@@ -10,6 +11,109 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestHistoricalRuleFieldNames(t *testing.T) {
+	const legacy = `[{"TyPe":"field","OutboundTag":"direct-v4","IP":["192.0.2.0/24"],"Port":"443","NETWORK":"tcp"}]`
+	const canonical = `[{"type":"field","outboundTag":"direct-v4","ip":["192.0.2.0/24"],"port":"443","network":"tcp"}]`
+	for _, version := range []string{"", `"schema_version":1,`, `"schema_version":2,`, `"schema_version":3,`} {
+		base := "{" + version + `"ipv6_failure_policy":"strict"}`
+		asPolicy := func(rules string) string {
+			return "{" + version + `"ipv6_failure_policy":"strict","custom_rules":` + rules + "}"
+		}
+		p, readErr := DecodeRoutingPolicy(asPolicy(legacy))
+		ov := `{"custom_rules":` + legacy + "}"
+		merged, mergeErr := MergeRoutingPolicy(base, ov)
+		if version == `"schema_version":3,` {
+			if readErr == nil || mergeErr == nil {
+				t.Fatal("v3 accepted noncanonical names")
+			}
+			continue
+		}
+		if err := ValidateRoutingOverrides(ov); err != nil || mergeErr != nil || readErr != nil {
+			t.Fatalf("%s historical policy/override: %v %v %v", version, readErr, mergeErr, err)
+		}
+		expected, err := DecodeRoutingPolicy(asPolicy(canonical))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := ApplyRoutingPolicy(`{"routing":{"rules":[]}}`, expected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, policy := range []RoutingPolicy{p, merged} {
+			got, err := ApplyRoutingPolicy(`{"routing":{"rules":[]}}`, policy)
+			if err != nil || got != out {
+				t.Fatalf("%s historical fields changed rendered config: %v", version, err)
+			}
+		}
+	}
+}
+
+func TestRuleFieldAliasesCannotBypassValidation(t *testing.T) {
+	for _, field := range []string{
+		`"OutboundTag":"direct-v6"`, `"outboundTag":"block"`, `"\u006futboundTag":"block"`,
+		`"Source":["192.0.2.1"]`, `"ſource":["192.0.2.1"]`, `"SourceIP":["192.0.2.1"]`,
+		`"Source":["192.0.2.1"],"source":[]`, `"ſource":["192.0.2.1"],"source":[]`,
+		`"InboundTAG":["api-inbound"]`, `"Disabled":true`, `"REMARK":"v3 only alias"`,
+	} {
+		rule := `[{"type":"field","outboundTag":"direct-v4","port":"443",` + field + `}]`
+		for _, version := range []int{1, 2, 3} {
+			policy := fmt.Sprintf(`{"schema_version":%d,"ipv6_failure_policy":"strict"}`, version)
+			if _, err := MergeRoutingPolicy(policy, `{"custom_rules":`+rule+`}`); err == nil {
+				t.Errorf("v%d accepted ambiguous or protected rule: %s", version, rule)
+			}
+		}
+	}
+	for _, obj := range []string{`{"custom_rules":[],"custom_rules":[]}`, `{"custom_rules":[],"CUSTOM_RULES":[]}`} {
+		if ValidateRoutingOverrides(obj) == nil {
+			t.Fatalf("accepted ambiguous override: %s", obj)
+		}
+	}
+	if _, err := DecodeRoutingPolicy(`{"schema_version":3,"SCHEMA_VERSION":1,"ipv6_failure_policy":"strict"}`); err == nil {
+		t.Fatal("accepted ambiguous schema version")
+	}
+}
+
+func TestLegacyOverridesReplaceRulesBeforeCIDRValidation(t *testing.T) {
+	const invalidRules = `[{"type":"field","ip":["::ffff:192.0.2.0/120"],"outboundTag":"direct-v4"}]`
+	for _, version := range []int{1, 2, 3} {
+		base := fmt.Sprintf(`{"schema_version":%d,"ipv6_failure_policy":"strict","custom_rules":%s}`, version, invalidRules)
+		if _, err := MergeRoutingPolicy(base, `{"custom_rules":null}`); err == nil {
+			t.Fatalf("v%d silently accepted inherited invalid CIDR", version)
+		}
+		if _, err := MergeRoutingPolicy(base, `{"custom_rules":`+invalidRules+`}`); err == nil {
+			t.Fatalf("v%d silently accepted invalid replacement CIDR", version)
+		}
+		_, err := MergeRoutingPolicy(base, `{"custom_rules":[]}`)
+		if (err == nil) != (version < 3) {
+			t.Fatalf("v%d replacement of unused rules: %v", version, err)
+		}
+	}
+}
+
+func TestPolicyVersionChecksCanonicalTopLevelFields(t *testing.T) {
+	const legacy = `{"SCHEMA_VERSION":2,"IPV6_FAILURE_POLICY":"strict","CUSTOM_RULES":[{"Type":"field","Port":"443","OutboundTag":"block"}]}`
+	p, err := DecodeRoutingPolicy(legacy)
+	if err != nil || p.SchemaVersion != 2 || len(p.CustomRules) != 1 {
+		t.Fatalf("v2 field aliases: %+v, %v", p, err)
+	}
+	p, err = MergeRoutingPolicy(legacy, `{"custom_rules":[]}`)
+	if err != nil || len(p.CustomRules) != 0 {
+		t.Fatalf("canonical override did not replace v2 aliases: %+v, %v", p, err)
+	}
+	for _, policy := range []string{
+		`{"schema_version":2,"ipv6_failure_policy":"strict","ENABLE_IPV6_OUTBOUND":false}`,
+		`{"schema_version":1,"ipv6_failure_policy":"strict","DNS":null}`,
+		`{"schema_version":2,"ipv6_failure_policy":"strict","CUSTOM_OUTBOUNDS":[]}`,
+		`{"SCHEMA_VERSION":3,"ipv6_failure_policy":"strict"}`,
+		`{"schema_version":3,"ipv6_failure_policy":"strict","DNS":null}`,
+		`{"schema_version":3,"ipv6_failure_policy":"strict","CUSTOM_RULES":[]}`,
+	} {
+		if _, err := DecodeRoutingPolicy(policy); err == nil {
+			t.Errorf("accepted version-incompatible field: %s", policy)
+		}
+	}
+}
 
 func TestRoutingPolicyValidationAndMerge(t *testing.T) {
 	base := `{"enable_ipv6_outbound":true,"ipv4_force_domains":["domain:a.example"],"ipv6_force_domains":["domain:b.example"],"ipv6_failure_policy":"strict","custom_rules":[]}`

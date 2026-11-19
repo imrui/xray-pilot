@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/imrui/xray-pilot/internal/dto"
+	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/service"
 	"github.com/imrui/xray-pilot/pkg/response"
 )
@@ -77,7 +78,16 @@ func (h *UserHandler) Create(c *gin.Context) {
 func (h *UserHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	users, total, err := h.svc.List(page, pageSize, h.baseURL(c))
+	filter := repository.UserListFilter{Keyword: c.Query("keyword"), Status: c.Query("status")}
+	if raw := c.Query("group_id"); raw != "" {
+		id, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil || id == 0 {
+			response.BadRequest(c, "无效的分组 ID")
+			return
+		}
+		filter.GroupID = uint(id)
+	}
+	users, total, err := h.svc.List(page, pageSize, h.baseURL(c), filter)
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return

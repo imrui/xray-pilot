@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/netip"
 	"regexp"
@@ -117,33 +116,55 @@ func (p RoutingPolicy) MarshalJSON() ([]byte, error) {
 }
 
 func DecodeRoutingPolicy(raw string) (RoutingPolicy, error) {
-	var p RoutingPolicy
-	if len(raw) > 256*1024 {
-		return p, fmt.Errorf("路由策略超过 256 KiB")
-	}
-	d := json.NewDecoder(strings.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&p); err != nil {
+	p, _, err := decodeRoutingPolicy(raw)
+	if err != nil {
 		return p, err
 	}
-	if d.Decode(new(any)) != io.EOF {
-		return p, fmt.Errorf("只允许一个 JSON 对象")
+	return p, p.Validate()
+}
+
+func decodeRoutingPolicy(raw string) (RoutingPolicy, map[string]json.RawMessage, error) {
+	var p RoutingPolicy
+	if len(raw) > 256*1024 {
+		return p, nil, fmt.Errorf("路由策略超过 256 KiB")
 	}
-	var fields map[string]json.RawMessage
-	_ = json.Unmarshal([]byte(raw), &fields)
-	if fields == nil {
-		return p, fmt.Errorf("路由策略必须是 JSON 对象")
+	fields, err := readRoutingObject([]byte(raw), "路由策略")
+	if err != nil {
+		return p, nil, err
+	}
+	// 先读取版本，再按该版本的字段约定解析规则（包括无版本的 v1 快照）。
+	wire := struct {
+		*RoutingPolicy
+		Rules json.RawMessage `json:"custom_rules"`
+	}{RoutingPolicy: &p}
+	d := json.NewDecoder(strings.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&wire); err != nil {
+		return p, nil, err
 	}
 	if p.SchemaVersion == 0 {
 		// Old API callers could omit the boolean switch. Unversioned drafts,
 		// revisions and snapshots must all keep their original interpretation.
 		p.SchemaVersion = 1
 	}
+	// 顶层字段均为小写。旧策略沿用 encoding/json 大小写规则，按同一份规范键检查版本、合并覆盖。
+	// readRoutingObject 已拒绝同名字段，不会因归一覆盖其他值。
+	for name, value := range fields {
+		key := routingFieldKey(name)
+		if key == name {
+			continue
+		}
+		if p.SchemaVersion >= 3 {
+			return p, nil, fmt.Errorf("路由策略字段 %q 请使用标准命名 %q", name, key)
+		}
+		delete(fields, name)
+		fields[key] = value
+	}
 	if p.SchemaVersion >= 2 && fields["enable_ipv6_outbound"] != nil {
-		return p, fmt.Errorf("新版策略不再使用 IPv6 开关，请分别填写强制 IPv4、IPv6 域名")
+		return p, nil, fmt.Errorf("新版策略不再使用 IPv6 开关，请分别填写强制 IPv4、IPv6 域名")
 	}
 	if p.SchemaVersion < 3 && (fields["custom_outbounds"] != nil || fields["domain_strategy"] != nil || fields["dns"] != nil || fields["balancers"] != nil || fields["observatory"] != nil) {
-		return p, fmt.Errorf("自定义出站、DNS 与负载均衡需使用 schema_version 3")
+		return p, nil, fmt.Errorf("自定义出站、DNS 与负载均衡需使用 schema_version 3")
 	}
 	if p.SchemaVersion >= 3 {
 		if p.DomainStrategy == "" {
@@ -155,10 +176,11 @@ func DecodeRoutingPolicy(raw string) (RoutingPolicy, error) {
 	}
 	p.IPv4Domains = normalizeDomains(p.IPv4Domains)
 	p.IPv6Domains = normalizeDomains(p.IPv6Domains)
-	if p.CustomRules == nil {
-		p.CustomRules = []RoutingRule{}
+	p.CustomRules, err = decodePolicyRules(wire.Rules, p.SchemaVersion < 3)
+	if err != nil {
+		return p, nil, err
 	}
-	return p, p.Validate()
+	return p, fields, nil
 }
 
 func normalizeDomains(in []string) []string {
@@ -438,28 +460,22 @@ func MergeRoutingPolicy(base, overrides string) (RoutingPolicy, error) {
 	if overrides == "" || overrides == "{}" {
 		return DecodeRoutingPolicy(base)
 	}
-	if len(overrides) > 256*1024 {
-		return RoutingPolicy{}, fmt.Errorf("覆盖超过 256 KiB")
-	}
-	basePolicy, err := DecodeRoutingPolicy(base)
+	o, err := DecodeRoutingOverrideFields(overrides)
 	if err != nil {
 		return RoutingPolicy{}, err
 	}
-	var b, o map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(base), &b); err != nil {
+	basePolicy, b, err := decodeRoutingPolicy(base)
+	if err != nil {
 		return RoutingPolicy{}, err
 	}
-	dec := json.NewDecoder(strings.NewReader(overrides))
-	if err := dec.Decode(&o); err != nil {
+	if ruleOverride := o["custom_rules"]; basePolicy.SchemaVersion < 3 && len(ruleOverride) > 0 && !bytes.Equal(bytes.TrimSpace(ruleOverride), []byte("null")) {
+		// 旧版先替换规则列表再校验。保留这一语义，例如节点已覆盖模板中无效的映射 CIDR。
+		// 基础规则的 JSON 结构与重复键已检查，最终生效规则在下方完整校验。
+		basePolicy.CustomRules = nil
+	}
+	if err := basePolicy.Validate(); err != nil {
 		return RoutingPolicy{}, err
 	}
-	if dec.Decode(new(any)) != io.EOF {
-		return RoutingPolicy{}, fmt.Errorf("只允许一个 JSON 对象")
-	}
-	if o == nil {
-		return RoutingPolicy{}, fmt.Errorf("覆盖必须是 JSON 对象")
-	}
-
 	var rawOutboundOverrides json.RawMessage
 	var rawDNSOverride json.RawMessage
 	for k, v := range o {

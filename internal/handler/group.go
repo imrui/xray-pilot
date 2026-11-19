@@ -34,7 +34,16 @@ func (h *GroupHandler) Create(c *gin.Context) {
 func (h *GroupHandler) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	groups, total, err := h.svc.List(page, pageSize)
+	var active *bool
+	if raw, ok := c.GetQuery("active"); ok {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "无效的启用状态")
+			return
+		}
+		active = &value
+	}
+	groups, total, err := h.svc.List(page, pageSize, c.Query("keyword"), active)
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return

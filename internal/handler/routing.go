@@ -165,6 +165,26 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 		})
 	}
 	api.POST("/nodes/:id/preflight", func(c *gin.Context) { reply(c, nil, service.NewSyncService().PreflightNode(id(c))) })
+	replyBaseline := func(c *gin.Context, result any, err error) {
+		if errors.Is(err, service.ErrBaselineChanged) || errors.Is(err, service.ErrNodeSyncBusy) || errors.Is(err, service.ErrConfigLeaseLost) {
+			c.JSON(http.StatusConflict, gin.H{"code": http.StatusConflict, "message": err.Error()})
+			return
+		}
+		reply(c, result, err)
+	}
+	api.POST("/nodes/:id/inspect-baseline", RequireSuperAdmin(), func(c *gin.Context) {
+		result, err := service.NewSyncService().InspectBaseline(id(c))
+		replyBaseline(c, result, err)
+	})
+	api.POST("/nodes/:id/adopt-baseline", RequireSuperAdmin(), func(c *gin.Context) {
+		var req service.AdoptBaselineRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			reply(c, nil, err)
+			return
+		}
+		jobs, err := service.NewSyncService().AdoptBaseline(id(c), req, actorFrom(c))
+		replyBaseline(c, jobs, err)
+	})
 	api.POST("/nodes/:id/preflight-draft", RequireSuperAdmin(), func(c *gin.Context) {
 		var req service.PreflightDraftRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

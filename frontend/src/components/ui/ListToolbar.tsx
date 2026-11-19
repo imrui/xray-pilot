@@ -1,6 +1,7 @@
-import { Search, SlidersHorizontal, X } from 'lucide-react'
+import { SlidersHorizontal } from 'lucide-react'
 import { type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { SearchInput } from './SearchInput'
 
 export function ListToolbar({
   searchValue,
@@ -24,24 +25,12 @@ export function ListToolbar({
     <div className="space-y-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <label className="relative block w-full shrink-0 sm:w-64">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-soft" />
-            <input
-              value={searchValue}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder={searchPlaceholder}
-              className="h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] py-2.5 pl-10 pr-10 text-sm text-[var(--text)] placeholder:text-faint focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]"
-            />
-            {searchValue && (
-              <button
-                type="button"
-                onClick={() => onSearchChange('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-soft transition hover:text-[var(--text)]"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </label>
+          <SearchInput
+            value={searchValue}
+            onChange={onSearchChange}
+            placeholder={searchPlaceholder}
+            className="w-full shrink-0 sm:w-64"
+          />
           {filters && (
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-2.5 py-2 text-xs font-medium text-faint">

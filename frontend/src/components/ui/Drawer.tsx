@@ -10,13 +10,14 @@ interface DrawerProps {
   description?: ReactNode
   children: ReactNode
   footer?: ReactNode
+  idleStatus?: string
   width?: 'md' | 'lg' | 'xl'
   dirty?: boolean
   saving?: boolean
   onBeforeClose?: () => Promise<boolean> | boolean
 }
 
-export function Drawer({ open, onClose, title, description, children, footer, width = 'md', dirty = false, saving = false, onBeforeClose }: DrawerProps) {
+export function Drawer({ open, onClose, title, description, children, footer, idleStatus = '配置以保存结果为准', width = 'xl', dirty = false, saving = false, onBeforeClose }: DrawerProps) {
   const returnFocus = useRef<HTMLElement | null>(null)
   useEffect(() => {
     if (!open || !dirty) return
@@ -73,11 +74,11 @@ export function Drawer({ open, onClose, title, description, children, footer, wi
         <div className="min-h-0 flex-1 overflow-auto px-6 py-5">{children}</div>
 
         {footer && (
-          <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] bg-[var(--panel-muted)] px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-            <div className="text-xs text-soft">
-              {saving ? '保存中…' : dirty ? '有未保存更改' : '配置以保存结果为准'}
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--border)] bg-[var(--panel-muted)] px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+            <div className={cn('text-sm text-soft', !dirty && !saving && 'hidden sm:block')}>
+              {saving ? '保存中…' : dirty ? '有未保存更改' : idleStatus}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">{footer}</div>
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{footer}</div>
           </div>
         )}
       </Dialog.Content>

@@ -1,4 +1,5 @@
-import { type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { Btn } from './Form'
 
 export interface Column<T> {
   key: string
@@ -11,6 +12,7 @@ interface TableProps<T> {
   data: T[]
   loading?: boolean
   keyField?: keyof T
+  labelClassName?: string
 }
 
 export function Table<T extends { id?: unknown }>({
@@ -18,12 +20,13 @@ export function Table<T extends { id?: unknown }>({
   data,
   loading,
   keyField = 'id' as keyof T,
+  labelClassName = 'text-[11px] uppercase tracking-[0.12em] text-faint',
 }: TableProps<T>) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] py-16 shadow-[var(--shadow-card)]">
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent-soft)] border-t-[var(--accent)]" />
-        <span className="text-sm font-medium text-soft">Loading data...</span>
+        <span className="text-sm font-medium text-soft">正在加载…</span>
       </div>
     )
   }
@@ -31,7 +34,7 @@ export function Table<T extends { id?: unknown }>({
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] py-16 shadow-[var(--shadow-card)]">
-        <span className="text-sm font-medium text-soft">No records found.</span>
+        <span className="text-sm font-medium text-soft">暂无记录</span>
       </div>
     )
   }
@@ -44,7 +47,7 @@ export function Table<T extends { id?: unknown }>({
             <div className="flex flex-col gap-3">
               {columns.map((col) => (
                 <div key={col.key} className="flex items-start justify-between gap-4">
-                  <span className="mt-0.5 shrink-0 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">{col.label}</span>
+                  <span className={`mt-0.5 shrink-0 font-medium ${labelClassName}`}>{col.label}</span>
                   <div className="text-right text-sm font-medium text-[var(--text)] text-balance">
                     {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? '')}
                   </div>
@@ -60,7 +63,7 @@ export function Table<T extends { id?: unknown }>({
           <thead>
             <tr className="border-b border-[var(--border)] bg-[var(--panel-muted)]">
               {columns.map((col) => (
-                <th key={col.key} className="whitespace-nowrap px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-faint">
+                <th key={col.key} className={`whitespace-nowrap px-4 py-3 font-medium ${labelClassName}`}>
                   {col.label}
                 </th>
               ))}
@@ -86,40 +89,45 @@ export function Table<T extends { id?: unknown }>({
 interface PaginationProps {
   page: number
   pageSize: number
-  total: number
+  total?: number
   onChange: (page: number) => void
+  onPageSizeChange: (size: number) => void
 }
 
-export function Pagination({ page, pageSize, total, onChange }: PaginationProps) {
-  const totalPages = Math.ceil(total / pageSize)
-  if (totalPages <= 1) return null
+export function Pagination({ page, pageSize, total, onChange, onPageSizeChange }: PaginationProps) {
+  const totalPages = total === undefined ? undefined : Math.max(1, Math.ceil(total / pageSize))
+  useEffect(() => {
+    if (totalPages !== undefined && page > totalPages) onChange(totalPages)
+  }, [page, totalPages, onChange])
 
   return (
-    <div className="mt-3 flex flex-col items-center justify-between gap-4 px-1 py-3 sm:flex-row">
-      <span className="text-[13px] font-medium text-soft">
-        总计 <span className="font-semibold text-[var(--text)]">{total}</span> 条记录
-      </span>
-      <div className="flex items-center gap-2">
-        <button
-          disabled={page <= 1}
-          onClick={() => onChange(page - 1)}
-          className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-[13px] font-medium text-[var(--text)] transition-colors hover:bg-[var(--panel-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+    <nav aria-label="列表分页" className="flex flex-wrap items-center justify-between gap-3 text-sm text-soft">
+      <span>共 {total ?? '…'} 条</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="每页条数"
+          value={pageSize}
+          onChange={(event) => {
+            onPageSizeChange(Number(event.target.value))
+            onChange(1)
+          }}
+          className="h-9 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-2 text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
         >
+          {[10, 20, 50, 100].map(size => <option key={size} value={size}>{size} / 页</option>)}
+        </select>
+        <Btn variant="secondary" className="h-9 px-3" disabled={page <= 1} onClick={() => onChange(page - 1)}>
           上一页
-        </button>
-        <div className="flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] px-3 py-2 text-[13px] font-medium">
-          <span className="text-[var(--text)]">{page}</span>
-          <span className="text-faint">/</span>
-          <span className="text-soft">{totalPages}</span>
-        </div>
-        <button
-          disabled={page >= totalPages}
+        </Btn>
+        <span aria-label={`第 ${page} 页`} className="whitespace-nowrap tabular-nums">{page} / {totalPages ?? '…'}</span>
+        <Btn
+          variant="secondary"
+          className="h-9 px-3"
+          disabled={totalPages === undefined || page >= totalPages}
           onClick={() => onChange(page + 1)}
-          className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-[13px] font-medium text-[var(--text)] transition-colors hover:bg-[var(--panel-muted)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           下一页
-        </button>
+        </Btn>
       </div>
-    </div>
+    </nav>
   )
 }

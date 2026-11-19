@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/pkg/crypto"
@@ -27,14 +28,22 @@ func (r *InboundProfileRepository) FindByID(id uint) (*entity.InboundProfile, er
 	return &p, err
 }
 
-func (r *InboundProfileRepository) List(page, pageSize int) ([]entity.InboundProfile, int64, error) {
+func (r *InboundProfileRepository) List(page, pageSize int, keyword, protocol string, keywordProtocols []string) ([]entity.InboundProfile, int64, error) {
+	query := DB.Model(&entity.InboundProfile{})
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + escapeLike(strings.ToLower(keyword)) + "%"
+		query = query.Where("LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(protocol) LIKE ? ESCAPE '\\' OR protocol IN ?", like, like, keywordProtocols)
+	}
+	if protocol != "" {
+		query = query.Where("protocol = ?", protocol)
+	}
 	var total int64
-	if err := DB.Model(&entity.InboundProfile{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var profiles []entity.InboundProfile
 	offset := (page - 1) * pageSize
-	err := DB.Order("id asc").Offset(offset).Limit(pageSize).Find(&profiles).Error
+	err := query.Order("id asc").Offset(offset).Limit(pageSize).Find(&profiles).Error
 	return profiles, total, err
 }
 

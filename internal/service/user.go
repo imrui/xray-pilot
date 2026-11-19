@@ -362,8 +362,8 @@ func (s *UserService) SweepExpired(now time.Time) (*SweepResult, error) {
 	return result, nil
 }
 
-func (s *UserService) List(page, pageSize int, baseURL string) ([]dto.UserResponse, int64, error) {
-	users, total, err := s.userRepo.List(page, pageSize)
+func (s *UserService) List(page, pageSize int, baseURL string, filter repository.UserListFilter) ([]dto.UserResponse, int64, error) {
+	users, total, err := s.userRepo.List(page, pageSize, filter)
 	if err != nil {
 		return nil, 0, err
 	}

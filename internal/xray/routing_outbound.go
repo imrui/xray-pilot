@@ -130,12 +130,13 @@ var routingRuleKnownKeys = map[string]string{
 }
 
 func (r *RoutingRule) UnmarshalJSON(data []byte) error {
-	var rawMap map[string]json.RawMessage
-	if err := json.Unmarshal(data, &rawMap); err != nil {
+	return r.decode(data, false)
+}
+
+func (r *RoutingRule) decode(data []byte, legacyFieldNames bool) error {
+	rawMap, err := readRoutingObject(data, "路由规则")
+	if err != nil {
 		return err
-	}
-	if rawMap == nil {
-		return fmt.Errorf("路由规则必须是 JSON 对象")
 	}
 	var alias routingRuleAlias
 	if err := json.Unmarshal(data, &alias); err != nil {
@@ -143,9 +144,10 @@ func (r *RoutingRule) UnmarshalJSON(data []byte) error {
 	}
 	var extra map[string]json.RawMessage
 	for k, v := range rawMap {
-		lower := strings.ToLower(k)
+		lower := routingFieldKey(k)
 		if canonical, ok := routingRuleKnownKeys[lower]; ok {
-			if k != canonical {
+			// v0.7.2 直接用 encoding/json 读取旧规则。仅恢复当时已有字段的别名。
+			if k != canonical && !(legacyFieldNames && isLegacyRuleField(canonical)) {
 				return fmt.Errorf("路由规则字段 %q 请使用标准命名 %q", k, canonical)
 			}
 			continue
@@ -164,6 +166,33 @@ func (r *RoutingRule) UnmarshalJSON(data []byte) error {
 	*r = RoutingRule(alias)
 	r.Extra = extra
 	return nil
+}
+
+func isLegacyRuleField(key string) bool {
+	switch key {
+	case "domain", "port", "network", "protocol", "type", "ip", "source", "inboundTag", "outboundTag":
+		return true
+	}
+	return false
+}
+
+func decodePolicyRules(raw json.RawMessage, legacyFieldNames bool) ([]RoutingRule, error) {
+	var entries []json.RawMessage
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, err
+		}
+	}
+	if len(entries) > 200 {
+		return nil, fmt.Errorf("自定义规则最多 200 条")
+	}
+	rules := make([]RoutingRule, len(entries))
+	for i, data := range entries {
+		if err := rules[i].decode(data, legacyFieldNames); err != nil {
+			return nil, fmt.Errorf("custom_rules[%d]: %w", i, err)
+		}
+	}
+	return rules, nil
 }
 
 func (r RoutingRule) MarshalJSON() ([]byte, error) {
@@ -1162,24 +1191,22 @@ func validateSingleOutboundOverrideShape(tag string, ov OutboundOverride) error 
 	return nil
 }
 
+// DecodeRoutingOverrideFields 在合并或恢复脱敏值前检查大小及重复字段。
+func DecodeRoutingOverrideFields(overrides string) (map[string]json.RawMessage, error) {
+	if len(overrides) > 256*1024 {
+		return nil, fmt.Errorf("覆盖超过 256 KiB")
+	}
+	return readRoutingObject([]byte(overrides), "覆盖")
+}
+
 // ValidateRoutingOverrides 独立校验节点 Overrides JSON 的语法结构与安全边界。
 func ValidateRoutingOverrides(overrides string) error {
 	if overrides == "" || overrides == "{}" {
 		return nil
 	}
-	if len(overrides) > 256*1024 {
-		return fmt.Errorf("覆盖超过 256 KiB")
-	}
-	var o map[string]json.RawMessage
-	dec := json.NewDecoder(strings.NewReader(overrides))
-	if err := dec.Decode(&o); err != nil {
+	o, err := DecodeRoutingOverrideFields(overrides)
+	if err != nil {
 		return err
-	}
-	if dec.Decode(new(any)) != io.EOF {
-		return fmt.Errorf("只允许一个 JSON 对象")
-	}
-	if o == nil {
-		return fmt.Errorf("覆盖必须是 JSON 对象")
 	}
 	for k, v := range o {
 		trimmed := bytes.TrimSpace(v)
@@ -1219,12 +1246,10 @@ func ValidateRoutingOverrides(overrides string) error {
 			}
 		case "custom_rules":
 			if !bytes.Equal(trimmed, []byte("null")) {
-				var rules []RoutingRule
-				if err := json.Unmarshal(trimmed, &rules); err != nil {
+				// 此处尚未解析绑定模板。最终合并时按实际 schema 再核对字段名。
+				rules, err := decodePolicyRules(trimmed, true)
+				if err != nil {
 					return err
-				}
-				if len(rules) > 200 {
-					return fmt.Errorf("自定义规则最多 200 条")
 				}
 				for i, r := range rules {
 					if err := validateRoutingRuleFields(r, nil, nil, true); err != nil {

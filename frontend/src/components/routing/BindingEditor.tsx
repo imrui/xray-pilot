@@ -294,7 +294,6 @@ export function RoutingBindingDrawer({
       open
       onClose={onClose}
       title={scope === 'global' ? '全局默认路由' : `节点路由配置 · ${name}`}
-      width="lg"
       dirty={dirty}
       saving={busy}
       onBeforeClose={close}

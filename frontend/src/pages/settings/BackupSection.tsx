@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, HardDriveDownload, Trash2 } from 'lucide-react'
+import { Download, Trash2 } from 'lucide-react'
 import { backupApi } from '@/lib/api'
 import type { BackupFile } from '@/lib/api'
 import { Btn, Field } from '@/components/ui/Form'
@@ -15,7 +15,7 @@ export default function BackupSection() {
   const qc = useQueryClient()
   const confirm = useConfirm()
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['system-backups'],
     queryFn: () => backupApi.list().then((r) => r.data.data ?? []),
   })
@@ -44,36 +44,28 @@ export default function BackupSection() {
 
   return (
     <>
-      <Section title="备份策略" description="SQLite VACUUM INTO 生成完整快照，对运行中的服务安全。备份文件需自行拷贝到异地以应对主机损毁。">
+      <Section title="备份策略" description="SQLite 快照请另存到异地。恢复时须使用原 MasterKey，才能解密私钥和证书。">
         <div className="grid gap-4 md:grid-cols-3">
           <Field label="自动备份间隔（小时，0 禁用）" type="number" value={form['backup.interval_hours'] ?? '24'} onChange={f('backup.interval_hours')} />
           <Field label="备份目录（相对工作目录或绝对路径）" value={form['backup.dir'] ?? 'data/backup'} onChange={f('backup.dir')} placeholder="data/backup" />
-          <Field label="保留天数（超过则自动清理）" type="number" value={form['backup.retention_days'] ?? '30'} onChange={f('backup.retention_days')} />
+          <Field label="快照保留天数（0 关闭自动清理）" type="number" value={form['backup.retention_days'] ?? '30'} onChange={f('backup.retention_days')} />
         </div>
-        <p className="text-xs text-soft">恢复到新机器时必须同时带上 MasterKey，否则加密存储的 Reality 私钥与证书无法解密。</p>
       </Section>
 
       <Section
-        title="备份文件"
-        description="按需手动生成快照，或下载、删除已有文件。下载经 JWT 鉴权，大文件可能需要等待数十秒。"
+        title={backups.length ? `备份文件（${backups.length}）` : '备份文件'}
         actions={
           <>
-            <Btn variant="ghost" onClick={() => void refetch()}>刷新</Btn>
+            <Btn variant="ghost" loading={isFetching} onClick={() => void refetch()}>刷新</Btn>
             <Btn variant="secondary" loading={run.isPending} onClick={() => run.mutate()}>立即备份</Btn>
           </>
         }
       >
         <div className="border-t border-[var(--border)]">
-          <div className="flex items-center gap-2 border-b border-[var(--border)] py-3 text-sm font-semibold">
-            <HardDriveDownload className="h-4 w-4 text-[var(--accent)]" />
-            快照
-            <span className="text-faint">（{backups.length} 个）</span>
-          </div>
+          {isError && <p role="alert" className="py-3 text-sm text-[var(--danger)]">读取备份列表失败，请刷新重试。</p>}
           {isLoading ? (
             <div className="py-6 text-sm text-soft">加载中…</div>
-          ) : backups.length === 0 ? (
-            <div className="py-6 text-sm text-soft">暂无备份。点击「立即备份」生成首个快照。</div>
-          ) : (
+          ) : backups.length > 0 ? (
             <ul className="divide-y divide-[var(--border)]">
               {backups.map((b: BackupFile) => (
                 <li key={b.name} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
@@ -115,7 +107,7 @@ export default function BackupSection() {
                 </li>
               ))}
             </ul>
-          )}
+          ) : !isError && <div className="py-6 text-sm text-soft">暂无备份文件</div>}
         </div>
       </Section>
     </>

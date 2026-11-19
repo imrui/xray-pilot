@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 )
 
 type balancerStrategyAlias BalancerStrategy
@@ -73,14 +74,31 @@ func validateRoutingExtensions(extra map[string]json.RawMessage, kind string) er
 	return nil
 }
 
-func decodeRoutingExtensions(data []byte, target any, known map[string]string, kind string) (map[string]json.RawMessage, error) {
+// 与 encoding/json 的字段名匹配使用相同的 Unicode 简单折叠等价类。
+func routingFieldKey(key string) string {
+	return strings.Map(func(r rune) rune {
+		for {
+			next := unicode.SimpleFold(r)
+			if next <= r {
+				if next >= 'A' && next <= 'Z' {
+					return next + ('a' - 'A')
+				}
+				return next
+			}
+			r = next
+		}
+	}, key)
+}
+
+// 在解入 map 前拒绝重复键，否则后面的同名字段会静默覆盖前面的值。
+func readRoutingObject(data []byte, kind string) (map[string]json.RawMessage, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	tok, err := dec.Token()
 	if err != nil || tok != json.Delim('{') {
 		return nil, fmt.Errorf("%s 必须是 JSON 对象", kind)
 	}
 	seen := make(map[string]bool)
-	var extra map[string]json.RawMessage
+	fields := make(map[string]json.RawMessage)
 	for dec.More() {
 		tok, err = dec.Token()
 		if err != nil {
@@ -90,7 +108,7 @@ func decodeRoutingExtensions(data []byte, target any, known map[string]string, k
 		if !ok {
 			return nil, fmt.Errorf("%s 字段名称无效", kind)
 		}
-		lower := strings.ToLower(key)
+		lower := routingFieldKey(key)
 		if seen[lower] {
 			return nil, fmt.Errorf("%s 存在重复字段 %q", kind, key)
 		}
@@ -99,7 +117,25 @@ func decodeRoutingExtensions(data []byte, target any, known map[string]string, k
 		if err := dec.Decode(&value); err != nil {
 			return nil, err
 		}
-		if canonical, ok := known[lower]; ok {
+		fields[key] = value
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	if dec.Decode(new(any)) != io.EOF {
+		return nil, fmt.Errorf("%s 只允许一个 JSON 对象", kind)
+	}
+	return fields, nil
+}
+
+func decodeRoutingExtensions(data []byte, target any, known map[string]string, kind string) (map[string]json.RawMessage, error) {
+	fields, err := readRoutingObject(data, kind)
+	if err != nil {
+		return nil, err
+	}
+	var extra map[string]json.RawMessage
+	for key, value := range fields {
+		if canonical, ok := known[routingFieldKey(key)]; ok {
 			if key != canonical {
 				return nil, fmt.Errorf("%s 字段 %q 请使用标准命名 %q", kind, key, canonical)
 			}
@@ -109,12 +145,6 @@ func decodeRoutingExtensions(data []byte, target any, known map[string]string, k
 			extra = make(map[string]json.RawMessage)
 		}
 		extra[key] = value
-	}
-	if _, err := dec.Token(); err != nil {
-		return nil, err
-	}
-	if dec.Decode(new(any)) != io.EOF {
-		return nil, fmt.Errorf("%s 只允许一个 JSON 对象", kind)
 	}
 	if err := validateRoutingExtensions(extra, kind); err != nil {
 		return nil, err

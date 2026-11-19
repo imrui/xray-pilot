@@ -55,7 +55,7 @@ func AcquireConfigLease(id uint) (*entity.NodeConfigState, func(), error) {
 	owner := uuid.NewString()
 	now := time.Now()
 	r := DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND (lease_owner = '' OR lease_until < ? OR lease_until IS NULL)", id, now).
-		Updates(map[string]any{"lease_owner": owner, "lease_until": now.Add(5 * time.Minute)})
+		UpdateColumns(map[string]any{"lease_owner": owner, "lease_until": now.Add(5 * time.Minute)})
 	if r.Error != nil {
 		return nil, nil, r.Error
 	}
@@ -63,7 +63,7 @@ func AcquireConfigLease(id uint) (*entity.NodeConfigState, func(), error) {
 		return nil, nil, ErrConfigLeased
 	}
 	release := func() {
-		DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", id, owner).Updates(map[string]any{"lease_owner": "", "lease_until": nil})
+		DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", id, owner).UpdateColumns(map[string]any{"lease_owner": "", "lease_until": nil})
 	}
 	var state entity.NodeConfigState
 	if err := DB.First(&state, "node_id = ?", id).Error; err != nil {

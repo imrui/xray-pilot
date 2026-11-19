@@ -42,19 +42,22 @@ func EnqueueDeployments(ids []uint, key, actor string, expected ...map[uint]stri
 	err := repository.DB.Transaction(func(tx *gorm.DB) error {
 		for i := range jobs {
 			if jobs[i].ID == 0 {
-				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&jobs[i]).Error; err != nil {
+				if err := enqueueDeployment(tx, &jobs[i]); err != nil {
 					return err
-				}
-				if jobs[i].ID == 0 {
-					if err := tx.Where("request_key = ?", jobs[i].RequestKey).First(&jobs[i]).Error; err != nil {
-						return err
-					}
 				}
 			}
 		}
 		return nil
 	})
 	return jobs, err
+}
+
+func enqueueDeployment(tx *gorm.DB, job *entity.ConfigDeployment) error {
+	r := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(job)
+	if r.Error == nil && r.RowsAffected == 0 {
+		return tx.Where("request_key = ?", job.RequestKey).First(job).Error
+	}
+	return r.Error
 }
 
 // Durable queue survives page closure. Interrupted jobs are unknown, never assumed successful.
