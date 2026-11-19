@@ -61,7 +61,15 @@ func (s *NodeService) Create(req *dto.CreateNodeRequest) (*dto.NodeResponse, err
 	return s.toNodeResponse(node), nil
 }
 
-func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResponse, error) {
+func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest, actor string) (*dto.NodeResponse, error) {
+	wakeAfterSave := false
+	unlock := lockNode(id)
+	defer func() {
+		unlock()
+		if wakeAfterSave {
+			wakeDNS()
+		}
+	}()
 	node, err := s.nodeRepo.FindByID(id)
 	if err != nil {
 		return nil, errors.New("节点不存在")
@@ -120,13 +128,17 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest) (*dto.NodeResp
 		}
 	}
 
-	if err := s.nodeRepo.Update(node); err != nil {
+	if err := s.nodeRepo.Update(node, actor); err != nil {
 		return nil, err
 	}
-	return s.toNodeResponse(node), nil
+	wakeAfterSave = ipChanged || domainChanged
+	return s.nodeWithDNS(node)
 }
 
 func (s *NodeService) Delete(id uint) error {
+	dnsControls.Lock()
+	defer dnsControls.Unlock()
+	defer lockNode(id)()
 	return s.nodeRepo.Delete(id)
 }
 
@@ -143,7 +155,17 @@ func (s *NodeService) GetByID(id uint) (*dto.NodeResponse, error) {
 	if err != nil {
 		return nil, errors.New("节点不存在")
 	}
-	return s.toNodeResponse(node), nil
+	return s.nodeWithDNS(node)
+}
+
+func (s *NodeService) nodeWithDNS(n *entity.Node) (*dto.NodeResponse, error) {
+	resp := s.toNodeResponse(n)
+	binding, err := NewDNSService().Binding(n.ID)
+	if err != nil {
+		return nil, err
+	}
+	resp.DNSBinding = binding
+	return resp, nil
 }
 
 func (s *NodeService) List(page, pageSize int, filter repository.NodeListFilter) ([]dto.NodeResponse, int64, error) {
@@ -152,8 +174,24 @@ func (s *NodeService) List(page, pageSize int, filter repository.NodeListFilter)
 		return nil, 0, err
 	}
 	result := make([]dto.NodeResponse, 0, len(nodes))
+	ids := make([]uint, 0, len(nodes))
 	for i := range nodes {
-		result = append(result, *s.toNodeResponse(&nodes[i]))
+		ids = append(ids, nodes[i].ID)
+	}
+	var bindings []entity.DNSBinding
+	if len(ids) > 0 {
+		if err := repository.DB.Where("node_id IN ?", ids).Find(&bindings).Error; err != nil {
+			return nil, 0, err
+		}
+	}
+	byNode := make(map[uint]*entity.DNSBinding, len(bindings))
+	for i := range bindings {
+		byNode[bindings[i].NodeID] = &bindings[i]
+	}
+	for i := range nodes {
+		resp := s.toNodeResponse(&nodes[i])
+		resp.DNSBinding = byNode[nodes[i].ID]
+		result = append(result, *resp)
 	}
 	return result, total, nil
 }

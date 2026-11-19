@@ -8,6 +8,8 @@ export interface User {
   active: boolean
   expires_at?: string  // ISO 8601，空表示永久有效
   remark: string
+  relay_subscription_id?: string
+  relay_subscription_url?: string
   subscribe_url: string
   feishu_enabled?: boolean
   feishu_email?: string
@@ -45,6 +47,7 @@ export interface Group {
 export type SyncStatus = 'synced' | 'drifted' | 'failed' | 'pending'
 
 export interface Node {
+  dns_binding?: import('@/lib/dns').DNSBinding
   id: number
   name: string
   region: string

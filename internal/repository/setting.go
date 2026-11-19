@@ -1,6 +1,9 @@
 package repository
 
-import "github.com/imrui/xray-pilot/internal/entity"
+import (
+	"github.com/imrui/xray-pilot/internal/entity"
+	"gorm.io/gorm"
+)
 
 type SettingRepository struct{}
 
@@ -43,10 +46,10 @@ func (r *SettingRepository) GetAll() (map[string]string, error) {
 	return result, nil
 }
 
-// BatchSet 批量写入
-func (r *SettingRepository) BatchSet(kv map[string]string) error {
+// BatchSetTx 与跨字段校验共用调用方事务。
+func (r *SettingRepository) BatchSetTx(tx *gorm.DB, kv map[string]string) error {
 	for k, v := range kv {
-		if err := r.Set(k, v); err != nil {
+		if err := tx.Save(&entity.SystemSetting{Key: k, Value: v}).Error; err != nil {
 			return err
 		}
 	}

@@ -26,6 +26,7 @@ func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
 
 	// 订阅（无需鉴权）
 	r.GET("/sub/:token", subH.Subscribe)
+	r.GET("/subscription-assets/qrcode.js", func(c *gin.Context) { c.Data(200, "application/javascript; charset=utf-8", subscribeQRCode) })
 	r.POST("/api/feishu/events", feishuH.Events)
 
 	// 登录（无需鉴权）
@@ -41,6 +42,7 @@ func RegisterRoutes(r *gin.Engine, releaseNotesFS fs.FS) {
 	// 需要 JWT 鉴权的路由
 	api := r.Group("/api", JWTMiddleware())
 	registerRoutingRoutes(api)
+	registerDNSRoutes(api)
 	{
 		// 用户管理
 		api.GET("/users", userH.List)

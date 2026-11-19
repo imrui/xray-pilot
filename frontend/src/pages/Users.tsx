@@ -30,6 +30,7 @@ interface FormState {
   group_ids: string[]
   expires_at: string
   remark: string
+  relay_subscription_id: string
   feishu_enabled: string
   feishu_email: string
   feishu_open_id: string
@@ -43,6 +44,7 @@ const emptyForm = (): FormState => ({
   group_ids: [],
   expires_at: '',
   remark: '',
+  relay_subscription_id: '',
   feishu_enabled: 'false',
   feishu_email: '',
   feishu_open_id: '',
@@ -480,12 +482,12 @@ export default function Users() {
   const [form, setForm] = useState<FormState>(emptyForm())
   const [initialForm, setInitialForm] = useState<FormState>(emptyForm())
   const [err, setErr] = useState('')
-  const [qrUser, setQrUser] = useState<User | null>(null)
+  const [qrLink, setQrLink] = useState<{ url: string; username: string; relay: boolean } | null>(null)
   const { search, setSearch, keyword } = useListSearch()
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'expired'>('all')
   const [groupFilter, setGroupFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
-  const [copiedUserId, setCopiedUserId] = useState<number | null>(null)
+  const [copiedURL, setCopiedURL] = useState<string | null>(null)
   const [showFeishuDetails, setShowFeishuDetails] = useState(false)
 
   const filterKey = JSON.stringify([keyword, statusFilter, groupFilter])
@@ -506,6 +508,11 @@ export default function Users() {
     }).then((r) => r.data.data!),
   })
 
+  const showRelay = Boolean(data?.relay_enabled)
+  const relayId = form.relay_subscription_id.trim()
+  const relayPreviewUrl = showRelay && data?.relay_prefix && /^[A-Za-z0-9_.-]+$/.test(relayId) && relayId !== '.' && relayId !== '..'
+    ? data.relay_prefix + relayId
+    : undefined
   const { data: groups } = useQuery({
     queryKey: ['groups-all'],
     queryFn: () => fetchAllPages((page, pageSize) =>
@@ -520,10 +527,10 @@ export default function Users() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] })
 
   useEffect(() => {
-    if (copiedUserId == null) return
-    const timer = setTimeout(() => setCopiedUserId(null), 1800)
+    if (copiedURL == null) return
+    const timer = setTimeout(() => setCopiedURL(null), 1800)
     return () => clearTimeout(timer)
-  }, [copiedUserId])
+  }, [copiedURL])
 
   const save = useMutation({
     mutationFn: () => {
@@ -534,7 +541,8 @@ export default function Users() {
           username: form.username,
           real_name: form.real_name,
           group_ids: groupIds,
-          expires_at: expiresAt,
+          expires_at: form.expires_at === toDateTimeLocalValue(drawer.user.expires_at) ? undefined : expiresAt,
+          relay_subscription_id: form.relay_subscription_id,
           remark: form.remark,
           feishu_enabled: form.feishu_enabled === 'true',
           feishu_email: form.feishu_email,
@@ -548,6 +556,7 @@ export default function Users() {
         real_name: form.real_name,
         group_ids: groupIds,
         expires_at: expiresAt,
+        relay_subscription_id: form.relay_subscription_id,
         remark: form.remark,
         feishu_enabled: form.feishu_enabled === 'true',
         feishu_email: form.feishu_email,
@@ -618,6 +627,7 @@ export default function Users() {
       real_name: u.real_name,
       group_ids: (u.group_ids ?? []).map(String),
       expires_at: toDateTimeLocalValue(u.expires_at),
+      relay_subscription_id: u.relay_subscription_id ?? '',
       remark: u.remark,
       feishu_enabled: u.feishu_enabled ? 'true' : 'false',
       feishu_email: u.feishu_email ?? '',
@@ -685,22 +695,48 @@ export default function Users() {
     await runBulk((u) => userApi.toggle(u.id))
   }
 
-  const copySubscribeUrl = async (user: User) => {
-    const ok = await copyText(user.subscribe_url)
+  const copySubscribeUrl = async (url: string, username: string, label: string) => {
+    const ok = await copyText(url)
     if (!ok) {
       pushToast({
         title: '复制失败',
-        description: '请手动选中订阅地址并按 Ctrl+C 复制',
+        description: '可在二维码弹窗中选中地址手动复制。',
         variant: 'warning',
       })
       return
     }
-    setCopiedUserId(user.id)
+    setCopiedURL(url)
     pushToast({
-      title: '订阅链接已复制',
-      description: `${user.username} 的订阅地址已复制到剪贴板。`,
+      title: `${label}链接已复制`,
+      description: `${username} 的${label}地址已复制到剪贴板。`,
       variant: 'success',
     })
+  }
+
+  const subscriptionActions = (user: User, relay = false) => {
+    const label = relay ? '内网中转订阅' : '订阅'
+    const url = relay ? user.relay_subscription_url : user.subscribe_url
+    if (!url) return <span className="text-sm text-faint">未配置</span>
+    const copied = copiedURL === url
+    return (
+      <div role="group" aria-label={`${user.username} 的${label}链接`} className="inline-flex items-center whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--panel-strong)]">
+        <button type="button" title={`复制${label}链接`} aria-label={`复制 ${user.username} 的${label}链接`}
+          onClick={() => void copySubscribeUrl(url, user.username, label)}
+          className="inline-flex h-9 items-center gap-1.5 rounded-l-md px-2.5 text-sm font-medium text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]">
+          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          {copied ? '已复制' : '复制'}
+        </button>
+        <button type="button" title={`查看${label}二维码`} aria-label={`查看 ${user.username} 的${label}二维码`}
+          onClick={() => setQrLink({ url, username: user.username, relay })}
+          className="inline-flex size-9 items-center justify-center text-soft last:rounded-r-md hover:bg-[var(--panel-muted)] hover:text-[var(--accent)]">
+          <QrCode className="h-4 w-4" />
+        </button>
+        {!relay && <a aria-label={`打开 ${user.username} 的订阅页`} title="打开订阅页" href={url} target="_blank" rel="noopener noreferrer"
+          className="inline-flex size-9 items-center justify-center rounded-r-md text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--accent)]">
+          <ExternalLink className="h-4 w-4" />
+        </a>}
+      </div>
+    )
   }
 
   const toggleUserActive = async (user: User) => {
@@ -839,6 +875,8 @@ export default function Users() {
                 <th>到期时间</th>
                 <th>启用状态</th>
                 <th>累计流量</th>
+                <th>订阅</th>
+                {showRelay && <th>内网中转订阅</th>}
                 <th>飞书消息</th>
                 <th className="text-right">操作</th>
               </tr>
@@ -846,11 +884,11 @@ export default function Users() {
             <tbody className="divide-y divide-[var(--border)]">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-soft">加载中…</td>
+                  <td colSpan={showRelay ? 10 : 9} className="px-4 py-10 text-center text-soft">加载中…</td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-soft">暂无用户数据</td>
+                  <td colSpan={showRelay ? 10 : 9} className="px-4 py-10 text-center text-soft">暂无用户数据</td>
                 </tr>
               ) : (
                 filteredUsers.map((u) => (
@@ -896,6 +934,8 @@ export default function Users() {
                         <div className="text-soft" title="累计下行字节">↓ {formatBytes(u.traffic_down_bytes)}</div>
                       </div>
                     </td>
+                    <td className="px-4 py-3.5">{subscriptionActions(u)}</td>
+                    {showRelay && <td className="px-4 py-3.5">{subscriptionActions(u, true)}</td>}
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2.5">
                         <label className="inline-flex shrink-0">
@@ -910,36 +950,6 @@ export default function Users() {
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-                        <div role="group" aria-label={`${u.username} 的订阅链接`} className="inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--panel-strong)]">
-                          <button
-                            type="button"
-                            title="复制订阅链接"
-                            onClick={() => void copySubscribeUrl(u)}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-l-md px-2.5 text-sm font-medium text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
-                          >
-                            {copiedUserId === u.id ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                            {copiedUserId === u.id ? '已复制' : '复制链接'}
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`查看 ${u.username} 的订阅二维码`}
-                            title="查看订阅二维码"
-                            onClick={() => setQrUser(u)}
-                            className="inline-flex size-9 items-center justify-center text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--accent)]"
-                          >
-                            <QrCode className="h-4 w-4" />
-                          </button>
-                          <a
-                            aria-label={`打开 ${u.username} 的订阅页`}
-                            title="打开订阅页"
-                            href={u.subscribe_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex size-9 items-center justify-center rounded-r-md text-soft hover:bg-[var(--panel-muted)] hover:text-[var(--accent)]"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
-                        </div>
                         <button
                           onClick={() => openEdit(u)}
                           className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm font-medium text-soft transition hover:bg-[var(--panel-muted)] hover:text-[var(--text)]"
@@ -1026,6 +1036,17 @@ export default function Users() {
               <Field label="用户名（客户端显示） *" value={form.username} onChange={f('username')} placeholder="如 alice01" />
               <Field label="真实姓名（仅后台可见）" value={form.real_name} onChange={f('real_name')} />
             </div>
+            <Field
+              label="内网中转订阅 ID"
+              labelHint={relayPreviewUrl && (
+                <span className="select-all break-all font-mono text-[var(--success)]">
+                  {relayPreviewUrl}
+                </span>
+              )}
+              value={form.relay_subscription_id}
+              onChange={f('relay_subscription_id')}
+              placeholder="u002abc"
+            />
             <Field label="备注" value={form.remark} onChange={f('remark')} />
           </FieldGroup>
 
@@ -1154,11 +1175,11 @@ export default function Users() {
             <FieldGroup title="订阅链接">
               <p className="text-sm text-soft">持有链接或二维码即可获取该用户的订阅。</p>
               <div className="flex flex-wrap gap-2">
-                <Btn variant="secondary" onClick={() => void copySubscribeUrl(drawer.user!)}>
+                <Btn variant="secondary" onClick={() => void copySubscribeUrl(drawer.user!.subscribe_url, drawer.user!.username, '订阅')}>
                   <Copy className="h-4 w-4" />
-                  {copiedUserId === drawer.user!.id ? '已复制' : '复制订阅链接'}
+                  {copiedURL === drawer.user!.subscribe_url ? '已复制' : '复制订阅链接'}
                 </Btn>
-                <Btn variant="secondary" onClick={() => setQrUser(drawer.user!)}>
+                <Btn variant="secondary" onClick={() => setQrLink({ url: drawer.user!.subscribe_url, username: drawer.user!.username, relay: false })}>
                   <QrCode className="h-4 w-4" />
                   查看订阅二维码
                 </Btn>
@@ -1204,7 +1225,7 @@ export default function Users() {
         </div>
       </Drawer>
 
-      {qrUser && <QRModal open={!!qrUser} onClose={() => setQrUser(null)} url={qrUser.subscribe_url} title={`${qrUser.username} 的订阅二维码`} />}
+      {qrLink && (!qrLink.relay || showRelay) && <QRModal {...qrLink} onClose={() => setQrLink(null)} />}
     </PageShell>
   )
 }

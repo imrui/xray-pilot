@@ -106,8 +106,12 @@ npm run build
 - **字体与离线可用**：仅使用已通过 `@fontsource/*` 内嵌的 `Inter` 与 `IBM Plex Mono`，严禁引入 Google Fonts 或外部 CDN 资源。
 - **布局约定**：`Table` 自带外框，禁止外层再套卡片形成双边框；页面首行直接放 `ListToolbar`；抽屉宽度按 `md(560)` / `lg(720)` / `xl(960)` 规范选用；`Switch` 统一从 `components/ui/Form.tsx` 导入。
 
-### 5.3 决策与 Git 提交流程
-- **先对齐后编码**：涉及跨模块或架构边界的改动，先与用户对齐关键决策，并将定稿方案沉淀至 `docs/design/YYYY-MM-DD-<topic>.md`。
+### 5.3 决策、文档目录与 Git 提交流程
+- **先对齐后编码**：涉及跨模块或架构边界的改动，先与用户对齐关键决策，并将定稿方案沉淀至 `docs/design/`。
+- **文档目录与临时文件约定**：
+  - `docs/design/` 仅存放跨模块或里程碑级系统设计文档；命名遵循 [docs/design/README.md](./docs/design/README.md)（未定版用 `YYYY-MM-DD-<topic>.md`，定版/发版用 `YYYY-MM-DD-vX.Y-<topic>.md`），新增、重命名或移除文档时必须同步更新 `docs/design/README.md` 且索引列统一使用文件名链接。
+  - 同一版本或主题的补充细节直接修订对应主设计文档，禁止另起零碎短文档。
+  - 临时草稿、小型补丁说明、一次性排查/分析笔记统一写入 `tmp/`（已在 `.gitignore` 忽略），严禁写入 `docs/design/`。
 - **诚实交付**：遇到底层内核或环境限制不支持的能力（如 Hysteria2 进 Xray、无 IPv6 路由强开 IPv6），主动明确边界并拦截，不伪造表面兼容。
 - **不主动执行 Git 写操作**：除非用户明确发出“提交”或“发布”指令，否则不要主动执行 `git commit`、`git push`、`git tag` 或合并 PR。
 - **分支与发版约束**：分支统一用 `feature/<短描述>`；提交遵循 `<type>(<scope>): <english subject>`；打 tag 发版前必须先编写面向用户的 `release-notes/vX.Y.Z.md`（CI 强校验）。

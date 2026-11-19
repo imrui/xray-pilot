@@ -12,7 +12,7 @@ interface PageParams {
 // ---- 用户 API ----
 export const userApi = {
   list: (params?: PageParams & { keyword?: string; status?: 'active' | 'inactive' | 'expired'; group_id?: number }) =>
-    request.get<ApiResponse<PageResult<User>>>('/users', { params }),
+    request.get<ApiResponse<PageResult<User> & { relay_enabled: boolean; relay_prefix?: string }>>('/users', { params }),
 
   create: (data: {
     username: string
@@ -20,6 +20,7 @@ export const userApi = {
     group_ids?: number[]
     expires_at?: string | null
     remark?: string
+    relay_subscription_id?: string
     feishu_enabled?: boolean
     feishu_email?: string
     feishu_open_id?: string
@@ -34,6 +35,7 @@ export const userApi = {
     active?: boolean
     expires_at?: string | null
     remark?: string
+    relay_subscription_id?: string
     feishu_enabled?: boolean
     feishu_email?: string
     feishu_open_id?: string

@@ -11,8 +11,9 @@ type TrafficRange struct {
 }
 
 type TrafficOption struct {
-	ID   uint   `json:"id"`
-	Name string `json:"name"`
+	Deleted bool   `json:"deleted"`
+	ID      uint   `json:"id"`
+	Name    string `json:"name"`
 }
 
 type TrafficAmount struct {
@@ -33,9 +34,10 @@ type TrafficPoint struct {
 }
 
 type TrafficSeries struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name"`
-	Points []TrafficPoint `json:"points"`
+	Deleted bool           `json:"deleted"`
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	Points  []TrafficPoint `json:"points"`
 }
 
 type TrafficAnalytics struct {

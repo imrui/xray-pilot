@@ -308,6 +308,9 @@ func (s *InstallService) RegisterNode(t *entity.NodeInstallToken, sourceIP strin
 		0,
 	)
 
+	if t.ReplaceNodeID != nil {
+		wakeDNS()
+	}
 	// 注册成功后立刻 SSH 端口连通性自检；用于一键接入对话框 success 态
 	// 提示"panel 是否能 SSH 到节点"——若不通用户可立刻去放行防火墙。
 	reach, latencyMs := TCPProbe(node.IP, node.SSHPort)
@@ -429,7 +432,7 @@ func (s *InstallService) registerReplace(t *entity.NodeInstallToken, ip string, 
 	node.ConfigHash = ""
 	node.RegisteredAt = &now
 
-	if err := s.nodeRepo.ReplaceHost(node, req.BootstrapConfigSHA256); err != nil {
+	if err := s.nodeRepo.ReplaceHost(node, req.BootstrapConfigSHA256, "system:install-token:"+tokenShortID(t.Token)); err != nil {
 		return nil, fmt.Errorf("更新节点失败: %w", err)
 	}
 	return node, nil

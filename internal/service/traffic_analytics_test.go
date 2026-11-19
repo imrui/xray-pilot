@@ -208,3 +208,34 @@ func TestAnalyticsZeroUsesEnabledCollectors(t *testing.T) {
 		t.Fatalf("health list: %+v %d %v", nodes, total, err)
 	}
 }
+
+func TestDeletedNodeTrafficIdentity(t *testing.T) {
+	start, svc := analyticsFixture(t)
+	n := repository.NewNodeRepository()
+	if err := n.Delete(2); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.NewTrafficRepository().WriteCycle([]entity.TrafficSample{{NodeID: 2, UserID: 1, PeriodEnd: start.Add(time.Minute), UpBytes: 100}, {NodeID: 24, UserID: 1, PeriodEnd: start.Add(time.Hour), UpBytes: 17}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	r := dto.TrafficRange{Start: start, End: start.Add(time.Hour * 2), Dimension: "node"}
+	result, err := svc.Analytics(t.Context(), r, r.End)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalNodes != 6 || result.UpBytes != 117 || !result.Ranking[0].Deleted || result.Ranking[0].Name != "node-2" || !result.Series[0].Deleted || result.Ranking[1].Name != "已删除节点 #24" {
+		t.Fatalf("incorrect history: %+v", result)
+	}
+	r.NodeID = 2
+	r.Dimension = "user"
+	result, err = svc.Analytics(t.Context(), r, r.End)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range result.Nodes {
+		if n.ID == 2 && n.Name == "node-2" && n.Deleted {
+			return
+		}
+	}
+	t.Fatal("drilldown filter lost deleted identity")
+}

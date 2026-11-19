@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+
+	"gorm.io/gorm"
 
 	"github.com/imrui/xray-pilot/config"
 	"github.com/imrui/xray-pilot/internal/repository"
@@ -73,7 +76,10 @@ func normalizeXrayStableVersion(value string) (string, error) {
 }
 
 // 硬编码默认值（三级优先级最后兜底）
+var settingsWriteMu sync.Mutex
+
 var settingDefaults = map[string]string{
+	KeyRelayEnabled: "false", KeyRelayPrefix: "",
 	KeyXrayProbeURL:               xssh.DefaultProbeURL,
 	KeySchedulerDriftInterval:     "300",
 	KeySchedulerHealthInterval:    "120",
@@ -167,7 +173,19 @@ func (s *SettingService) BatchUpdate(kv map[string]string) error {
 			filtered[k] = v
 		}
 	}
-	return s.repo.BatchSet(filtered)
+	settingsWriteMu.Lock()
+	defer settingsWriteMu.Unlock()
+	return repository.DB.Transaction(func(tx *gorm.DB) error {
+		if tx.Dialector.Name() == "postgres" {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", 910301).Error; err != nil {
+				return err
+			}
+		}
+		if err := validateRelaySettings(tx, filtered); err != nil {
+			return err
+		}
+		return s.repo.BatchSetTx(tx, filtered)
+	})
 }
 
 // SeedFromConfig 将 config.yaml 中的运行时配置写入 DB（仅首次启动，已有则跳过）

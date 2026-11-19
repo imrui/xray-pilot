@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -54,6 +55,42 @@ func (s *TrafficService) Analytics(ctx context.Context, window dto.TrafficRange,
 	for _, u := range out.Users {
 		users[u.ID] = u.Name
 	}
+	missing := map[uint]bool{}
+	for _, a := range amounts {
+		if _, ok := nodes[a.NodeID]; !ok {
+			missing[a.NodeID] = true
+		}
+	}
+	for _, p := range polls {
+		if _, ok := nodes[p.NodeID]; !ok {
+			missing[p.NodeID] = true
+		}
+	}
+	if window.NodeID != 0 {
+		if _, ok := nodes[window.NodeID]; !ok {
+			missing[window.NodeID] = true
+		}
+	}
+	ids := make([]uint, 0, len(missing))
+	for id := range missing {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	if len(ids) > 0 {
+		var archived []dto.TrafficOption
+		if err := repository.DB.WithContext(ctx).Table("deleted_nodes").Select("node_id AS id, name").Where("node_id IN ?", ids).Scan(&archived).Error; err != nil {
+			return nil, err
+		}
+		for _, n := range archived {
+			nodes[n.ID] = n.Name
+		}
+		for _, id := range ids {
+			if nodes[id] == "" {
+				nodes[id] = fmt.Sprintf("已删除节点 #%d", id)
+			}
+			out.Nodes = append(out.Nodes, dto.TrafficOption{ID: id, Name: nodes[id], Deleted: true})
+		}
+	}
 	activeNodes, activeUsers := map[uint]bool{}, map[uint]bool{}
 	totals := map[uint]dto.TrafficAmount{}
 	points := map[uint]map[int64]dto.TrafficAmount{}
@@ -90,9 +127,6 @@ func (s *TrafficService) Analytics(ctx context.Context, window dto.TrafficRange,
 		name := "全部用量"
 		if window.Dimension == "node" {
 			name = nodes[id]
-			if name == "" {
-				name = fmt.Sprintf("已删除节点 #%d", id)
-			}
 		}
 		if window.Dimension == "user" {
 			name = users[id]
@@ -100,7 +134,7 @@ func (s *TrafficService) Analytics(ctx context.Context, window dto.TrafficRange,
 				name = fmt.Sprintf("已删除用户 #%d", id)
 			}
 		}
-		out.Ranking = append(out.Ranking, dto.TrafficRanking{TrafficOption: dto.TrafficOption{ID: id, Name: name}, TrafficAmount: t})
+		out.Ranking = append(out.Ranking, dto.TrafficRanking{TrafficOption: dto.TrafficOption{ID: id, Name: name, Deleted: window.Dimension == "node" && missing[id]}, TrafficAmount: t})
 	}
 	sort.Slice(out.Ranking, func(i, j int) bool {
 		a, b := out.Ranking[i], out.Ranking[j]
@@ -142,7 +176,7 @@ func (s *TrafficService) Analytics(ctx context.Context, window dto.TrafficRange,
 	first := (window.Start.Unix() + 28800) / seconds
 	last := (window.End.Add(-time.Nanosecond).Unix() + 28800) / seconds
 	appendSeries := func(id, name string, ids []uint) {
-		series := dto.TrafficSeries{ID: id, Name: name, Points: []dto.TrafficPoint{}}
+		series := dto.TrafficSeries{ID: id, Name: name, Deleted: window.Dimension == "node" && id != "other" && len(ids) == 1 && missing[ids[0]], Points: []dto.TrafficPoint{}}
 		for bucket := first; bucket <= last; bucket++ {
 			var up, down int64
 			observed := false

@@ -164,8 +164,8 @@ func (r *UserRepository) FindByIDs(ids []uint) ([]entity.User, error) {
 	return users, err
 }
 
-func (r *UserRepository) Update(user *entity.User) error {
-	return DB.Save(user).Error
+func (r *UserRepository) UpdateFeishu(user *entity.User) error {
+	return DB.Model(user).Select("FeishuEnabled", "FeishuEmail", "FeishuOpenID", "FeishuUnionID", "FeishuChatID", "FeishuBoundAt").Updates(user).Error
 }
 
 func (r *UserRepository) UpdateActive(id uint, active bool) error {

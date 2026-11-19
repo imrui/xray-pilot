@@ -96,6 +96,10 @@ func (s *UserService) userNodeIDs(user *entity.User) []uint {
 }
 
 func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.UserResponse, error) {
+	relay, err := relayID(req.RelaySubscriptionID)
+	if err != nil {
+		return nil, err
+	}
 	var feishuBoundAt *time.Time
 	if req.FeishuOpenID != "" || req.FeishuUnionID != "" || req.FeishuChatID != "" {
 		now := time.Now()
@@ -103,26 +107,27 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 	}
 
 	user := &entity.User{
-		Username:      strings.TrimSpace(req.Username),
-		RealName:      req.RealName,
-		Remark:        req.Remark,
-		FeishuEnabled: req.FeishuEnabled,
-		FeishuEmail:   strings.ToLower(strings.TrimSpace(req.FeishuEmail)),
-		UUID:          uuid.NewString(),
-		Token:         uuid.NewString(),
-		Active:        true,
-		ExpiresAt:     req.ExpiresAt,
-		FeishuOpenID:  req.FeishuOpenID,
-		FeishuUnionID: req.FeishuUnionID,
-		FeishuChatID:  req.FeishuChatID,
-		FeishuBoundAt: feishuBoundAt,
+		RelaySubscriptionID: relay,
+		Username:            strings.TrimSpace(req.Username),
+		RealName:            req.RealName,
+		Remark:              req.Remark,
+		FeishuEnabled:       req.FeishuEnabled,
+		FeishuEmail:         strings.ToLower(strings.TrimSpace(req.FeishuEmail)),
+		UUID:                uuid.NewString(),
+		Token:               uuid.NewString(),
+		Active:              true,
+		ExpiresAt:           req.ExpiresAt,
+		FeishuOpenID:        req.FeishuOpenID,
+		FeishuUnionID:       req.FeishuUnionID,
+		FeishuChatID:        req.FeishuChatID,
+		FeishuBoundAt:       feishuBoundAt,
 	}
 	if user.Username == "" {
 		return nil, errors.New("用户名不能为空")
 	}
 	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(user).Error; err != nil {
-			return fmt.Errorf("创建用户失败: %w", err)
+			return fmt.Errorf("创建用户失败: %w", relayUserError(err))
 		}
 		if err := s.userRepo.ReplaceGroupsTx(tx, user, req.GroupIDs); err != nil {
 			return fmt.Errorf("保存用户分组失败: %w", err)
@@ -144,7 +149,7 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 	} else {
 		_ = s.nodeRepo.MarkAllDrifted()
 	}
-	return s.toResponse(created, baseURL), nil
+	return s.toResponse(created, baseURL, currentRelayPrefix()), nil
 }
 
 func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string) (*dto.UserResponse, error) {
@@ -164,7 +169,14 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		oldEffectiveActive = user.EffectiveActive(time.Now())
 		oldUsername = user.Username
 	}
+	groupsChanged := false
 	shouldMarkSync := false
+	if req.RelaySubscriptionID != nil {
+		user.RelaySubscriptionID, err = relayID(*req.RelaySubscriptionID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if req.Username != nil {
 		username := strings.TrimSpace(*req.Username)
 		if username == "" {
@@ -185,6 +197,7 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		}
 		currentGroupIDs := extractGroupIDs(user.Groups)
 		if !slices.Equal(currentGroupIDs, groupIDs) {
+			groupsChanged = true
 			shouldMarkSync = true
 		}
 	}
@@ -197,6 +210,7 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 	if req.FeishuEmail != nil {
 		user.FeishuEmail = strings.ToLower(strings.TrimSpace(*req.FeishuEmail))
 	}
+	oldOpen, oldUnion, oldChat := user.FeishuOpenID, user.FeishuUnionID, user.FeishuChatID
 	if req.FeishuOpenID != nil {
 		user.FeishuOpenID = *req.FeishuOpenID
 	}
@@ -223,14 +237,14 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 		}
 		user.ExpiresAt = expiresAt
 	}
-	if user.FeishuOpenID != "" || user.FeishuUnionID != "" || user.FeishuChatID != "" {
+	if user.FeishuOpenID == "" && user.FeishuUnionID == "" && user.FeishuChatID == "" {
+		user.FeishuBoundAt = nil
+	} else if user.FeishuBoundAt == nil || oldOpen != user.FeishuOpenID || oldUnion != user.FeishuUnionID || oldChat != user.FeishuChatID {
 		now := time.Now()
 		user.FeishuBoundAt = &now
-	} else {
-		user.FeishuBoundAt = nil
 	}
 	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
-		if req.GroupIDs != nil {
+		if groupsChanged {
 			if err := repository.InvalidateUserConfigs(tx, user.ID); err != nil {
 				return err
 			}
@@ -242,8 +256,12 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 				return fmt.Errorf("更新用户分组失败: %w", err)
 			}
 		}
-		if err := tx.Save(user).Error; err != nil {
-			return err
+		write := tx
+		if req.RelaySubscriptionID == nil {
+			write = write.Omit("RelaySubscriptionID")
+		}
+		if err := write.Save(user).Error; err != nil {
+			return relayUserError(err)
 		}
 		if shouldMarkSync {
 			return repository.InvalidateUserConfigs(tx, user.ID)
@@ -263,7 +281,7 @@ func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string
 			_ = s.nodeRepo.MarkAllDrifted()
 		}
 	}
-	return s.toResponse(updated, baseURL), nil
+	return s.toResponse(updated, baseURL, currentRelayPrefix()), nil
 }
 
 func (s *UserService) Delete(id uint) error {
@@ -362,10 +380,10 @@ func (s *UserService) SweepExpired(now time.Time) (*SweepResult, error) {
 	return result, nil
 }
 
-func (s *UserService) List(page, pageSize int, baseURL string, filter repository.UserListFilter) ([]dto.UserResponse, int64, error) {
+func (s *UserService) List(page, pageSize int, baseURL string, filter repository.UserListFilter) (*dto.UserListResponse, error) {
 	users, total, err := s.userRepo.List(page, pageSize, filter)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	// 一次性 join 当页用户的累计流量，避免 N+1
 	ids := make([]uint, 0, len(users))
@@ -374,9 +392,10 @@ func (s *UserService) List(page, pageSize int, baseURL string, filter repository
 	}
 	totals, _ := s.trafficRepo.ListTotalsByUserIDs(ids) // 失败时空 map，不阻塞主流程
 
+	baseRelay := currentRelayPrefix()
 	result := make([]dto.UserResponse, 0, len(users))
 	for i := range users {
-		resp := s.toResponse(&users[i], baseURL)
+		resp := s.toResponse(&users[i], baseURL, baseRelay)
 		if t, ok := totals[users[i].ID]; ok {
 			resp.TrafficUpBytes = t.UpBytes
 			resp.TrafficDownBytes = t.DownBytes
@@ -386,7 +405,7 @@ func (s *UserService) List(page, pageSize int, baseURL string, filter repository
 		}
 		result = append(result, *resp)
 	}
-	return result, total, nil
+	return &dto.UserListResponse{Total: total, List: result, RelayEnabled: baseRelay != "", RelayPrefix: baseRelay}, nil
 }
 
 // ResetUUID 重置用户 UUID（触发全节点重新同步）
@@ -409,7 +428,7 @@ func (s *UserService) ResetUUID(id uint, baseURL string) (*dto.UserResponse, err
 	} else {
 		_ = s.nodeRepo.MarkAllDrifted()
 	}
-	return s.toResponse(user, baseURL), nil
+	return s.toResponse(user, baseURL, currentRelayPrefix()), nil
 }
 
 // ResetToken 重置用户订阅 Token
@@ -423,10 +442,10 @@ func (s *UserService) ResetToken(id uint, baseURL string) (*dto.UserResponse, er
 		return nil, fmt.Errorf("重置 Token 失败: %w", err)
 	}
 	user.Token = newToken
-	return s.toResponse(user, baseURL), nil
+	return s.toResponse(user, baseURL, currentRelayPrefix()), nil
 }
 
-func (s *UserService) toResponse(u *entity.User, baseURL string) *dto.UserResponse {
+func (s *UserService) toResponse(u *entity.User, baseURL, baseRelay string) *dto.UserResponse {
 	groupIDs := extractGroupIDs(u.Groups)
 	groupNames := extractGroupNames(u.Groups)
 	groups := make([]dto.UserGroupSummary, 0, len(u.Groups))
@@ -438,6 +457,7 @@ func (s *UserService) toResponse(u *entity.User, baseURL string) *dto.UserRespon
 	}
 
 	resp := &dto.UserResponse{
+		RelaySubscriptionID: u.RelaySubscriptionID, RelaySubscriptionURL: relayURL(baseRelay, u),
 		ID:            u.ID,
 		Username:      u.Username,
 		RealName:      u.RealName,

@@ -5,13 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>Xray Pilot | 订阅</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%20fill%3D%22none%22%3E%3Cstyle%3E.m%7Bcolor%3A%2316A34A%7D%40media%20%28prefers-color-scheme%3Adark%29%7B.m%7Bcolor%3A%2322C55E%7D%7D%3C%2Fstyle%3E%3Cg%20class%3D%22m%22%3E%3Cpath%20d%3D%22M7.5%207.5L13%2013M24.5%2024.5L19%2019M24.5%207.5L19%2013M7.5%2024.5L13%2019%22%20stroke%3D%22currentColor%22%20stroke-width%3D%223.2%22%20stroke-linecap%3D%22round%22%2F%3E%3Ccircle%20cx%3D%227.5%22%20cy%3D%227.5%22%20r%3D%223.6%22%20fill%3D%22currentColor%22%2F%3E%3Ccircle%20cx%3D%2224.5%22%20cy%3D%227.5%22%20r%3D%223.6%22%20fill%3D%22currentColor%22%2F%3E%3Ccircle%20cx%3D%227.5%22%20cy%3D%2224.5%22%20r%3D%223.6%22%20fill%3D%22currentColor%22%2F%3E%3Ccircle%20cx%3D%2224.5%22%20cy%3D%2224.5%22%20r%3D%223.6%22%20fill%3D%22currentColor%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%223.6%22%20stroke%3D%22currentColor%22%20stroke-width%3D%223.2%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="/subscription-assets/qrcode.js" defer></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   color-scheme:light;
+  --page-width:880px;
   --bg:#f3f4f6;--panel:#fff;--panel-muted:#f6f7f9;--border:#e5e7eb;--border-strong:#d1d5db;
   --text:#111827;--text-soft:#4b5563;--text-faint:#9aa1ad;--accent:#16a34a;--accent-strong:#15803d;
   --accent-soft:rgba(22,163,74,.1);--link:#2563eb;--shadow-card:0 1px 3px rgba(17,24,39,.04);
@@ -30,22 +29,21 @@ body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'Inter'
 a{color:inherit;text-decoration:none}
 button{font:inherit}
 header{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--panel) 94%, transparent);border-bottom:1px solid var(--border);backdrop-filter:blur(12px)}
-.header-inner{max-width:760px;height:56px;margin:0 auto;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
+.header-inner{max-width:var(--page-width);height:56px;margin:0 auto;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
 .logo{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600}
 .logo svg{color:var(--accent)}
 .header-actions{display:flex;align-items:center;gap:4px}
 .icon-btn{width:36px;height:36px;border:none;border-radius:10px;background:transparent;color:var(--text-faint);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .15s ease,color .15s ease}
 .icon-btn:hover{background:var(--panel-muted);color:var(--text)}
-main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-direction:column;gap:16px}
+main{max-width:var(--page-width);margin:0 auto;padding:20px 16px 28px;display:flex;flex-direction:column;gap:16px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:20px;box-shadow:var(--shadow-card)}
 .section-kicker{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
 .section-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
-.section-subtitle{margin-top:8px;font-size:12px;color:var(--text-faint);line-height:1.6}
-.user-grid{display:grid;grid-template-columns:minmax(0,1fr) 1px 280px;gap:0;align-items:start}
+.user-grid{display:grid;grid-template-columns:minmax(0,1fr) 1px minmax(290px,43%);gap:0;align-items:start}
 .user-divider{align-self:stretch;width:1px;background:var(--border)}
 .user-left{padding-right:24px;display:flex;flex-direction:column;justify-content:flex-start;min-height:220px;padding-top:4px}
 /* user-right 撑满左侧高度并内部垂直居中：左侧因累计流量增高时右侧不再贴顶 */
-.user-right{align-self:stretch;padding-left:24px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.user-right{min-width:0;align-self:stretch;padding-left:24px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .user-fields{display:grid;gap:16px}
 .field-label{margin-bottom:4px;font-size:12px;color:var(--text-faint)}
 .field-value{font-size:15px;font-weight:600;color:var(--text)}
@@ -62,13 +60,12 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .badge-active{background:var(--badge-green-bg);color:var(--badge-green-text);border-color:var(--badge-green-border)}
 .badge-inactive{background:var(--badge-red-bg);color:var(--badge-red-text);border-color:var(--badge-red-border)}
 .qr-box,.modal-qr-inner{background:#fff;border:1px solid var(--border);border-radius:12px;padding:10px;line-height:0}
+.qr-box{width:202px;max-width:100%}
+.qr-box canvas,.qr-box img{width:100%;height:auto}
+.qr-hint{margin-top:10px;font-size:12px;line-height:1.5;text-align:center;color:var(--text-faint)}
 .qr-actions{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;flex-wrap:wrap}
 .btn-subtle{min-height:32px;padding:0 10px;border:1px solid var(--border);border-radius:999px;background:var(--panel);color:var(--text-soft);display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;white-space:nowrap}
 .btn-subtle:hover{background:var(--panel-muted);border-color:var(--border-strong);color:var(--text)}
-.qr-hint{margin-top:12px;font-size:12px;color:var(--text-faint);text-align:center;line-height:1.6}
-.qr-save-hint{font-size:11px;color:var(--text-faint);text-align:center}
-.qr-mobile-head{display:none}
-.qr-mobile-head .btn-subtle{min-height:28px;padding:0 10px;font-size:12px}
 .count{font-size:12px;color:var(--text-faint)}
 .node-list{display:flex;flex-direction:column;gap:8px}
 .node-item{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-muted);transition:border-color .15s ease,background-color .15s ease}
@@ -86,30 +83,35 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
 .node-meta-row .meta-sync.stale{color:var(--badge-yellow-text)}
 .node-meta-row .meta-remark{color:var(--text-soft);font-style:italic}
 .node-name{font-size:15px;font-weight:600;color:var(--text)}
-.node-link,.alt-link{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.node-actions,.alt-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.node-link{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
 .btn{min-height:34px;padding:0 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--text-soft);display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;white-space:nowrap}
 .btn:hover{background:var(--panel-muted);border-color:var(--border-strong);color:var(--text)}
 .btn-icon{width:34px;padding:0}
-.alt-list{display:flex;flex-direction:column;gap:8px}
-.alt-row{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-muted);transition:border-color .15s ease,background-color .15s ease}
-.alt-row:hover{border-color:var(--border-strong);background:var(--panel)}
-.alt-info{flex:1;min-width:0}
-.alt-label-row{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap}
-.alt-label{font-size:13px;font-weight:600;color:var(--text)}
-.alt-hint{font-size:11px;color:var(--text-faint)}
 .empty{padding:18px 0;text-align:center;color:var(--text-faint);font-size:13px}
-.modal-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);z-index:100}
-.modal{position:relative;width:min(100%,360px);padding:22px;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-card)}
+.modal-overlay{position:fixed;inset:0;width:100%;max-width:none;height:100%;max-height:none;border:0;padding:16px;color:var(--text);background:transparent}
+.modal-overlay[open]{display:flex;align-items:center;justify-content:center}
+.modal-overlay::backdrop{background:rgba(0,0,0,.45);backdrop-filter:blur(2px)}
+.modal [hidden],.user-right [hidden],.subscription-row [hidden]{display:none}
+.qr-formats{min-width:0;display:flex;flex-wrap:wrap;justify-content:center;gap:4px;width:max-content;max-width:100%;margin:0 auto 14px;padding:3px;border:1px solid var(--border);border-radius:8px;background:var(--panel-muted)}
+.user-right .qr-formats{margin:10px 0}
+.user-right .qr-formats span{padding-inline:8px}
+.qr-formats label{position:relative;cursor:pointer}
+.qr-formats input{position:absolute;opacity:0}
+.qr-formats span{display:block;padding:6px 12px;border-radius:5px;font-size:13px;color:var(--text-soft)}
+.qr-formats input:checked+span{background:var(--panel);color:var(--accent-strong);font-weight:600}
+.qr-formats input:focus-visible+span{outline:2px solid var(--accent)}
+.selected-url{display:block;max-width:100%;user-select:all;line-height:1.5;margin-top:12px;text-align:center;overflow-wrap:anywhere;font-size:12px;color:var(--text-soft)}
+.subscription-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;margin-top:16px}
+.subscription-row .selected-url{margin:0;text-align:left}
+#mainURL{white-space:nowrap;overflow-x:auto;scrollbar-width:thin}
+.subscription-actions{display:flex;align-items:center;gap:6px}
+.modal{position:relative;max-height:100%;overflow-y:auto;width:min(100%,360px);padding:22px;background:var(--panel);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-card)}
 .modal-close{position:absolute;top:14px;right:14px;width:28px;height:28px;border:1px solid var(--accent);border-radius:8px;background:transparent;color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .15s ease}
 .modal-close:hover{background:var(--accent-soft)}
 .modal-title{padding:0 36px;font-size:16px;font-weight:600;color:var(--text);display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;word-break:break-word;text-align:center}
 .modal-sub{margin-top:4px;margin-bottom:18px;font-size:12px;color:var(--text-faint);text-align:center}
 .modal-qr{display:flex;justify-content:center}
-@media (min-width:641px){
-  .qr-hint{white-space:nowrap}
-  .qr-actions{display:none}
-}
 @media (max-width:640px){
   .header-inner{height:52px;padding:0 12px}
   .logo{gap:8px;font-size:14px}
@@ -117,25 +119,18 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
   main{padding:12px 12px 22px;gap:12px}
   .card{padding:16px;border-radius:14px}
   .section-header{margin-bottom:12px}
-  .section-subtitle{margin-top:6px}
   .user-grid{grid-template-columns:1fr;gap:14px}
   .user-divider{width:100%;height:1px}
   .user-left{padding-right:0;min-height:0;padding-top:0}
   .user-right{padding-left:0;align-items:center;text-align:center}
   .user-fields{gap:14px}
   .field-inline{grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:14px}
-  .qr-box{padding:8px}
-  .qr-hint{max-width:250px;font-size:11px;white-space:normal}
-  .qr-mobile-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
-  .qr-desktop-title{display:none}
-  .qr-actions{display:none}
-  .qr-mobile-head .qr-actions{display:flex;margin-top:0}
+  .qr-box{width:170px;padding:8px}
   .btn-subtle{width:auto;padding:0 12px}
-  .qr-save-hint{display:none}
-  .alt-row,.node-item{align-items:flex-start;flex-direction:column;gap:10px}
-  .node-info,.alt-info{width:100%}
-  .node-link,.alt-link{font-size:11px}
-  .node-actions,.alt-actions{
+  .node-item{align-items:flex-start;flex-direction:column;gap:10px}
+  .node-info{width:100%}
+  .node-link{font-size:11px}
+  .node-actions{
     width:100%;
     display:grid;
     grid-template-columns:minmax(0,1fr) 38px;
@@ -144,12 +139,24 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
   }
   .btn{width:100%;min-height:36px}
   .btn-icon{width:38px;min-height:36px;padding:0}
+  .subscription-row{align-items:center;gap:8px;padding:10px}
+  .subscription-actions{gap:4px}
+  .subscription-actions .btn{width:auto;padding:0 6px;gap:4px;font-size:13px}
   .modal{width:min(100%,340px);padding:18px;border-radius:14px}
   .modal-title{font-size:15px}
   .modal-sub{margin-bottom:14px}
   .modal-close{top:12px;right:12px}
 }
 </style>
+<noscript><style>
+.user-grid{grid-template-columns:minmax(0,1fr)}
+.user-right,.user-divider,.subscription-actions{display:none}
+.subscription-row{grid-template-columns:minmax(0,1fr)}
+#mainURL{white-space:normal}
+.subscription-row noscript{grid-column:1/-1}
+.manual-links dt{margin-top:14px;font-size:13px;font-weight:600}
+.manual-links .selected-url{margin:4px 0}
+</style></noscript>
 </head>
 <body>
 <header>
@@ -177,7 +184,7 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
   </div>
 </header>
 
-<main>
+<main id="pageData" data-username="{{.Username}}">
   <section class="card">
     <div class="user-grid">
       <div class="user-left">
@@ -232,27 +239,57 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
       </div>
       <div class="user-divider"></div>
       <div class="user-right">
-        <div class="qr-mobile-head">
-          <div class="section-kicker" style="color:var(--accent)">扫码订阅</div>
-          <div class="qr-actions">
-            <button class="btn-subtle" type="button" onclick="saveQRCode('qrMain', 'xray-pilot-subscription')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
-              保存二维码
-            </button>
-          </div>
-        </div>
-        <div class="section-kicker qr-desktop-title" style="color:var(--accent)">扫码订阅</div>
-        <div class="qr-box" id="qrMain" style="margin-top:14px"></div>
-        <div class="qr-actions">
-          <button class="btn-subtle" type="button" onclick="saveQRCode('qrMain', 'xray-pilot-subscription')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
-            保存二维码
-          </button>
-        </div>
-        <p class="qr-hint">支持 V2rayN / Clash / Shadowrocket 等客户端</p>
+        <div class="section-kicker">扫码订阅</div>
+        <fieldset id="mainFormats" class="qr-formats" aria-label="订阅格式">
+          <label><input type="radio" name="mainFormat" data-format="default" value="{{.SubURL}}" checked><span>订阅</span></label>
+          {{range .SubLinks}}
+          <label><input type="radio" name="mainFormat" data-hint="{{.Hint}}" data-format="{{.Format}}" value="{{.URL}}"><span>{{.FormatLabel}}</span></label>
+          {{end}}
+        </fieldset>
+        <div class="qr-box" id="qrMain"></div>
+        <p id="mainHint" class="qr-hint" aria-live="polite">由客户端自动识别订阅格式</p>
+      </div>
+    </div>
+    <div class="node-item subscription-row">
+      <code id="mainURL" class="selected-url" tabindex="0">{{.SubURL}}</code>
+      <div class="subscription-actions">
+        {{range .SubLinks}}{{if eq .Format "clash"}}
+        <span id="mainImport" hidden>{{template "clash-import" .}}</span>
+        {{end}}{{end}}
+        <button id="mainCopy" class="btn copy-btn" type="button" title="复制订阅地址" aria-label="复制订阅地址" data-copy="{{.SubURL}}">{{template "copy-icon"}} 复制</button>
+        <button id="mainSave" class="btn" type="button" title="保存二维码" aria-label="保存二维码" onclick="saveQRCode('qrMain')">{{template "download-icon"}} 二维码</button>
+      </div>
+      <noscript>
+        <dl class="manual-links">
+          {{range .SubLinks}}
+          <dt>{{.Label}}</dt>
+          <dd><code class="selected-url">{{.URL}}</code>{{if eq .Format "clash"}}{{template "clash-import" .}}{{end}}</dd>
+          {{end}}
+        </dl>
+      </noscript>
+    </div>
+  </section>
+
+  {{if .RelayURL}}
+  <section class="card">
+    <div class="section-header"><h2 class="section-kicker">内网中转订阅</h2></div>
+    <div class="node-item">
+      <div class="node-info">
+        <div class="node-link" title="{{.RelayURL}}">{{.RelayURL}}</div>
+        <div class="node-meta-row">连接内网后使用</div>
+      </div>
+      <div class="node-actions">
+        <button class="btn copy-btn" type="button" aria-label="复制内网中转订阅链接" data-copy="{{.RelayURL}}">
+          {{template "copy-icon"}} 复制
+        </button>
+        <button class="btn btn-icon qr-btn" type="button" title="二维码" aria-label="查看内网中转订阅二维码"
+          data-relay data-name="内网中转订阅" data-sub="连接内网后扫码导入" data-link="{{.RelayURL}}">
+          {{template "qr-icon"}}
+        </button>
       </div>
     </div>
   </section>
+  {{end}}
 
   <section class="card">
     <div class="section-header">
@@ -281,11 +318,11 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
         </div>
         <div class="node-actions">
           <button class="btn copy-btn" data-copy="{{.Link}}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            {{template "copy-icon"}}
             复制
           </button>
           <button class="btn btn-icon qr-btn" title="二维码" data-name="{{.Name}}" data-region="{{.Region}}" data-link="{{.Link}}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+            {{template "qr-icon"}}
           </button>
         </div>
       </div>
@@ -294,56 +331,32 @@ main{max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-dire
     {{end}}
   </section>
 
-  <section class="card">
-    <div class="section-kicker">备用订阅链接</div>
-    <p class="section-subtitle">如客户端无法自动识别，请按使用的客户端类型选择对应链接</p>
-    <div class="alt-list">
-      {{range .SubLinks}}
-      <div class="alt-row">
-        <div class="alt-info">
-          <div class="alt-label-row">
-            <span class="alt-label">{{.Label}}</span>
-            <span class="alt-hint">{{.Hint}}</span>
-          </div>
-          <div class="alt-link" title="{{.URL}}">{{.URL}}</div>
-        </div>
-        <div class="alt-actions">
-          {{if eq .Format "clash"}}
-          <a class="btn" href="clash://install-config?url={{.URL | urlquery}}&name=xray-pilot" title="一键导入 Mihomo / Clash Verge / ClashX">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/><path d="M14 3v6h6"/></svg>
-            一键导入
-          </a>
-          {{end}}
-          <button class="btn copy-btn" data-copy="{{.URL}}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            复制
-          </button>
-          <button class="btn btn-icon qr-btn" title="二维码" data-name="{{.Label}} 订阅" data-sub="{{.Hint}}" data-link="{{.URL}}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
-          </button>
-        </div>
-      </div>
-      {{end}}
-    </div>
-  </section>
 </main>
 
-<div id="pageData" data-sub-url="{{.SubURL}}" style="display:none"></div>
-
-<div class="modal-overlay" id="modalOverlay" style="display:none" onclick="if(event.target===this)closeModal()">
+<dialog class="modal-overlay" id="modalOverlay" aria-labelledby="modalTitle" onclick="if(event.target===this)this.close()">
   <div class="modal">
-    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <button type="button" class="modal-close" aria-label="关闭二维码" onclick="this.closest('dialog').close()">&times;</button>
     <div class="modal-title" id="modalTitle"></div>
     <div class="modal-sub" id="modalSub"></div>
+    <div class="modal-sub" id="modalQRUnavailable" hidden>二维码暂时不可用，可复制下方地址。</div>
+    {{if .RelayURL}}
+    <fieldset id="relayFormats" class="qr-formats" aria-label="内网中转订阅格式" hidden>
+      <label><input type="radio" name="relayFormat" data-format="default" value="{{.RelayURL}}" checked><span>订阅</span></label>
+      <label><input type="radio" name="relayFormat" data-format="json" value="{{.RelayURL}}?format=json"><span>JSON</span></label>
+      <label><input type="radio" name="relayFormat" data-format="clash" value="{{.RelayURL}}?format=clash"><span>Clash</span></label>
+    </fieldset>
+    {{end}}
     <div class="modal-qr"><div class="modal-qr-inner" id="modalQR"></div></div>
+    <code id="modalURL" class="selected-url" hidden></code>
     <div class="qr-actions" style="margin-top:16px">
-      <button class="btn-subtle" type="button" onclick="saveQRCode('modalQR', 'xray-pilot-qr')">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+      <button id="modalCopy" class="btn-subtle copy-btn" type="button" hidden>{{template "copy-icon"}} 复制地址</button>
+      <button id="modalSave" class="btn-subtle" type="button" onclick="saveQRCode('modalQR')">
+        {{template "download-icon"}}
         保存二维码
       </button>
     </div>
   </div>
-</div>
+</dialog>
 
 <script>
 (function(){
@@ -362,18 +375,19 @@ function toggleTheme(){
   document.getElementById('sunIcon').style.display = dark ? '' : 'none';
 }
 
-window.addEventListener('load', function(){
-  var subUrl = document.getElementById('pageData').dataset.subUrl;
-  if(!subUrl){ return; }
-  var qrSize = window.innerWidth <= 640 ? 116 : 128;
-  new QRCode(document.getElementById('qrMain'), {
-    text: subUrl,
-    width: qrSize,
-    height: qrSize,
-    colorDark: '#000000',
-    colorLight: '#ffffff',
-    correctLevel: QRCode.CorrectLevel.M
-  });
+function updateMainQR(){
+  var selected = document.querySelector('#mainFormats input:checked');
+  setCopyLink('mainCopy', selected.value);
+  document.getElementById('mainHint').textContent = selected.dataset.hint ? '适用于 ' + selected.dataset.hint : '由客户端自动识别订阅格式';
+  document.getElementById('mainURL').textContent = selected.value;
+  var importLink = document.getElementById('mainImport');
+  if(importLink) importLink.hidden = selected.dataset.format !== 'clash';
+  document.getElementById('mainSave').hidden = !renderQRCode('qrMain', selected.value, 512, 'subscription-' + selected.dataset.format);
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  document.getElementById('mainFormats').addEventListener('change', updateMainQR);
+  updateMainQR();
   renderRelativeSyncTimes();
 });
 
@@ -406,7 +420,8 @@ function fallbackCopy(text, onSuccess, onFail){
   var ta = document.createElement('textarea');
   ta.value = text;
   ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
-  document.body.appendChild(ta);
+  var previousFocus = document.activeElement;
+  (document.querySelector('dialog[open]') || document.body).appendChild(ta);
   ta.focus();
   ta.select();
   try {
@@ -414,21 +429,27 @@ function fallbackCopy(text, onSuccess, onFail){
   } catch(e){
     onFail();
   } finally {
-    document.body.removeChild(ta);
+    ta.remove();
+    if(previousFocus) previousFocus.focus();
   }
 }
 
 function copyText(btn){
   var text = btn.dataset.copy || '';
-  var original = btn.innerHTML;
+  if(!btn.dataset.label) btn.dataset.label = btn.innerHTML;
+  clearTimeout(btn.copyTimer);
   var successHtml = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> 已复制';
   function onSuccess(){
-    btn.innerHTML = successHtml;
-    setTimeout(function(){ btn.innerHTML = original; }, 1500);
+    feedback(successHtml);
   }
   function onFail(){
-    btn.textContent = '复制失败';
-    setTimeout(function(){ btn.innerHTML = original; }, 1500);
+    feedback('复制失败');
+  }
+  function feedback(markup){
+    if(btn.dataset.copy !== text) return;
+    clearTimeout(btn.copyTimer);
+    btn.innerHTML = markup;
+    btn.copyTimer = setTimeout(function(){ btn.innerHTML = btn.dataset.label; }, 1500);
   }
   if(navigator.clipboard && navigator.clipboard.writeText){
     navigator.clipboard.writeText(text).then(onSuccess, function(){
@@ -439,32 +460,74 @@ function copyText(btn){
   }
 }
 
-// showQR 渲染二维码弹窗
-//   name   - 主标题（必填）
-//   region - 节点地域 badge（可选；通常很短，作为 region-tag 显示在标题左侧）
-//   sub    - 副标题文案（可选；用于备用订阅链接显示客户端示例）
-//   link   - 二维码内容
-//
-// 节点弹窗调用：showQR(name, region, '', link) → "[广州] node 1"
-// 备用订阅调用：showQR(label, '', hint, link)  → "通用 Base64 订阅" + 下方副标题
-function showQR(name, region, sub, link){
-  var titleHtml = '';
-  if(region){ titleHtml += '<span class="region-tag" style="margin-right:4px">' + region + '</span>'; }
-  titleHtml += '<span>' + name + '</span>';
-  document.getElementById('modalTitle').innerHTML = titleHtml;
-  document.getElementById('modalSub').textContent = sub || '扫描二维码导入此节点';
-  var el = document.getElementById('modalQR');
-  el.innerHTML = '';
+function showQR(button){
+  var title = document.getElementById('modalTitle');
+  title.replaceChildren();
+  if(button.dataset.region){
+    var tag = document.createElement('span');
+    tag.className = 'region-tag';
+    tag.textContent = button.dataset.region;
+    title.append(tag, ' ');
+  }
+  title.append(document.createTextNode(button.dataset.name));
+  document.getElementById('modalSub').textContent = button.dataset.sub || '扫描二维码导入此节点';
+  var relay = button.hasAttribute('data-relay');
+  var formats = document.getElementById('relayFormats');
+  if(formats) formats.hidden = !relay;
+  if(relay){
+    formats.querySelector('input').checked = true;
+    updateRelayQR();
+  } else {
+    renderModalQR(button.dataset.link, 'node', false);
+  }
+  document.getElementById('modalOverlay').showModal();
+}
+
+function setCopyLink(id, link){
+  var copy = document.getElementById(id);
+  copy.dataset.copy = link;
+  if(copy.dataset.label) copy.innerHTML = copy.dataset.label;
+}
+
+function updateRelayQR(){
+  var selected = document.querySelector('#relayFormats input:checked');
+  renderModalQR(selected.value, 'intranet-relay-' + selected.dataset.format, true);
+}
+
+function renderModalQR(link, filenameSuffix, showAddress){
   var size = window.innerWidth <= 640 ? Math.min(180, window.innerWidth - 120) : 220;
-  new QRCode(el, {
-    text: link,
-    width: size,
-    height: size,
-    colorDark: '#000000',
-    colorLight: '#ffffff',
-    correctLevel: QRCode.CorrectLevel.M
-  });
-  document.getElementById('modalOverlay').style.display = 'flex';
+  var rendered = renderQRCode('modalQR', link, size, filenameSuffix);
+  document.getElementById('modalSave').hidden = !rendered;
+  document.getElementById('modalQRUnavailable').hidden = rendered;
+  document.getElementById('modalSub').hidden = !rendered;
+  var address = document.getElementById('modalURL');
+  address.hidden = rendered && !showAddress;
+  address.textContent = address.hidden ? '' : link;
+  document.getElementById('modalCopy').hidden = address.hidden;
+  setCopyLink('modalCopy', address.textContent);
+}
+
+function renderQRCode(containerId, link, size, filenameSuffix){
+  var el = document.getElementById(containerId);
+  el.replaceChildren();
+  el.dataset.filenameSuffix = filenameSuffix;
+  el.hidden = typeof QRCode !== 'function';
+  if(el.hidden) return false;
+  try {
+    new QRCode(el, {
+      text: link,
+      width: size,
+      height: size,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+    return true;
+  } catch(e){
+    el.replaceChildren();
+    el.hidden = true;
+    return false;
+  }
 }
 
 function getQRCodeDataURL(containerId){
@@ -472,7 +535,16 @@ function getQRCodeDataURL(containerId){
   if(!container){ return ''; }
   var canvas = container.querySelector('canvas');
   if(canvas && canvas.toDataURL){
-    return canvas.toDataURL('image/png');
+    // 导出时带上白色静区。最小二维码宽 21 个模块，此边距至少覆盖 4 个模块。
+    var margin = Math.ceil(canvas.width * 4 / 21);
+    var image = document.createElement('canvas');
+    image.width = canvas.width + 2 * margin;
+    image.height = canvas.height + 2 * margin;
+    var ctx = image.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, image.width, image.height);
+    ctx.drawImage(canvas, margin, margin);
+    return image.toDataURL('image/png');
   }
   var img = container.querySelector('img');
   if(img && img.src){
@@ -481,12 +553,15 @@ function getQRCodeDataURL(containerId){
   return '';
 }
 
-function saveQRCode(containerId, fileBaseName){
+function saveQRCode(containerId){
   var dataUrl = getQRCodeDataURL(containerId);
   if(!dataUrl){ return; }
+  var username = document.getElementById('pageData').dataset.username;
+  var fileUser = Array.from(username.trim().replace(/[^\p{L}\p{M}\p{N}._@+-]+/gu, '_')).slice(0, 48).join('') || 'user';
+  var filename = 'xray-pilot-' + fileUser + '-' + document.getElementById(containerId).dataset.filenameSuffix + '.png';
   if(navigator.share && dataUrl.indexOf('data:image/png') === 0){
     try {
-      var file = dataURLToFile(dataUrl, fileBaseName + '.png');
+      var file = dataURLToFile(dataUrl, filename);
       if(file && (!navigator.canShare || navigator.canShare({ files:[file] }))){
         navigator.share({ files:[file], title:'二维码', text:'保存二维码' }).catch(function(){});
         return;
@@ -495,7 +570,7 @@ function saveQRCode(containerId, fileBaseName){
   }
   var link = document.createElement('a');
   link.href = dataUrl;
-  link.download = fileBaseName + '.png';
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -521,10 +596,8 @@ function dataURLToFile(dataUrl, filename){
   return new File([u8arr], filename, { type: mime });
 }
 
-function closeModal(){
-  document.getElementById('modalOverlay').style.display = 'none';
-  document.getElementById('modalQR').innerHTML = '';
-}
+var relayFormats = document.getElementById('relayFormats');
+if(relayFormats) relayFormats.addEventListener('change', updateRelayQR);
 
 document.addEventListener('click', function(e){
   var copyBtn = e.target.closest('.copy-btn');
@@ -534,20 +607,15 @@ document.addEventListener('click', function(e){
   }
   var qrBtn = e.target.closest('.qr-btn');
   if(qrBtn){
-    showQR(
-      qrBtn.dataset.name || '',
-      qrBtn.dataset.region || '',
-      qrBtn.dataset.sub || '',
-      qrBtn.dataset.link || ''
-    );
-  }
-});
-
-document.addEventListener('keydown', function(e){
-  if(e.key === 'Escape'){
-    closeModal();
+    showQR(qrBtn);
   }
 });
 </script>
 </body>
 </html>
+
+{{define "copy-icon"}}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>{{end}}
+{{define "qr-icon"}}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>{{end}}
+
+{{define "download-icon"}}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>{{end}}
+{{define "clash-import"}}<a class="btn" href="clash://install-config?url={{.URL | urlquery}}&amp;name=xray-pilot" title="导入到 Clash 客户端"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1"/><path d="M14 2v5a1 1 0 0 0 1 1h5M2 15h10m-3 3 3-3-3-3"/></svg> 导入</a>{{end}}

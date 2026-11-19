@@ -116,7 +116,7 @@ func (h *NodeHandler) Update(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	node, err := h.svc.Update(uint(id), &req)
+	node, err := h.svc.Update(uint(id), &req, actorFrom(c))
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return

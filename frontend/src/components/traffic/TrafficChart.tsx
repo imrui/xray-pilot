@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { formatBytes } from '@/lib/utils'
 import { toDateInput } from '@/lib/trafficDates'
+import { trafficName } from '@/types/traffic'
 import type { TrafficDirection, TrafficPoint, TrafficSeries } from '@/types/traffic'
 import { useChartWidth } from './useChartWidth'
 
@@ -47,11 +48,11 @@ export function TrafficChart({ series, direction, interval }: { series: TrafficS
       {selectedIndex !== null && count > 0 && (
         <div className="pointer-events-none absolute right-2 top-2 max-w-[calc(100%-1rem)] rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-2 text-xs shadow-[var(--shadow-panel)]" aria-live="polite">
           <p className="mb-2 font-medium">{timeLabel(series[0].points[selectedIndex].time, true)}</p>
-          <div className="space-y-1.5">{visible.map(s => <div key={s.id} className="flex justify-between gap-4"><span className="min-w-0 break-all text-soft">{s.name}</span><span className="shrink-0 tabular-nums">{pointValue(s.points[selectedIndex], direction) === null ? '无采集依据' : formatBytes(pointValue(s.points[selectedIndex], direction))}</span></div>)}</div>
+          <div className="space-y-1.5">{visible.map(s => <div key={s.id} className="flex justify-between gap-4"><span className="min-w-0 break-all text-soft">{trafficName(s)}</span><span className="shrink-0 tabular-nums">{pointValue(s.points[selectedIndex], direction) === null ? '无采集依据' : formatBytes(pointValue(s.points[selectedIndex], direction))}</span></div>)}</div>
         </div>
       )}
     </div>
-    <div className="flex flex-wrap gap-x-3 gap-y-1">{series.map((s, i) => <button key={s.id} className="flex min-w-0 items-center gap-2 rounded px-1 py-1 text-xs text-soft" title={`${hidden.has(s.id) ? '显示' : '隐藏'} ${s.name}`} aria-pressed={!hidden.has(s.id)} onClick={() => setHidden(prev => { const next = new Set(prev); if (next.has(s.id)) next.delete(s.id); else next.add(s.id); return next })}><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors[i % colors.length], opacity: hidden.has(s.id) ? .25 : 1 }} /><span className={`break-all ${hidden.has(s.id) ? 'line-through' : ''}`}>{s.name}</span></button>)}</div>
+    <div className="flex flex-wrap gap-x-3 gap-y-1">{series.map((s, i) => <button key={s.id} className="flex min-w-0 items-center gap-2 rounded px-1 py-1 text-xs text-soft" title={`${hidden.has(s.id) ? '显示' : '隐藏'} ${trafficName(s)}`} aria-pressed={!hidden.has(s.id)} onClick={() => setHidden(prev => { const next = new Set(prev); if (next.has(s.id)) next.delete(s.id); else next.add(s.id); return next })}><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors[i % colors.length], opacity: hidden.has(s.id) ? .25 : 1 }} /><span className={`break-all ${hidden.has(s.id) ? 'line-through' : ''}`}>{trafficName(s)}</span></button>)}</div>
     {count > 0 && <label className="mt-3 flex items-center gap-3 text-xs text-soft">时间点<input aria-label="查看趋势时间点" aria-valuetext={timeLabel(series[0].points[selectedIndex ?? 0].time, true)} type="range" min="0" max={count - 1} value={selectedIndex ?? 0} onChange={e => setSelected(Number(e.target.value))} className="min-w-0 flex-1 accent-[var(--accent)]" /></label>}
   </div>
 }

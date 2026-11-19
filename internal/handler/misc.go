@@ -22,6 +22,9 @@ import (
 //go:embed templates/subscribe.html
 var subscribePageHTML string
 
+//go:embed templates/qrcode.min.js
+var subscribeQRCode []byte
+
 // ---- 日志 ----
 
 type LogHandler struct {
@@ -214,6 +217,8 @@ func (h *SubscribeHandler) handleSubscription(c *gin.Context, token, format stri
 
 // handleInfoPage 返回 HTML 订阅信息页
 func (h *SubscribeHandler) handleInfoPage(c *gin.Context, token string) {
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("Referrer-Policy", "no-referrer")
 	data, err := h.svc.GetSubscribePageDataWithBaseURL(token, h.baseURL(c))
 	if err != nil {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(renderErrorPage(err.Error())))
@@ -331,7 +336,7 @@ func (h *SystemHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	if err := h.settingSvc.BatchUpdate(kv); err != nil {
-		if errors.Is(err, service.ErrInvalidXrayStableVersion) {
+		if errors.Is(err, service.ErrInvalidXrayStableVersion) || errors.Is(err, service.ErrRelaySettings) {
 			response.BadRequest(c, err.Error())
 			return
 		}

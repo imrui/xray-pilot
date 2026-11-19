@@ -350,6 +350,8 @@ func (s *FeishuService) sendSubscriptionContent(receiveID, receiveIDType string,
 	statusText := "正常"
 	if !user.Active {
 		statusText = "已禁用"
+	} else if user.IsExpired(time.Now()) {
+		statusText = "已过期"
 	}
 	expireText := "永久有效"
 	if user.ExpiresAt != nil {
@@ -412,6 +414,13 @@ func (s *FeishuService) sendSubscriptionContent(receiveID, receiveIDType string,
 		},
 	}
 
+	if relay := distributedRelayURL(user); relay != "" {
+		elements := cardContent["elements"].([]map[string]any)
+		cardContent["elements"] = append(elements,
+			map[string]any{"tag": "div", "text": map[string]string{"tag": "plain_text", "content": "内网中转订阅（连接内网后使用）"}},
+			map[string]any{"tag": "div", "text": map[string]string{"tag": "plain_text", "content": relay}},
+		)
+	}
 	content, err := json.Marshal(cardContent)
 	if err != nil {
 		return err
@@ -547,7 +556,7 @@ func (s *FeishuService) BindUserByEmail(userID uint, email string, actor string)
 		user.FeishuUnionID = ""
 		user.FeishuBoundAt = nil
 	}
-	if err := s.userRepo.Update(user); err != nil {
+	if err := s.userRepo.UpdateFeishu(user); err != nil {
 		s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actor, false, err.Error(), 0)
 		return nil, err
 	}
@@ -570,7 +579,7 @@ func (s *FeishuService) UnbindUser(userID uint, actor string) (*entity.User, err
 	user.FeishuUnionID = ""
 	user.FeishuChatID = ""
 	user.FeishuBoundAt = nil
-	if err := s.userRepo.Update(user); err != nil {
+	if err := s.userRepo.UpdateFeishu(user); err != nil {
 		return nil, err
 	}
 
@@ -742,7 +751,7 @@ func (s *FeishuService) ResolveAuthorizedUser(openID, unionID string) (*entity.U
 		changed = true
 	}
 	if changed {
-		if err := s.userRepo.Update(user); err != nil {
+		if err := s.userRepo.UpdateFeishu(user); err != nil {
 			s.logRepo.RecordWithActor("feishu_bind", fmt.Sprintf("user:%s(%d)", user.Username, user.ID), actorFeishuWebhook, false, "首次私聊补全飞书身份失败："+err.Error(), 0)
 			return nil, err
 		}

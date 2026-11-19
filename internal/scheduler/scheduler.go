@@ -44,6 +44,7 @@ func New() *Scheduler {
 // Start 启动所有定时任务，ctx 取消时自动退出
 func (s *Scheduler) Start(ctx context.Context) {
 	go service.RunConfigDeployments(ctx)
+	go service.NewDNSService().Run(ctx)
 	driftInterval := s.settingSvc.GetInt(service.KeySchedulerDriftInterval)
 	healthInterval := s.settingSvc.GetInt(service.KeySchedulerHealthInterval)
 	trafficInterval := s.settingSvc.GetInt(service.KeySchedulerTrafficInterval)

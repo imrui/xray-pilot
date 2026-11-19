@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, expect, test, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import Nodes from '@/pages/Nodes'
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
 import request from '@/lib/axios'
+import type { DNSBinding } from '@/lib/dns'
 import { useAuthStore } from '@/store/auth'
 
 const rawHash = 'a'.repeat(64)
@@ -15,20 +16,27 @@ let client: QueryClient
 afterEach(() => {
   cleanup()
   client.clear()
+  vi.useRealTimers()
   request.defaults.adapter = originalAdapter
 })
 
-function mountNodes(reason: string, role: 'super_admin' | 'admin' = 'super_admin', initialCheck?: string) {
+function mountNodes(reason: string, role: 'super_admin' | 'admin' = 'super_admin', initialCheck?: string, readDNS = (): DNSBinding[] => []) {
   useAuthStore.getState().setSession('test', role, role)
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const errorAt = '2026-11-19T10:00:00.500Z'
   let checked = initialCheck
+  let ip = '192.0.2.7'
   let stale = false
   const post = vi.fn()
+  const listNodes = vi.fn()
   const getData = (url: string, body: string) => {
-    const node = { id: 7, name: '台北节点', ip: '192.0.2.7', active: true, sync_status: 'failed',
+    const node = { id: 7, name: '台北节点', ip, active: true, sync_status: 'failed',
       last_check_at: checked, last_check_ok: !!checked, last_sync_at: errorAt }
-    if (url === '/nodes') return { list: [node], total: 1 }
+    if (url === '/nodes') {
+      listNodes()
+      return { list: [{ ...node, domain: 'example.test' }], total: 1 }
+    }
+    if (url === '/dns/bindings') return readDNS()
     if (url === '/profiles') return { list: [], total: 0 }
     if (url === '/nodes/7/keys') return []
     if (url === '/nodes/filter-options') return { regions: [], owners: [] }
@@ -57,8 +65,45 @@ function mountNodes(reason: string, role: 'super_admin' | 'admin' = 'super_admin
     config, data: { code: 0, data: getData(config.url!, config.data) }, headers: {}, status: 200, statusText: 'OK',
   })
   render(<QueryClientProvider client={client}><MemoryRouter><ConfirmProvider><Nodes /></ConfirmProvider></MemoryRouter></QueryClientProvider>)
-  return { post, changeRemote: () => { stale = true } }
+  return { post, listNodes, replaceIP: (next: string) => { ip = next }, changeRemote: () => { stale = true } }
 }
+
+test.each(['admin', 'super_admin'] as const)('%s 在节点列表和抽屉通过轻量接口刷新 DNS', async role => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  const binding: DNSBinding = { node_id: 7, domain: 'example.test', type: 'A', confirmed_ip: '192.0.2.1',
+    desired_ip: '192.0.2.7', status: 'pending', message: '' }
+  let bindings = [binding]
+  const readDNS = vi.fn(() => bindings)
+  const { listNodes, replaceIP } = mountNodes('', role, undefined, readDNS)
+  await screen.findByText('DNS · 待同步')
+  fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+  const drawer = within(await screen.findByRole('dialog', { name: '编辑节点 · 台北节点' }))
+  expect(drawer.getByText(/example\.test（A） · 待同步/)).toBeTruthy()
+
+  bindings = [{ ...binding, confirmed_ip: binding.desired_ip, status: 'synced' }]
+  await act(() => vi.advanceTimersByTimeAsync(3000))
+  await screen.findByText('DNS · 已更新')
+  expect(drawer.getByText(/example\.test（A） · 已更新/)).toBeTruthy()
+  expect(listNodes).toHaveBeenCalledTimes(1)
+  replaceIP('192.0.2.8')
+  await act(() => vi.advanceTimersByTimeAsync(2000))
+  await screen.findByText('192.0.2.8')
+  expect(listNodes).toHaveBeenCalledTimes(2)
+  await act(() => vi.advanceTimersByTimeAsync(4000))
+  expect(readDNS).toHaveBeenCalledTimes(2)
+
+  bindings = [{ ...binding, status: 'rebind' }]
+  fireEvent.click(drawer.getByRole('button', { name: '刷新' }))
+  await screen.findByText('DNS · 需重新绑定')
+  expect(drawer.queryByRole('button', { name: '手动同步' })).toBeNull()
+  expect(Boolean(drawer.queryByRole('button', { name: '重新绑定' }))).toBe(role === 'super_admin')
+  bindings = []
+  fireEvent.click(drawer.getByRole('button', { name: '刷新' }))
+  await drawer.findByText('未绑定 DNS 记录')
+  expect(screen.queryByText('DNS · 需重新绑定')).toBeNull()
+  expect(readDNS).toHaveBeenCalledTimes(4)
+  expect(listNodes).toHaveBeenCalledTimes(2)
+})
 
 test.each(['PREFLIGHT_FAILED', 'IPV6_UNAVAILABLE', 'VERSION_UNSUPPORTED', 'PATH_MISMATCH', 'ROLLED_BACK',
   'ROLLBACK_FAILED', 'AUTHORIZATION_STOPPED', 'HEALTH_FAILED', 'HEALTH_PROBE_UNAVAILABLE', '生成配置失败', '协议配置不完整'])(

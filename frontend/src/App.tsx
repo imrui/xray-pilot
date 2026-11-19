@@ -9,6 +9,7 @@ import Nodes from '@/pages/Nodes'
 import Profiles from '@/pages/Profiles'
 import Logs from '@/pages/Logs'
 import Routing from '@/pages/Routing'
+import DNSSection from '@/pages/settings/DNSSection'
 import { AdminsSection, BackupSection, SettingsLayout, StatusSection, SubscriptionSection, SyncSection } from '@/pages/settings'
 import { useAuthStore } from '@/store/auth'
 import { ConfirmProvider } from '@/components/ui/ConfirmProvider'
@@ -48,6 +49,7 @@ export default function App() {
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<Navigate to="/settings/status" replace />} />
                   <Route path="status" element={<StatusSection />} />
+                  <Route path="dns" element={<DNSSection />} />
                   <Route path="sync" element={<SyncSection />} />
                   <Route path="subscription" element={<SubscriptionSection />} />
                   <Route path="backup" element={<BackupSection />} />

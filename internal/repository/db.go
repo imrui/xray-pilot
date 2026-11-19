@@ -45,6 +45,7 @@ func Connect() error {
 			LogLevel:                  gormlogger.Warn,
 			IgnoreRecordNotFoundError: true,
 			Colorful:                  true,
+			ParameterizedQueries:      true,
 		},
 	)
 	db, err := gorm.Open(dialector, &gorm.Config{Logger: dbLogger})
@@ -124,7 +125,7 @@ func autoMigrate(db *gorm.DB) error {
 		&entity.InboundProfile{},
 		&entity.NodeProfileKey{},
 		&entity.SystemSetting{},
-		&entity.TrafficSample{},
+		&entity.DNSConfig{}, &entity.DNSBinding{}, &entity.DeletedNode{}, &entity.TrafficSample{},
 		&entity.TrafficPoll{},
 		&entity.UserTrafficTotal{},
 		&entity.NodeInstallToken{},
@@ -132,6 +133,15 @@ func autoMigrate(db *gorm.DB) error {
 		&entity.NodeAlertState{},
 	); err != nil {
 		return err
+	}
+	// 旧版 review 同时表示远端冲突和暂停后的核对。只读重查这些旧记录，由执行器区分两者。
+	if err := db.Model(&entity.DNSBinding{}).
+		Where("status = ? AND (message LIKE ? OR message LIKE ?)", entity.DNSReview, "远端当前值 %，请核对绑定", "DNS 记录与绑定不一致，请重新核对%").
+		Updates(map[string]any{"status": entity.DNSChecking, "message": "正在只读核对远端记录", "version": gorm.Expr("version + 1"), "retries": 0, "retry_at": nil}).Error; err != nil {
+		return err
+	}
+	if db.Dialector.Name() == "postgres" {
+		return advanceNodeSequence(db)
 	}
 	if db.Dialector.Name() == "sqlite" {
 		// Expression indexes keep normalized legacy timestamp range queries indexed.

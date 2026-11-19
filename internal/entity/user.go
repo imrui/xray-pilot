@@ -5,15 +5,16 @@ import "time"
 // User 订阅用户实体（VPN 用户，不含管理员账号）
 // 管理员账号由 config.yaml 的 admins 字段管理
 type User struct {
-	ID            uint   `gorm:"primaryKey"`
-	Username      string `gorm:"uniqueIndex;not null"`
-	RealName      string
-	UUID          string     `gorm:"uniqueIndex;not null"` // VLESS UUID
-	Token         string     `gorm:"uniqueIndex;not null"` // 订阅 Token
-	LegacyGroupID *uint      `gorm:"column:group_id"`
-	Groups        []Group    `gorm:"many2many:user_groups"`
-	Active        bool       `gorm:"default:true"`
-	ExpiresAt     *time.Time // nil 表示永久有效
+	ID                  uint    `gorm:"primaryKey"`
+	RelaySubscriptionID *string `gorm:"uniqueIndex"`
+	Username            string  `gorm:"uniqueIndex;not null"`
+	RealName            string
+	UUID                string     `gorm:"uniqueIndex;not null"` // VLESS UUID
+	Token               string     `gorm:"uniqueIndex;not null"` // 订阅 Token
+	LegacyGroupID       *uint      `gorm:"column:group_id"`
+	Groups              []Group    `gorm:"many2many:user_groups"`
+	Active              bool       `gorm:"default:true"`
+	ExpiresAt           *time.Time // nil 表示永久有效
 	// 过期摘除打标：调度器把过期用户从节点运行时摘除后写入，避免每周期重复扫；
 	// ExpiresAt 变更（续期）时清空，使续期后的再次过期能被重新处理。
 	ExpiredSweptAt *time.Time

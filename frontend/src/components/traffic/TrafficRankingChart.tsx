@@ -1,11 +1,20 @@
 import { useState } from 'react'
 import { Btn } from '@/components/ui/Form'
 import { formatBytes } from '@/lib/utils'
+import { trafficName } from '@/types/traffic'
 import type { TrafficAmount, TrafficDimension, TrafficDirection, TrafficOption } from '@/types/traffic'
 import { useChartWidth } from './useChartWidth'
 
 type Row = TrafficOption & TrafficAmount
 const amount = (row: Row, direction: TrafficDirection) => direction === 'up' ? row.up_bytes : direction === 'down' ? row.down_bytes : row.up_bytes + row.down_bytes
+
+function axisLabel(row: Row, slot: number) {
+  const full = trafficName(row)
+  const capacity = Math.max(4, Math.floor(slot / 12))
+  if (full.length <= capacity) return full
+  if (row.deleted && full !== row.name) return row.name.slice(0, Math.max(2, capacity - 3)) + '·已删除'
+  return full.slice(0, capacity - 1) + '…'
+}
 
 export function TrafficRankingChart({ rows, dimension, direction, onSelect }: {
   rows: Row[]; dimension: TrafficDimension; direction: TrafficDirection; onSelect: (id: number) => void
@@ -29,7 +38,7 @@ export function TrafficRankingChart({ rows, dimension, direction, onSelect }: {
   const selected = shown.find(row => row.id === focused)
   const label = dimension === 'user' ? '用户' : dimension === 'node' ? '节点' : '范围'
   const directionLabel = direction === 'up' ? '上行' : direction === 'down' ? '下行' : '总用量'
-  const fullLabel = (row: Row) => `${row.name}，上行 ${formatBytes(row.up_bytes)}，下行 ${formatBytes(row.down_bytes)}，${directionLabel} ${formatBytes(amount(row, direction))}，占比 ${total ? (amount(row, direction) / total * 100).toFixed(1) : '0'}%`
+  const fullLabel = (row: Row) => `${trafficName(row)}，上行 ${formatBytes(row.up_bytes)}，下行 ${formatBytes(row.down_bytes)}，${directionLabel} ${formatBytes(amount(row, direction))}，占比 ${total ? (amount(row, direction) / total * 100).toFixed(1) : '0'}%`
   return <div ref={container} className="min-w-0">
     {!rows.length ? <p className="flex min-h-72 items-center justify-center text-sm text-soft">该范围暂无流量记录</p> : <>
       <div className="relative">
@@ -47,8 +56,8 @@ export function TrafficRankingChart({ rows, dimension, direction, onSelect }: {
               <rect x={x(i) - barWidth / 2} y={y(amount(row, direction))} width={barWidth} height={y(row.down_bytes) - y(amount(row, direction))} fill="var(--accent)" />
             </> : <rect x={x(i) - barWidth / 2} y={y(amount(row, direction))} width={barWidth} height={bottom - y(amount(row, direction))} fill={direction === 'up' ? 'var(--accent)' : 'var(--success)'} rx="3" />}
             <text x={x(i)} y={y(amount(row, direction)) - 9} textAnchor="middle" fontSize="11" fill="var(--text)">{formatBytes(amount(row, direction))}</text>
-            <text x={x(i)} y="294" textAnchor="middle" fontSize="12" fill="var(--text-soft)">{row.name.length > Math.max(4, Math.floor(slot / 13)) ? row.name.slice(0, Math.max(3, Math.floor(slot / 13) - 1)) + '…' : row.name}</text>
-            <text x={x(i)} y="313" textAnchor="middle" fontSize="10" fill="var(--text-faint)">#{offset + i + 1}</text>
+            <text x={x(i)} y="294" textAnchor="middle" fontSize="12" fill="var(--text-soft)">{axisLabel(row, slot)}</text>
+            <text x={x(i)} y="313" textAnchor="middle" fontSize="10" fill="var(--text-faint)">第 {offset + i + 1} 名</text>
           </g>)}
         </svg>
         {selected && <div role="status" className="pointer-events-none absolute right-0 top-0 max-w-[min(320px,100%)] break-words rounded-lg border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-xs leading-6 shadow-[var(--shadow-panel)]">{fullLabel(selected)}</div>}

@@ -1,9 +1,12 @@
 export type TrafficDimension = 'all' | 'node' | 'user'
 export type TrafficDirection = 'total' | 'up' | 'down'
-export interface TrafficOption { id: number; name: string }
+export interface TrafficOption { id: number; name: string; deleted?: boolean }
+export function trafficName(item: { id: number | string; name: string; deleted?: boolean }) {
+  return item.deleted && item.name !== `已删除节点 #${item.id}` ? `${item.name} · 已删除 · ID ${item.id}` : item.name
+}
 export interface TrafficAmount { up_bytes: number; down_bytes: number }
 export interface TrafficPoint { time: string; up_bytes: number | null; down_bytes: number | null }
-export interface TrafficSeries { id: string; name: string; points: TrafficPoint[] }
+export interface TrafficSeries { id: string; name: string; deleted?: boolean; points: TrafficPoint[] }
 export interface TrafficAnalytics extends TrafficAmount {
   start: string; end: string; timezone: string; interval: 'hour' | 'day'
   active_users: number; active_nodes: number

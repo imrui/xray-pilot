@@ -2,6 +2,14 @@ package entity
 
 import "time"
 
+// DeletedNode 保留节点删除时的身份，供历史流量使用。
+type DeletedNode struct {
+	NodeID    uint `gorm:"primaryKey;autoIncrement:false"`
+	Name      string
+	CreatedAt time.Time
+	DeletedAt time.Time
+}
+
 // TrafficSample 单周期、单用户、单节点的流量增量记录
 //
 // 由 TrafficPoller 每个调度周期写入一行。值为该周期内（period_end 之前到上次拉取之后）

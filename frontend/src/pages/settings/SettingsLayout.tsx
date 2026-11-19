@@ -36,6 +36,7 @@ export default function SettingsLayout() {
       qc.setQueryData(['system-settings'], res.data.data)
       void qc.invalidateQueries({ queryKey: ['system-diagnostics'] })
       void qc.invalidateQueries({ queryKey: ['system-feishu-status'] })
+      void qc.invalidateQueries({ queryKey: ['users'] })
       setDraft(null)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)

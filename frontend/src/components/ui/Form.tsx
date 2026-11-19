@@ -1,17 +1,25 @@
-import { type InputHTMLAttributes, useId } from 'react'
+import { type InputHTMLAttributes, type ReactNode, useId } from 'react'
 import { cn } from '@/lib/utils'
 
 interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string
+  labelHint?: ReactNode
   error?: string
 }
 
-export function Field({ label, error, className, ...props }: FieldProps) {
+export function Field({ label, labelHint, error, className, ...props }: FieldProps) {
   const generatedID = useId()
   const id = props.id ?? generatedID
+  const hintId = labelHint ? `${id}-hint` : undefined
+  const fieldLabel = <label htmlFor={id} className="text-[12px] font-medium text-soft">{label}</label>
   return (
     <div className="flex flex-col space-y-1.5">
-      <label htmlFor={id} className="text-[12px] font-medium text-soft">{label}</label>
+      {labelHint ? (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          {fieldLabel}
+          <span id={hintId} className="min-w-0 max-w-full text-xs text-soft">{labelHint}</span>
+        </div>
+      ) : fieldLabel}
       <input
         className={cn(
           'h-10 w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] px-3 text-sm text-[var(--text)] placeholder:text-faint transition-all duration-200 focus:border-[var(--accent)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-ring)]',
@@ -19,6 +27,7 @@ export function Field({ label, error, className, ...props }: FieldProps) {
           className
         )}
         {...props}
+        aria-describedby={[props['aria-describedby'], hintId].filter(Boolean).join(' ') || undefined}
         id={id}
       />
       {error && <p className="mt-1 text-[11px] font-medium text-[var(--danger)]">{error}</p>}

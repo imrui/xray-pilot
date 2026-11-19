@@ -30,7 +30,9 @@ function fallbackCopy(text: string): boolean {
   ta.style.cssText =
     'position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;outline:0;opacity:0;pointer-events:none'
   ta.setAttribute('readonly', '')
-  document.body.appendChild(ta)
+  const previousFocus = document.activeElement
+  const container = previousFocus?.closest('dialog[open], [role="dialog"]') ?? document.body
+  container.appendChild(ta)
 
   let ok = false
   try {
@@ -41,7 +43,8 @@ function fallbackCopy(text: string): boolean {
   } catch {
     ok = false
   } finally {
-    document.body.removeChild(ta)
+    ta.remove()
+    if (previousFocus instanceof HTMLElement) previousFocus.focus({ preventScroll: true })
   }
   return ok
 }

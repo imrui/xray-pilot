@@ -59,6 +59,9 @@ export default function SubscriptionSection() {
         </div>
       </Section>
 
+      <Section title="内网中转订阅" description="向有效用户展示个人内网中转订阅地址，并随飞书订阅消息发送。" actions={<label className="inline-flex items-center gap-2 text-sm">启用内网中转订阅<Switch checked={form['subscription.relay_enabled'] === 'true'} onChange={value => set('subscription.relay_enabled', String(value))} /></label>}>
+        <Field label="内网中转订阅地址前缀" value={form['subscription.relay_prefix'] ?? ''} onChange={f('subscription.relay_prefix')} placeholder="http://192.168.0.2:2096/sub/" />
+      </Section>
       <Section
         title="飞书机器人"
         description="关闭后保留机器人凭据，订阅链接、订阅页和二维码仍可使用。"

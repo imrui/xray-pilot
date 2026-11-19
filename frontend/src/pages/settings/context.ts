@@ -26,6 +26,7 @@ export function useSettingsForm() {
 export const SETTINGS_SECTIONS = [
   { key: 'status', label: '运行状态', hint: '系统信息与部署诊断', form: false },
   { key: 'sync', label: '节点与同步', hint: 'SSH、Xray 安装版本与日志、调度周期', form: true },
+  { key: 'dns', label: '节点 DNS 同步', hint: 'Cloudflare 凭据与记录状态', form: false, superAdminOnly: true },
   { key: 'subscription', label: '订阅与通知', hint: '订阅链接、飞书机器人、节点告警', form: true },
   { key: 'backup', label: '数据备份', hint: '备份周期与快照文件', form: true },
   { key: 'admins', label: '管理员', hint: '面板登录账号', form: false, superAdminOnly: true },

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -69,6 +70,10 @@ func (h *UserHandler) Create(c *gin.Context) {
 	}
 	user, err := h.svc.Create(&req, h.baseURL(c))
 	if err != nil {
+		if errors.Is(err, service.ErrRelayID) || errors.Is(err, service.ErrRelayDuplicate) {
+			response.BadRequest(c, err.Error())
+			return
+		}
 		response.Fail(c, 500, err.Error())
 		return
 	}
@@ -87,12 +92,12 @@ func (h *UserHandler) List(c *gin.Context) {
 		}
 		filter.GroupID = uint(id)
 	}
-	users, total, err := h.svc.List(page, pageSize, h.baseURL(c), filter)
+	result, err := h.svc.List(page, pageSize, h.baseURL(c), filter)
 	if err != nil {
 		response.Fail(c, 500, err.Error())
 		return
 	}
-	response.PageSuccess(c, total, users)
+	response.Success(c, result)
 }
 
 func (h *UserHandler) Update(c *gin.Context) {
@@ -108,6 +113,10 @@ func (h *UserHandler) Update(c *gin.Context) {
 	}
 	user, err := h.svc.Update(uint(id), &req, h.baseURL(c))
 	if err != nil {
+		if errors.Is(err, service.ErrRelayID) || errors.Is(err, service.ErrRelayDuplicate) {
+			response.BadRequest(c, err.Error())
+			return
+		}
 		response.Fail(c, 500, err.Error())
 		return
 	}

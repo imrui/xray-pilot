@@ -6,6 +6,7 @@ import (
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type NodeRepository struct{}
@@ -28,6 +29,11 @@ func NewNodeRepository() *NodeRepository {
 
 func (r *NodeRepository) Create(node *entity.Node) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if tx.Dialector.Name() == "sqlite" {
+			if err := nextSQLiteNodeID(tx, node); err != nil {
+				return err
+			}
+		}
 		if err := tx.Create(node).Error; err != nil {
 			return err
 		}
@@ -143,9 +149,12 @@ func (r *NodeRepository) FindAll() ([]entity.Node, error) {
 	return nodes, err
 }
 
-func (r *NodeRepository) Update(node *entity.Node) error {
+func (r *NodeRepository) Update(node *entity.Node, actor string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(node).Error; err != nil {
+			return err
+		}
+		if err := updateDNSIntent(tx, node, actor); err != nil {
 			return err
 		}
 		return InvalidateConfigs(tx, []uint{node.ID})
@@ -158,9 +167,12 @@ func (r *NodeRepository) UpdateActive(id uint, active bool) error {
 
 // ReplaceHost invalidates receipts from the old machine while preserving routing bindings.
 // The caller holds the configuration lease throughout replacement registration.
-func (r *NodeRepository) ReplaceHost(node *entity.Node, bootstrapHash string) error {
+func (r *NodeRepository) ReplaceHost(node *entity.Node, bootstrapHash, actor string) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(node).Error; err != nil {
+			return err
+		}
+		if err := updateDNSIntent(tx, node, actor); err != nil {
 			return err
 		}
 		if err := InvalidateConfigs(tx, []uint{node.ID}); err != nil {
@@ -190,6 +202,19 @@ func (r *NodeRepository) ReplaceHost(node *entity.Node, bootstrapHash string) er
 //   - nodes（节点本身）
 func (r *NodeRepository) Delete(id uint) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
+		var node entity.Node
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&node, id).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil
+			}
+			return err
+		}
+		if err := tx.Create(&entity.DeletedNode{NodeID: id, Name: node.Name, CreatedAt: node.CreatedAt, DeletedAt: time.Now()}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("node_id = ?", id).Delete(&entity.DNSBinding{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Exec("DELETE FROM group_nodes WHERE node_id = ?", id).Error; err != nil {
 			return err
 		}

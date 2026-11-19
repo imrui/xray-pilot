@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Copy, FileCode, Filter, Lock, PencilLine, Plus, RefreshCw, Sparkles, Terminal, Wifi } from 'lucide-react'
 import { OneClickInstallDialog } from '@/components/OneClickInstallDialog'
+import { dnsStatus, useDNSBindings } from '@/lib/dns'
+import { NodeDNS } from '@/components/nodes/NodeDNS'
 import { nodeApi, profileApi } from '@/lib/api'
 import { fetchAllPages } from '@/lib/pagination'
 import { useListSearch } from '@/lib/use-list-search'
@@ -145,6 +147,8 @@ export default function Nodes() {
         })
         .then((r) => r.data.data!),
   })
+  const { data: bindings, isFetching: refreshingDNS, refetch: refreshDNS } = useDNSBindings()
+  const dnsByNode = useMemo(() => bindings && new Map(bindings.map(b => [b.node_id, b])), [bindings])
   const { data: profiles = [] } = useQuery({
     queryKey: ['profiles-for-nodes'],
     queryFn: () => fetchAllPages((page, pageSize) =>
@@ -175,7 +179,7 @@ export default function Nodes() {
   if (regionFilter) regions.add(regionFilter)
   if (ownerFilter) owners.add(ownerFilter)
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['nodes'] })
+  const invalidate = () => Promise.all([qc.invalidateQueries({ queryKey: ['nodes'] }), qc.invalidateQueries({ queryKey: ['dns-bindings'] })])
   const nodeStatus = (n: Node) => {
     const row = routing.data?.nodes.find(row => row.id === n.id)
     if (row?.error) return { label: '路由冲突', tip: row.error, variant: 'red' as const }
@@ -303,12 +307,13 @@ export default function Nodes() {
   const f = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [k]: e.target.value }))
 
-  // 筛选已由服务端完成，这里只做当前页内的名称排序
+  // 轻量查询返回后，以其为准，包括已解除的绑定。
   const filteredNodes = useMemo(() => {
-    return [...(data?.list ?? [])].sort((a, b) =>
+    const nodes = (data?.list ?? []).map(n => dnsByNode ? { ...n, dns_binding: dnsByNode.get(n.id) } : n)
+    return nodes.sort((a, b) =>
       a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }),
     )
-  }, [data?.list])
+  }, [data?.list, dnsByNode])
 
   const allVisibleSelected = filteredNodes.length > 0 && filteredNodes.every((n) => selectedIds.includes(n.id))
   const dirty = JSON.stringify(form) !== JSON.stringify(initialForm) && drawer.open
@@ -661,6 +666,7 @@ export default function Nodes() {
                     <td className="px-3 py-3.5">
                       <CopyableAddress value={n.ip} strong />
                       {n.domain && <CopyableAddress value={n.domain} />}
+                      {n.dns_binding && <span className="text-xs text-soft">DNS · {dnsStatus[n.dns_binding.status]}</span>}
                     </td>
                     <td className="px-3 py-3.5">
                       <Tooltip
@@ -808,6 +814,13 @@ export default function Nodes() {
             </div>
           </FieldGroup>
 
+          {drawer.node && <NodeDNS
+            id={drawer.node.id}
+            binding={dnsByNode ? dnsByNode.get(drawer.node.id) : drawer.node.dns_binding}
+            changed={form.ip.trim() !== drawer.node.ip || form.domain.trim() !== (drawer.node.domain ?? '')}
+            refreshing={refreshingDNS}
+            onRefresh={() => void refreshDNS()}
+          />}
           <FieldGroup title="SSH 连接">
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="SSH 端口" value={form.ssh_port} onChange={f('ssh_port')} type="number" />
