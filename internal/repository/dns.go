@@ -40,7 +40,8 @@ func updateDNSIntent(tx *gorm.DB, node *entity.Node, actor string) error {
 	switch {
 	case !valid || cfg.ZoneID != b.ZoneID:
 		status, message = entity.DNSRebind, "域名、地址族或 Zone 已改变，请重新绑定"
-	case !cfg.Enabled || !node.Active:
+	// DNS 跟随节点地址，节点启停不影响已绑定记录的同步。
+	case !cfg.Enabled:
 		status, message = entity.DNSReview, "自动同步暂停，请核对后手动同步"
 	case b.Status == entity.DNSReview:
 		status, message = entity.DNSReview, b.Message

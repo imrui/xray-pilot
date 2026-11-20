@@ -116,6 +116,120 @@ func (f *cloudFixture) run(t *testing.T) {
 	}
 }
 
+func (f *cloudFixture) disableNode(t *testing.T) {
+	t.Helper()
+	if err := NewNodeService().ToggleActive(f.node.ID); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repository.NewNodeRepository().FindByID(f.node.ID)
+	if err != nil || node.Active {
+		t.Fatal("node was not disabled", err)
+	}
+}
+
+func TestDNSDisabledNodeAutomaticSync(t *testing.T) {
+	f := dnsFixture(t)
+	f.disableNode(t)
+	f.move(t, "192.0.2.2")
+	if b := f.state(t); b.Status != entity.DNSPending || b.DesiredIP != "192.0.2.2" {
+		t.Fatalf("disabled node did not queue its new address: %+v", b)
+	}
+	f.run(t)
+	if b := f.state(t); b.Status != entity.DNSSynced || b.ConfirmedIP != "192.0.2.2" || f.row.Content != "192.0.2.2" || f.patches != 1 {
+		t.Fatalf("disabled node did not update Cloudflare: %+v, patches=%d", b, f.patches)
+	}
+	node, err := repository.NewNodeRepository().FindByID(f.node.ID)
+	if err != nil || node.Active {
+		t.Fatal("DNS synchronization changed the node activation state", err)
+	}
+}
+
+func TestDNSDisabledNodeManualSync(t *testing.T) {
+	f := dnsFixture(t)
+	f.disableNode(t)
+	f.row.Content = "192.0.2.19"
+	f.bind(t)
+	if b := f.state(t); b.Status != entity.DNSReview || f.patches != 0 {
+		t.Fatalf("binding a different address wrote without manual sync: %+v", b)
+	}
+	if err := f.svc.Retry(f.node.ID, "admin:manual"); err != nil {
+		t.Fatal("disabled node rejected manual DNS sync", err)
+	}
+	f.run(t)
+	if b := f.state(t); b.Status != entity.DNSSynced || b.ConfirmedIP != f.node.IP || b.Actor != "admin:manual" || f.row.Content != f.node.IP || f.patches != 1 {
+		t.Fatalf("manual sync did not converge for disabled node: %+v, patches=%d", b, f.patches)
+	}
+}
+
+func TestDNSDisabledNodeUnchangedAddressDoesNotWrite(t *testing.T) {
+	f := dnsFixture(t)
+	f.disableNode(t)
+	f.bind(t)
+	b := f.state(t)
+	if b.Status != entity.DNSSynced || f.patches != 0 {
+		t.Fatal("same-address binding unexpectedly wrote DNS")
+	}
+	f.move(t, f.node.IP)
+	if next := f.state(t); next.Status != entity.DNSSynced || next.Version != b.Version {
+		t.Fatalf("saving the same address queued an update: %+v", next)
+	}
+	requests := f.requests
+	if err := f.svc.Retry(f.node.ID, "admin:manual"); err != nil {
+		t.Fatal(err)
+	}
+	f.run(t)
+	if b := f.state(t); b.Status != entity.DNSSynced || f.requests != requests+1 || f.patches != 0 || f.row.Content != f.node.IP {
+		t.Fatalf("same-address manual sync must only read Cloudflare: %+v, requests=%d, patches=%d", b, f.requests-requests, f.patches)
+	}
+}
+
+func TestDNSDisabledNodeRespectsGlobalPause(t *testing.T) {
+	for _, pauseBeforeSave := range []bool{true, false} {
+		name := "pause_after_queue"
+		if pauseBeforeSave {
+			name = "pause_before_save"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := dnsFixture(t)
+			f.disableNode(t)
+			if !pauseBeforeSave {
+				f.move(t, "192.0.2.2")
+				if f.state(t).Status != entity.DNSPending {
+					t.Fatal("address change was not queued before pause")
+				}
+			}
+			cfg := DNSSettingsInput{Provider: "cloudflare", ZoneID: strings.Repeat("a", 32)}
+			if err := f.svc.SaveSettings(cfg, false, "admin:pause"); err != nil {
+				t.Fatal(err)
+			}
+			if pauseBeforeSave {
+				f.move(t, "192.0.2.2")
+			}
+			requests := f.requests
+			if err := f.svc.Retry(f.node.ID, "admin:manual"); err == nil {
+				t.Fatal("global pause allowed manual DNS sync")
+			}
+			f.run(t)
+			if b := f.state(t); b.Status != entity.DNSReview || b.DesiredIP != "192.0.2.2" || f.requests != requests || f.patches != 0 || f.row.Content != f.node.IP {
+				t.Fatalf("global pause did not block automatic DNS sync: %+v, requests=%d, patches=%d", b, f.requests-requests, f.patches)
+			}
+		})
+	}
+}
+
+func TestDNSQueuedSyncSurvivesNodeDisable(t *testing.T) {
+	f := dnsFixture(t)
+	f.move(t, "192.0.2.2")
+	if f.state(t).Status != entity.DNSPending {
+		t.Fatal("address change was not queued")
+	}
+	f.disableNode(t)
+	f.run(t)
+	if b := f.state(t); b.Status != entity.DNSSynced || f.row.Content != "192.0.2.2" || f.patches != 1 {
+		t.Fatalf("disabling node canceled queued DNS sync: %+v, patches=%d", b, f.patches)
+	}
+}
+
 func TestDNSReplacementAndPause(t *testing.T) {
 	f := dnsFixture(t)
 	install := NewInstallService()

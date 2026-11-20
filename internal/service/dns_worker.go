@@ -94,7 +94,7 @@ func (s *DNSService) process(parent context.Context, id uint) error {
 	if err := db.First(&node, b.NodeID).Error; err != nil {
 		return err
 	}
-	if !cfg.Enabled || !node.Active {
+	if !cfg.Enabled {
 		return finishDNS(b, entity.DNSReview, "同步已暂停", nil)
 	}
 	if cfg.ZoneID != b.ZoneID {

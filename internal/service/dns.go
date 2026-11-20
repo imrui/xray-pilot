@@ -231,8 +231,8 @@ func (s *DNSService) Retry(id uint, actor string) error {
 		if err := tx.First(&n, id).Error; err != nil {
 			return err
 		}
-		if !cfg.Enabled || !n.Active {
-			return DNSValidationError("请先启用 DNS 同步和节点")
+		if !cfg.Enabled {
+			return DNSValidationError("请先启用 DNS 同步")
 		}
 		result := tx.Model(&entity.DNSBinding{}).Where("node_id = ? AND zone_id = ? AND status IN ?", id, cfg.ZoneID, []string{entity.DNSReview, entity.DNSFailed, entity.DNSSynced}).Updates(map[string]any{"status": entity.DNSPending, "actor": actor, "version": gorm.Expr("version + 1"), "retry_at": nil, "retries": 0, "message": "等待同步"})
 		if result.Error != nil {
