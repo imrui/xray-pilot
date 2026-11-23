@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/xray"
+	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
 
 func outboundProbeFixture(t *testing.T) *entity.Node {
@@ -53,15 +55,16 @@ func TestOutboundProbeUsesSavedEffectiveVLESSAndPreservesSyncState(t *testing.T)
 	before := configState()
 	svc := NewSyncService()
 	var tags []string
-	probeRemoteOutbound = func(ctx context.Context, p xray.SSHParams, tag string) (time.Duration, error) {
+	probeRemoteOutbound = func(ctx context.Context, p xray.SSHParams, tag string) (xssh.OutboundProbeMeasurements, error) {
 		if _, ok := ctx.Deadline(); !ok || p.Host != node.IP || p.ConfigPath != "/etc/xray/los1.json" || p.ProbeURL != url {
 			t.Fatal("missing deadline or incorrect probe parameters")
 		}
 		tags = append(tags, tag)
 		if tag == "replacement" {
-			return 0, errors.New("经此出站的 HTTPS 请求失败")
+			return xssh.OutboundProbeMeasurements{}, errors.New("经此出站的 HTTPS 请求失败")
 		}
-		return 17 * time.Millisecond, nil
+		rtt := 3 * time.Millisecond
+		return xssh.OutboundProbeMeasurements{HTTPSElapsed: 17 * time.Millisecond, TCPRTT: &rtt}, nil
 	}
 	for _, tag := range []string{"remapped", "ordinary", "unknown", "direct", ""} {
 		if _, err := svc.TestOutbound(context.Background(), node.ID, tag); !errors.Is(err, ErrOutboundNotConfigured) {
@@ -69,7 +72,7 @@ func TestOutboundProbeUsesSavedEffectiveVLESSAndPreservesSyncState(t *testing.T)
 		}
 	}
 	ok, err := svc.TestOutbound(context.Background(), node.ID, "outbound-los2")
-	if err != nil || !ok.OK || ok.ElapsedMs != 17 || ok.CheckedAt.IsZero() || ok.Message == "" {
+	if err != nil || !ok.OK || ok.ElapsedMs != 17 || ok.TCPRTTMs == nil || *ok.TCPRTTMs != 3 || ok.CheckedAt.IsZero() || ok.Message == "" {
 		t.Fatalf("unexpected successful probe: %+v %v", ok, err)
 	}
 	failed, err := svc.TestOutbound(context.Background(), node.ID, "replacement")
@@ -81,13 +84,59 @@ func TestOutboundProbeUsesSavedEffectiveVLESSAndPreservesSyncState(t *testing.T)
 	}
 }
 
+func TestOutboundProbeReportsMeasurementsIndependently(t *testing.T) {
+	node := outboundProbeFixture(t)
+	zero := time.Duration(0)
+	subMillisecond := 350 * time.Microsecond
+	httpsErr := errors.New("经此出站的 HTTPS 请求失败")
+	const tcpError = "无法连接出站服务器 TCP 端口"
+	for _, tc := range []struct {
+		name       string
+		measured   xssh.OutboundProbeMeasurements
+		probeErr   error
+		wantTCP    string
+		wantTCPErr string
+	}{
+		{"TCP succeeds and HTTPS fails", xssh.OutboundProbeMeasurements{TCPRTT: &zero}, httpsErr, "0", ""},
+		{"submillisecond RTT", xssh.OutboundProbeMeasurements{HTTPSElapsed: 59 * time.Millisecond, TCPRTT: &subMillisecond}, nil, "0.35", ""},
+		{"TCP fails and HTTPS succeeds", xssh.OutboundProbeMeasurements{HTTPSElapsed: 59 * time.Millisecond, TCPMessage: tcpError}, nil, "", tcpError},
+		{"both fail", xssh.OutboundProbeMeasurements{TCPMessage: tcpError}, httpsErr, "", tcpError},
+		{"before probes start", xssh.OutboundProbeMeasurements{}, errors.New("节点探测未完成"), "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probeRemoteOutbound = func(context.Context, xray.SSHParams, string) (xssh.OutboundProbeMeasurements, error) {
+				return tc.measured, tc.probeErr
+			}
+			result, err := NewSyncService().TestOutbound(context.Background(), node.ID, "outbound-los2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.OK != (tc.probeErr == nil) || result.ElapsedMs != tc.measured.HTTPSElapsed.Milliseconds() || (tc.probeErr != nil && result.Message != tc.probeErr.Error()) {
+				t.Fatalf("unexpected HTTPS result: %+v", result)
+			}
+			payload, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(payload, &fields); err != nil {
+				t.Fatal(err)
+			}
+			_, hasTCPErr := fields["tcp_rtt_error"]
+			if string(fields["tcp_rtt_ms"]) != tc.wantTCP || hasTCPErr != (tc.wantTCPErr != "") || result.TCPRTTError != tc.wantTCPErr {
+				t.Fatalf("unexpected TCP result: %s", payload)
+			}
+		})
+	}
+}
+
 func TestOutboundProbeConcurrentRequestsAndCancellation(t *testing.T) {
 	node := outboundProbeFixture(t)
 	started := make(chan struct{})
-	probeRemoteOutbound = func(ctx context.Context, _ xray.SSHParams, _ string) (time.Duration, error) {
+	probeRemoteOutbound = func(ctx context.Context, _ xray.SSHParams, _ string) (xssh.OutboundProbeMeasurements, error) {
 		close(started)
 		<-ctx.Done()
-		return 0, ctx.Err()
+		return xssh.OutboundProbeMeasurements{}, ctx.Err()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -113,7 +162,9 @@ func TestOutboundProbeConcurrentRequestsAndCancellation(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	probeRemoteOutbound = func(context.Context, xray.SSHParams, string) (time.Duration, error) { return 0, nil }
+	probeRemoteOutbound = func(context.Context, xray.SSHParams, string) (xssh.OutboundProbeMeasurements, error) {
+		return xssh.OutboundProbeMeasurements{}, nil
+	}
 	if res, err := NewSyncService().TestOutbound(context.Background(), node.ID, "outbound-los2"); err != nil || !res.OK {
 		t.Fatalf("node still busy after cancellation: %+v %v", res, err)
 	}
