@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +22,8 @@ var knownHostsMu sync.Mutex
 
 // Client SSH 客户端，封装连接和常用操作
 type Client struct {
-	client *ssh.Client
+	client     *ssh.Client
+	stopCancel func() bool
 }
 
 // Config SSH 连接配置
@@ -36,6 +38,11 @@ type Config struct {
 
 // Connect 建立 SSH 连接（TOFU known_hosts 校验：首次自动信任并记录，后续严格比对）
 func Connect(cfg Config) (*Client, error) {
+	return ConnectContext(context.Background(), cfg)
+}
+
+// ConnectContext 将 TCP 拨号、SSH 握手及此连接上的会话绑定到 ctx 的生命周期。
+func ConnectContext(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 15 * time.Second
 	}
@@ -60,19 +67,32 @@ func Connect(cfg Config) (*Client, error) {
 		User:            cfg.User,
 		Auth:            authMethods,
 		HostKeyCallback: hostKeyCallback,
-		Timeout:         cfg.Timeout,
 	}
 
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", cfg.Port))
-	client, err := ssh.Dial("tcp", addr, sshCfg)
+	dialer := net.Dialer{Timeout: cfg.Timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("SSH 连接失败 (%s): %w", addr, err)
 	}
-	return &Client{client: client}, nil
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	clientConn, channels, requests, err := ssh.NewClientConn(conn, addr, sshCfg)
+	if err != nil {
+		stop()
+		_ = conn.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("SSH 连接失败 (%s): %w", addr, err)
+	}
+	return &Client{client: ssh.NewClient(clientConn, channels, requests), stopCancel: stop}, nil
 }
 
 // Close 关闭连接
 func (c *Client) Close() error {
+	if c.stopCancel != nil {
+		c.stopCancel()
+	}
 	return c.client.Close()
 }
 

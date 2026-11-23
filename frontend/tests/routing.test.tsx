@@ -283,6 +283,96 @@ test('已保存节点覆盖的无效 JSON 计入 dirty，阻止保存、影响�
   assert.deepEqual(saved.outbound_overrides.proxy.outbound, updated)
 })
 
+test('管理员可单独测试已下发的 VLESS 出站，区分成功、探测失败和请求失败', async () => {
+  const los2 = { tag: 'outbound-los2', protocol: 'vless' }
+  const replacement = { tag: 'replacement', protocol: 'socks' }
+  const remapped = { tag: 'remapped', protocol: 'vless' }
+  const direct = { tag: 'direct-egress', protocol: 'freedom' }
+  const checkedAt = '2026-11-24T05:00:00Z'
+  const result = { ok: true, checked_at: checkedAt, elapsed_ms: 312, message: '' }
+  let attempts = 0
+  api((method, url, body) => {
+    if (method === 'get' && url === '/nodes/1/routing') return {
+      ...binding, overrides: JSON.stringify({ outbound_overrides: {
+        replacement: { mode: 'replace', outbound: { ...los2, tag: replacement.tag } },
+        remapped: { mode: 'remap', target_tag: 'direct' },
+      } }),
+    }
+    if (url.endsWith('/template-preview')) return {
+      ...overview.nodes[0].routing, policy: { ...emptyPolicy, custom_outbounds: [los2, replacement, remapped, direct] },
+    }
+    if (url === '/nodes/1/outbound-test') {
+      assert.equal(method, 'post')
+      assert.deepEqual(body, { tag: los2.tag })
+      attempts++
+      if (attempts === 1) return result
+      if (attempts === 2) return { ...result, ok: false, elapsed_ms: 0, message: '无法读取节点配置' }
+      throw new Error('无法连接源节点')
+    }
+  })
+  mount(<RoutingBindingDrawer scope="node" id={1} name="los1" onClose={() => {}} />)
+  await act(() => { useAuthStore.getState().setSession('test', 'ops', 'admin') })
+  const button = await screen.findByRole('button', { name: '测试连接 · outbound-los2' })
+  assert.equal(button.matches(':disabled'), false)
+  assert.ok(screen.getByLabelText('出站覆盖模式 · outbound-los2').matches(':disabled'))
+  assert.ok(screen.getByRole('button', { name: '测试连接 · replacement' }))
+  for (const tag of ['remapped', 'direct-egress']) assert.equal(screen.queryByRole('button', { name: '测试连接 · ' + tag }), null)
+  assert.equal(attempts, 0)
+  fireEvent.click(button)
+  const success = await screen.findByText('上次测试成功')
+  assert.match(success.parentElement!.textContent ?? '', /312 ms/)
+  assert.equal(success.parentElement!.querySelector('time')?.dateTime, checkedAt)
+  fireEvent.click(button)
+  const failure = await screen.findByText('无法读取节点配置')
+  assert.doesNotMatch(failure.parentElement!.textContent ?? '', /耗时/)
+  assert.ok(screen.getByText('上次测试失败'))
+  assert.equal(screen.queryByText('上次测试成功'), null)
+  fireEvent.click(button)
+  await screen.findByText(/测试未完成.*无法连接源节点/)
+  assert.equal(screen.queryByText('上次测试失败'), null)
+  assert.equal(calls.some((c) => c.method === 'put'), false)
+})
+
+test('出站测试随节点与绑定切换隔离结果，草稿不可测试，迟到回执不可恢复旧结果', async () => {
+  const tag = 'outbound-los2'
+  const responses: ((value: unknown) => void)[] = []
+  const result = { ok: true, elapsed_ms: 120, checked_at: '2026-11-24T05:00:00Z', message: '' }
+  api((_method, url) => {
+    if (url.endsWith('/template-preview')) return {
+      ...overview.nodes[0].routing, policy: { ...emptyPolicy, custom_outbounds: [{ tag, protocol: 'vless' }] },
+    }
+    if (url.endsWith('/outbound-test')) return new Promise((resolve) => responses.push(resolve))
+  })
+  function Harness() {
+    const [id, setID] = React.useState(1)
+    return <><button onClick={() => setID(2)}>切换测试节点</button>
+      <RoutingBindingDrawer scope="node" id={id} name={'lab-' + id} onClose={() => {}} /></>
+  }
+  mount(<Harness />)
+  const button = () => screen.getByRole('button', { name: '测试连接 · outbound-los2' })
+  fireEvent.click(await screen.findByRole('button', { name: '测试连接 · outbound-los2' }))
+  await waitFor(() => assert.equal(responses.length, 1))
+  assert.ok(button().matches(':disabled'))
+  fireEvent.change(screen.getByLabelText('出站覆盖模式 · outbound-los2'), { target: { value: 'replace' } })
+  assert.ok(button().matches(':disabled'))
+  fireEvent.click(screen.getByRole('button', { name: '放弃本节修改' }))
+  await act(async () => { responses[0](result) })
+  assert.equal(screen.queryByText('上次测试成功'), null)
+  fireEvent.click(button())
+  await waitFor(() => assert.equal(responses.length, 2))
+  fireEvent.click(screen.getByText('切换测试节点'))
+  await screen.findByRole('button', { name: '测试连接 · outbound-los2' })
+  await act(async () => { responses[1](result) })
+  assert.equal(screen.queryByText('上次测试成功'), null)
+  fireEvent.click(button())
+  await waitFor(() => assert.equal(responses.length, 3))
+  await act(async () => { responses[2](result) })
+  await screen.findByText('上次测试成功')
+  assert.deepEqual(calls.filter((c) => c.url.endsWith('/outbound-test')).map((c) => c.url), [
+    '/nodes/1/outbound-test', '/nodes/1/outbound-test', '/nodes/2/outbound-test',
+  ])
+})
+
 test('继承模板刷新移除出站后，清理失效覆盖同时解除该卡片的错误状态', async () => {
   const outbound = { tag: 'proxy', protocol: 'socks', settings: { servers: [{ address: 'old.test', port: 1080 }] } }
   api((method, url) => {

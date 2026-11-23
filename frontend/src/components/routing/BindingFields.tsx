@@ -23,6 +23,7 @@ import type {
 } from '@/lib/routing-model'
 import { DnsEditor } from './DnsEditor'
 import { SingleOutboundFields } from './OutboundListEditor'
+import { OutboundConnectionTest } from './OutboundConnectionTest'
 
 export const routingControl =
   'w-full rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3 text-sm text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]'
@@ -32,12 +33,14 @@ export function BindingFields({
   onChange,
   templates,
   disabled = false,
+  dirty,
   onPendingErrorChange,
 }: {
   value: RoutingBinding
   onChange: (b: RoutingBinding) => void
   templates: RoutingTemplate[]
   disabled?: boolean
+  dirty: boolean
   onPendingErrorChange?: (hasError: boolean) => void
 }) {
   const superAdmin = useAuthStore((s) => s.role) === 'super_admin'
@@ -279,6 +282,7 @@ export function BindingFields({
                 {inheritedOutbounds.map((tmplOutbound) => {
                   const currentOv = outboundOverridesMap[tmplOutbound.tag] as OutboundOverride | undefined
                   const ovMode: 'inherit' | 'replace' | 'remap' = currentOv?.mode ?? 'inherit'
+                  const protocol = ovMode === 'replace' ? currentOv?.outbound?.protocol : tmplOutbound.protocol
                   const peerTags = inheritedOutbounds
                     .map((o) => o.tag)
                     .filter((t) => outboundOverridesMap[t]?.mode !== 'remap')
@@ -298,17 +302,16 @@ export function BindingFields({
                   ]
 
                   return (
-                    <fieldset
+                    <div
                       key={tmplOutbound.tag}
-                      disabled={!superAdmin}
-                      className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-3 disabled:opacity-75"
+                      className="space-y-3 rounded-md border border-[var(--border)] bg-[var(--panel-muted)] p-3"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2 text-xs">
                           <span className="font-mono font-semibold text-[var(--text)]">
                             {tmplOutbound.tag}
                           </span>
-                          <Badge label={tmplOutbound.protocol.toUpperCase()} variant="blue" />
+                          <Badge label={(protocol ?? tmplOutbound.protocol).toUpperCase()} variant="blue" />
                           {tmplOutbound.remark && (
                             <span className="text-soft">{tmplOutbound.remark}</span>
                           )}
@@ -325,64 +328,74 @@ export function BindingFields({
                         />
                       </div>
 
-                      <SelectField
-                        label={`出站覆盖模式 · ${tmplOutbound.tag}`}
-                        value={ovMode}
-                        onChange={(nextMode) => {
-                          updateOutboundError(tmplOutbound.tag, '')
-                          if (nextMode === 'inherit') {
-                            updateOutboundOverride(tmplOutbound.tag, undefined)
-                          } else if (nextMode === 'remap') {
-                            updateOutboundOverride(tmplOutbound.tag, {
-                              mode: 'remap',
-                              target_tag: 'direct',
-                            })
-                          } else {
-                            updateOutboundOverride(tmplOutbound.tag, {
-                              mode: 'replace',
-                              outbound: { ...tmplOutbound, tag: tmplOutbound.tag },
-                            })
-                          }
-                        }}
-                        options={[
-                          { value: 'inherit', label: '继承模板参数' },
-                          { value: 'remap', label: '重映射到其他出站（remap）' },
-                          { value: 'replace', label: '自定义本节点参数（replace）' },
-                        ]}
-                      />
-
-                      {ovMode === 'remap' && (
-                        <SelectField
-                          label={`重映射目标出站 · ${tmplOutbound.tag}`}
-                          value={currentOv?.target_tag ?? 'direct'}
-                          onChange={(targetTag) =>
-                            updateOutboundOverride(tmplOutbound.tag, {
-                              mode: 'remap',
-                              target_tag: targetTag,
-                            })
-                          }
-                          options={remapOptions}
+                      {ovMode !== 'remap' && protocol === 'vless' && (
+                        <OutboundConnectionTest
+                          key={[value.target_id, value.version, base?.template_id, base?.revision, dirty].join('/')}
+                          nodeID={value.target_id}
+                          tag={tmplOutbound.tag}
+                          dirty={dirty}
                         />
                       )}
-
-                      {ovMode === 'replace' && (
-                        <div className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3">
-                          <SingleOutboundFields
-                            outbound={currentOv?.outbound ?? { ...tmplOutbound }}
-                            lockedTag={tmplOutbound.tag}
-                            peerOutboundTags={peerTags}
-                            disabled={disabled || !superAdmin}
-                            onRawErrorChange={(error) => updateOutboundError(tmplOutbound.tag, error)}
-                            onChange={(updatedOutbound) =>
+                      <fieldset disabled={!superAdmin} className="space-y-3 disabled:opacity-75">
+                        <SelectField
+                          label={`出站覆盖模式 · ${tmplOutbound.tag}`}
+                          value={ovMode}
+                          onChange={(nextMode) => {
+                            updateOutboundError(tmplOutbound.tag, '')
+                            if (nextMode === 'inherit') {
+                              updateOutboundOverride(tmplOutbound.tag, undefined)
+                            } else if (nextMode === 'remap') {
+                              updateOutboundOverride(tmplOutbound.tag, {
+                                mode: 'remap',
+                                target_tag: 'direct',
+                              })
+                            } else {
                               updateOutboundOverride(tmplOutbound.tag, {
                                 mode: 'replace',
-                                outbound: { ...updatedOutbound, tag: tmplOutbound.tag },
+                                outbound: { ...tmplOutbound, tag: tmplOutbound.tag },
                               })
                             }
+                          }}
+                          options={[
+                            { value: 'inherit', label: '继承模板参数' },
+                            { value: 'remap', label: '重映射到其他出站（remap）' },
+                            { value: 'replace', label: '自定义本节点参数（replace）' },
+                          ]}
+                        />
+
+                        {ovMode === 'remap' && (
+                          <SelectField
+                            label={`重映射目标出站 · ${tmplOutbound.tag}`}
+                            value={currentOv?.target_tag ?? 'direct'}
+                            onChange={(targetTag) =>
+                              updateOutboundOverride(tmplOutbound.tag, {
+                                mode: 'remap',
+                                target_tag: targetTag,
+                              })
+                            }
+                            options={remapOptions}
                           />
-                        </div>
-                      )}
-                    </fieldset>
+                        )}
+
+                        {ovMode === 'replace' && (
+                          <div className="rounded-md border border-[var(--border)] bg-[var(--panel-strong)] p-3">
+                            <SingleOutboundFields
+                              outbound={currentOv?.outbound ?? { ...tmplOutbound }}
+                              lockedTag={tmplOutbound.tag}
+                              peerOutboundTags={peerTags}
+                              disabled={disabled || !superAdmin}
+                              onRawErrorChange={(error) => updateOutboundError(tmplOutbound.tag, error)}
+                              onChange={(updatedOutbound) =>
+                                updateOutboundOverride(tmplOutbound.tag, {
+                                  mode: 'replace',
+                                  outbound: { ...updatedOutbound, tag: tmplOutbound.tag },
+                                })
+                              }
+                            />
+                          </div>
+                        )}
+                      </fieldset>
+                    </div>
                   )
                 })}
               </div>

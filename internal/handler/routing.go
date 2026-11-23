@@ -164,6 +164,7 @@ func registerRoutingRoutes(api *gin.RouterGroup) {
 			reply(c, impact, err)
 		})
 	}
+	api.POST("/nodes/:id/outbound-test", testNodeOutbound)
 	api.POST("/nodes/:id/preflight", func(c *gin.Context) { reply(c, nil, service.NewSyncService().PreflightNode(id(c))) })
 	replyBaseline := func(c *gin.Context, result any, err error) {
 		if errors.Is(err, service.ErrBaselineChanged) || errors.Is(err, service.ErrNodeSyncBusy) || errors.Is(err, service.ErrConfigLeaseLost) {

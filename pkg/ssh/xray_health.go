@@ -107,19 +107,27 @@ func probeEnvelope(content, probeURL string) (string, error) {
 	return string(data), err
 }
 
-// The target is validated after node-side DNS resolution and redirects are not followed.
-const proxyHealthPython = `import ipaddress,json,socket,subprocess,sys,tempfile,time,os,urllib.parse
+// Pin the HTTPS connection to a public IP resolved by the node, keeping the hostname for TLS.
+const publicProbeTargetPython = `import ipaddress,socket,urllib.parse
+def public_probe_target(url):
+    host=urllib.parse.urlparse(url).hostname
+    answers=socket.getaddrinfo(host,443,type=socket.SOCK_STREAM)
+    ips=[ipaddress.ip_address(a[4][0]) for a in answers]
+    if not ips or any(not ip.is_global or ip.is_multicast or ip.is_reserved for ip in ips):
+        raise ValueError("invalid probe target")
+    target=next((a[4][0] for a in answers if a[0]==socket.AF_INET),answers[0][4][0])
+    if ":" in target: target="["+target+"]"
+    return ("["+host+"]" if ":" in host else host),target
+`
+
+const proxyHealthPython = publicProbeTargetPython + `import json,subprocess,sys,tempfile,time,os
 data=json.load(open(sys.argv[1]))
 url=data["probe_url"]
-host=urllib.parse.urlparse(url).hostname
-answers=socket.getaddrinfo(host,443,type=socket.SOCK_STREAM)
-if not answers or any(not ipaddress.ip_address(a[4][0]).is_global for a in answers): sys.exit(2)
+host,target=public_probe_target(url)
 for port in data["ports"]:
     with socket.create_connection(("127.0.0.1",int(port)),timeout=2): pass
 probes=data["probes"]
 if not probes: sys.exit(0) # legacy configurations without accounts retain basic checking
-target=next((a[4][0] for a in answers if a[0]==socket.AF_INET),answers[0][4][0])
-if ":" in target: target="["+target+"]"
 for probe in probes:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1",0)); port=sock.getsockname()[1]
