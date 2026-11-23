@@ -59,7 +59,7 @@ Protocol templates hold shared settings; node keys hold per-node key material an
 
 Save a routing template draft, publish a fixed revision, then select it for a node, group or the global default. Each node has one effective routing policy and can keep multiple protocol bindings. Node domain lists can inherit the template, replace a list, or explicitly clear its rules. Preview the complete configuration and synchronize it from the node list.
 
-In a node's routing settings, use the connection test on a VLESS outbound card to request the configured HTTPS health probe URL from that node using its deployed outbound settings. The card shows the result and time of that test.
+In a node's routing settings, click the connection test on a VLESS outbound card to see two measurements. For a single TCP endpoint, the node times a TCP handshake to the configured relay address and port to estimate round-trip time (RTT). Separately, it times an HTTPS request through the deployed outbound to the configured health probe URL. Each measurement has its own result.
 
 Domain rules use strict `ForceIPv4` / `ForceIPv6`; unmatched traffic uses ordinary direct routing. IPv6 rules require working IPv6 connectivity and do not fall back to IPv4. Optional system-default and AI/media presets are provided without automatically binding nodes. Failed health checks restore a configuration compatible with current user authorization while leaving the requested policy pending.
 

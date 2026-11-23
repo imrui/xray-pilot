@@ -96,10 +96,99 @@ for ip in ("127.0.0.1","224.0.0.1","ff02::1"):
         continue
     raise AssertionError("non-public probe target accepted")
 `
-	cmd := exec.Command(outboundProbePython(t), "-c", "import sys\nexec(sys.stdin.read(), {'__name__':'fixture'})")
+	cmd := exec.Command(outboundProbePython(t), "-c", "import sys\nexec(sys.stdin.buffer.read(), {'__name__':'fixture'})")
 	cmd.Stdin = strings.NewReader(publicProbeTargetPython + vlessOutboundProbePython + tests)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
+	}
+}
+
+func TestRelayTCPMeasurement(t *testing.T) {
+	const checks = `
+from unittest import mock
+relay={"address":"relay.example","port":8443}
+short={"settings":relay,"streamSettings":{"network":"tcp","security":"reality",
+       "realitySettings":{"serverName":"cover.example"}}}
+assert relay_endpoint(short) == ("relay.example",8443)
+assert relay_endpoint(dict(short,streamSettings={"sockopt":{"tcpKeepAliveIdle":30,"tcpNoDelay":True,"domainStrategy":"AsIs"}})) == ("relay.example",8443)
+assert relay_endpoint({"settings":{"vnext":[relay]}}) == ("relay.example",8443)
+assert relay_endpoint({"settings":{"Address":"2001:db8::1","Port":2443}}) == ("2001:db8::1",2443)
+assert relay_endpoint({"settings":{"address":"[2001:db8::1]","port":2443}}) == ("2001:db8::1",2443)
+def rejected(ob, reason):
+    try:
+        relay_endpoint(ob)
+    except ProbeError as e:
+        assert str(e) == reason
+    else:
+        raise AssertionError("unexpected relay")
+for port in (0,65536,True,"443"):
+    rejected({"settings":dict(relay, port=port)}, "ENDPOINT")
+rejected({"settings":{"vnext":[relay,relay]}}, "ENDPOINT")
+rejected({"settings":dict(relay,vnext=[relay])}, "ENDPOINT")
+rejected({"settings":{"Address":"one","address":"two","port":443}}, "ENDPOINT")
+rejected(dict(short,streamSettings={"method":"kcp","network":"tcp"}), "TRANSPORT")
+rejected(dict(short,streamSettings={"network":"xhttp"}), "TRANSPORT")
+rejected(dict(short,sendThrough="127.0.0.1"), "ROUTE")
+rejected(dict(short,targetStrategy="ForceIPv6"), "ROUTE")
+rejected(dict(short,streamSettings={"sockopt":{"interface":"eth1"}}), "ROUTE")
+rejected(dict(short,streamSettings={"network":"ws","wsSettings":{"useBrowserForwarding":True}}), "ROUTE")
+
+clock=[100.]
+attempts=[]
+def lookup(host, port, type):
+    assert (host,port,type) == ("relay.example",8443,socket.SOCK_STREAM)
+    clock[0] += 1
+    return [(socket.AF_INET,socket.SOCK_STREAM,6,"",(ip,port)) for ip in ("192.0.2.1","192.0.2.2")]
+class TestSocket:
+    def __init__(self, *args): pass
+    def __enter__(self): return self
+    def __exit__(self, *args): pass
+    def settimeout(self, t): assert 0 < t <= 4
+    def connect(self, addr):
+        attempts.append(addr)
+        if addr[0] == "192.0.2.1":
+            clock[0] += .8
+            raise OSError()
+        clock[0] += .00035
+with mock.patch.object(socket,"getaddrinfo",lookup), mock.patch.object(socket,"socket",TestSocket), mock.patch.object(time,"monotonic",lambda: clock[0]):
+    assert tcp_rtt(short) == 350
+assert attempts == [("192.0.2.1",8443),("192.0.2.2",8443)]
+blocked=threading.Event()
+try:
+    assert bounded_lookup(lambda: blocked.wait(5), .05) is None
+finally:
+    blocked.set()
+`
+	cmd := exec.Command(outboundProbePython(t), "-c", "import sys\nexec(sys.stdin.buffer.read(), {'__name__':'fixture'})")
+	cmd.Stdin = strings.NewReader(publicProbeTargetPython + vlessOutboundProbePython + checks)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("relay TCP: %v %s", err, out)
+	}
+}
+
+func TestParseIndependentOutboundMeasurements(t *testing.T) {
+	for _, tc := range []struct {
+		output  string
+		rtt     time.Duration
+		httpsOK bool
+	}{
+		{"TCP OK 350\r\nOK 59\n", 350 * time.Microsecond, true},
+		{"TCP OK 0\nHTTPS", 0, false},
+		{"TCP CONNECT\nOK 59", -1, true},
+		{"TCP OK 4000001\nHTTPS", -1, false},
+		{"TCP untrusted-endpoint\nOK 59", -1, true},
+	} {
+		result, err := parseOutboundProbe(tc.output)
+		if (err == nil) != tc.httpsOK || tc.httpsOK && result.HTTPSElapsed != 59*time.Millisecond {
+			t.Fatalf("HTTPS result: %+v, %v", result, err)
+		}
+		if tc.rtt >= 0 {
+			if result.TCPRTT == nil || *result.TCPRTT != tc.rtt || result.TCPMessage != "" {
+				t.Fatalf("TCP result: %+v", result)
+			}
+		} else if result.TCPRTT != nil || result.TCPMessage == "" || strings.Contains(result.TCPMessage, "untrusted") {
+			t.Fatalf("TCP diagnostic: %+v", result)
+		}
 	}
 }
 
@@ -168,14 +257,23 @@ def check_cleanup():
             os._exit(90)
 original_lookup=socket.getaddrinfo
 def resolve(host,*args,**kwargs):
-    if host == "example.com": return [(socket.AF_INET,socket.SOCK_STREAM,6,"",("1.1.1.1",443))]
+    if host == "example.com":
+        if os.environ["PROBE_TEST_SLOW_DNS"] == "true":
+            time.sleep(5)
+        return [(socket.AF_INET,socket.SOCK_STREAM,6,"",("1.1.1.1",443))]
     return original_lookup(host,*args,**kwargs)
 socket.getaddrinfo=resolve
 if os.environ["PROBE_TEST_BUSY"] == "true":
     # 保留选中的端口，让 Xray 绑定失败。其他进程的监听不能作为启动回执。
     class BusySocket(socket.socket):
+        def bind(self, address):
+            self.hold_port=True
+            return super().bind(address)
         def __exit__(self, *args):
-            self.listen()
+            if getattr(self,"hold_port",False):
+                self.listen()
+            else:
+                super().__exit__(*args)
     socket.socket=BusySocket
 original_run=subprocess.run
 def trusted_curl(args,**kwargs):
@@ -188,6 +286,8 @@ subprocess.run=trusted_curl
 `
 	for _, tc := range []struct{ name, uuid, path, want string }{
 		{"through-selected-relay", id, "/test", "OK "},
+		{"slow-https-dns", id, "/test", "OK "},
+		{"source-bound-relay", id, "/test", "OK "},
 		{"http-error", id, "/denied", "HTTP 403"},
 		{"wrong-account", "22222222-2222-4222-8222-222222222222", "/test", "HTTPS"},
 		{"occupied-probe-port", id, "/test", "START"},
@@ -198,7 +298,11 @@ subprocess.run=trusted_curl
 				wantRequests++
 			}
 			path := filepath.Join(dir, "deployed.json")
-			raw := fmt.Sprintf(`{"outbounds":[{"tag":"default","protocol":"freedom"},{"tag":"los2","protocol":"vless","settings":{"address":"127.0.0.1","port":%d,"id":%q,"encryption":"none"}}]}`, port, tc.uuid)
+			bind := ""
+			if tc.name == "source-bound-relay" {
+				bind = `"sendThrough":"127.0.0.1",`
+			}
+			raw := fmt.Sprintf(`{"outbounds":[{"tag":"default","protocol":"freedom"},{"tag":"los2","protocol":"vless",%s"settings":{"address":"127.0.0.1","port":%d,"id":%q,"encryption":"none"}}]}`, bind, port, tc.uuid)
 			if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -206,10 +310,20 @@ subprocess.run=trusted_curl
 			defer cancel()
 			cmd := exec.CommandContext(ctx, python, "-c", publicProbeTargetPython+fixture+vlessOutboundProbePython, path, "los2", "https://example.com"+tc.path, binary)
 			cmd.Env = append(os.Environ(), "PROBE_TEST_CA="+cert, "PROBE_TEST_TARGET="+target.Listener.Addr().String(),
-				fmt.Sprintf("PROBE_TEST_BUSY=%t", tc.name == "occupied-probe-port"), "NO_PROXY=*")
+				fmt.Sprintf("PROBE_TEST_BUSY=%t", tc.name == "occupied-probe-port"),
+				fmt.Sprintf("PROBE_TEST_SLOW_DNS=%t", tc.name == "slow-https-dns"), "NO_PROXY=*")
 			output, err := cmd.CombinedOutput()
-			if err != nil || !strings.HasPrefix(string(output), tc.want) {
+			tcp, https, found := strings.Cut(strings.TrimSpace(string(output)), "\n")
+			if err != nil || !found || !strings.HasPrefix(https, tc.want) {
 				t.Fatalf("probe result %q %v", output, err)
+			}
+			result, _ := parseOutboundProbe(string(output))
+			if tc.name == "source-bound-relay" {
+				if result.TCPRTT != nil || strings.TrimSpace(tcp) != "TCP ROUTE" {
+					t.Fatalf("expected HTTPS-only result, got %q", output)
+				}
+			} else if result.TCPRTT == nil {
+				t.Fatalf("missing real TCP handshake, got %q", output)
 			}
 			unchanged, err := os.ReadFile(path)
 			if err != nil || string(unchanged) != raw || requests.Load() != wantRequests {

@@ -13,10 +13,12 @@ import (
 )
 
 type OutboundProbeResult struct {
-	OK        bool      `json:"ok"`
-	ElapsedMs int64     `json:"elapsed_ms"`
-	CheckedAt time.Time `json:"checked_at"`
-	Message   string    `json:"message"`
+	OK          bool      `json:"ok"`
+	ElapsedMs   int64     `json:"elapsed_ms"`
+	CheckedAt   time.Time `json:"checked_at"`
+	Message     string    `json:"message"`
+	TCPRTTMs    *float64  `json:"tcp_rtt_ms,omitempty"`
+	TCPRTTError string    `json:"tcp_rtt_error,omitempty"`
 }
 
 var (
@@ -27,12 +29,12 @@ var (
 	outboundProbes sync.Map
 )
 
-var probeRemoteOutbound = func(ctx context.Context, p xray.SSHParams, tag string) (time.Duration, error) {
+var probeRemoteOutbound = func(ctx context.Context, p xray.SSHParams, tag string) (xssh.OutboundProbeMeasurements, error) {
 	c, err := xssh.ConnectContext(ctx, xssh.Config{
 		Host: p.Host, Port: p.Port, User: p.User, KeyPath: p.KeyPath, KnownHostsPath: p.KnownHostsPath,
 	})
 	if err != nil {
-		return 0, errors.New("无法通过 SSH 连接节点，请检查节点连接参数")
+		return xssh.OutboundProbeMeasurements{}, errors.New("无法通过 SSH 连接节点，请检查节点连接参数")
 	}
 	defer c.Close()
 	// 此接口只返回预定义的诊断错误，不公开远端命令输出或配置内容。
@@ -63,8 +65,16 @@ func (s *SyncService) TestOutbound(ctx context.Context, nodeID uint, tag string)
 
 	ctx, cancel := context.WithTimeout(ctx, 55*time.Second)
 	defer cancel()
-	elapsed, err := probeRemoteOutbound(ctx, s.sshParamsForPath(node, effective.Binding.ConfigPath), tag)
-	result := &OutboundProbeResult{CheckedAt: time.Now().UTC(), ElapsedMs: elapsed.Milliseconds()}
+	measured, err := probeRemoteOutbound(ctx, s.sshParamsForPath(node, effective.Binding.ConfigPath), tag)
+	result := &OutboundProbeResult{
+		CheckedAt:   time.Now().UTC(),
+		ElapsedMs:   measured.HTTPSElapsed.Milliseconds(),
+		TCPRTTError: measured.TCPMessage,
+	}
+	if measured.TCPRTT != nil {
+		ms := float64(*measured.TCPRTT) / float64(time.Millisecond)
+		result.TCPRTTMs = &ms
+	}
 	switch {
 	case ctx.Err() != nil:
 		result.Message = "测试已超时或取消"

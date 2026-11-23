@@ -289,7 +289,7 @@ test('管理员可单独测试已下发的 VLESS 出站，区分成功、探测�
   const remapped = { tag: 'remapped', protocol: 'vless' }
   const direct = { tag: 'direct-egress', protocol: 'freedom' }
   const checkedAt = '2026-11-24T05:00:00Z'
-  const result = { ok: true, checked_at: checkedAt, elapsed_ms: 312, message: '' }
+  const result = { ok: true, checked_at: checkedAt, elapsed_ms: 312, tcp_rtt_ms: 0.35, message: '' }
   let attempts = 0
   api((method, url, body) => {
     if (method === 'get' && url === '/nodes/1/routing') return {
@@ -306,7 +306,7 @@ test('管理员可单独测试已下发的 VLESS 出站，区分成功、探测�
       assert.deepEqual(body, { tag: los2.tag })
       attempts++
       if (attempts === 1) return result
-      if (attempts === 2) return { ...result, ok: false, elapsed_ms: 0, message: '无法读取节点配置' }
+      if (attempts === 2) return { ok: false, checked_at: checkedAt, elapsed_ms: 0, message: '无法读取节点配置' }
       throw new Error('无法连接源节点')
     }
   })
@@ -319,18 +319,41 @@ test('管理员可单独测试已下发的 VLESS 出站，区分成功、探测�
   for (const tag of ['remapped', 'direct-egress']) assert.equal(screen.queryByRole('button', { name: '测试连接 · ' + tag }), null)
   assert.equal(attempts, 0)
   fireEvent.click(button)
-  const success = await screen.findByText('上次测试成功')
-  assert.match(success.parentElement!.textContent ?? '', /312 ms/)
-  assert.equal(success.parentElement!.querySelector('time')?.dateTime, checkedAt)
+  const rtt = await screen.findByText('节点间 RTT（TCP 握手估算）')
+  assert.equal(rtt.nextElementSibling?.textContent, '0.35 ms')
+  assert.equal(screen.getByText('HTTPS 总耗时').nextElementSibling?.textContent, '成功 · 312 ms')
+  assert.equal(rtt.closest('[role=status]')?.querySelector('time')?.dateTime, checkedAt)
   fireEvent.click(button)
-  const failure = await screen.findByText('无法读取节点配置')
-  assert.doesNotMatch(failure.parentElement!.textContent ?? '', /耗时/)
-  assert.ok(screen.getByText('上次测试失败'))
-  assert.equal(screen.queryByText('上次测试成功'), null)
+  await screen.findByText('未通过 · 无法读取节点配置')
+  assert.equal(screen.getByText('节点间 RTT（TCP 握手估算）').nextElementSibling?.textContent, '无测量结果')
+  assert.equal(screen.queryByText('0.35 ms'), null)
   fireEvent.click(button)
   await screen.findByText(/测试未完成.*无法连接源节点/)
-  assert.equal(screen.queryByText('上次测试失败'), null)
+  assert.equal(screen.queryByText('HTTPS 总耗时'), null)
   assert.equal(calls.some((c) => c.method === 'put'), false)
+})
+
+test('节点间 RTT 和 HTTPS 独立展示，保留单项成功与零毫秒测量', async () => {
+  const tag = 'outbound-los2'
+  const checked_at = '2026-11-24T05:00:00Z'
+  const results = [
+    { checked_at, tcp_rtt_ms: 0, elapsed_ms: 0, ok: false, message: '经此出站的 HTTPS 请求失败' },
+    { checked_at, tcp_rtt_ms: null, tcp_rtt_error: 'TCP 连接超时', elapsed_ms: 0, ok: true, message: '' },
+  ]
+  api((_method, url) => {
+    if (url.endsWith('/template-preview')) return {
+      ...overview.nodes[0].routing, policy: { ...emptyPolicy, custom_outbounds: [{ tag, protocol: 'vless' }] },
+    }
+    if (url.endsWith('/outbound-test')) return results.shift()
+  })
+  mount(<RoutingBindingDrawer scope="node" id={1} name="los1" onClose={() => {}} />)
+  const button = await screen.findByRole('button', { name: '测试连接 · outbound-los2' })
+  fireEvent.click(button)
+  await screen.findByText('未通过 · 经此出站的 HTTPS 请求失败')
+  assert.equal(screen.getByText('节点间 RTT（TCP 握手估算）').nextElementSibling?.textContent, '0 ms')
+  fireEvent.click(button)
+  await screen.findByText('TCP 连接超时')
+  assert.equal(screen.getByText('HTTPS 总耗时').nextElementSibling?.textContent, '成功 · 0 ms')
 })
 
 test('出站测试随节点与绑定切换隔离结果，草稿不可测试，迟到回执不可恢复旧结果', async () => {
@@ -357,17 +380,18 @@ test('出站测试随节点与绑定切换隔离结果，草稿不可测试，�
   assert.ok(button().matches(':disabled'))
   fireEvent.click(screen.getByRole('button', { name: '放弃本节修改' }))
   await act(async () => { responses[0](result) })
-  assert.equal(screen.queryByText('上次测试成功'), null)
+  assert.equal(screen.queryByText('HTTPS 总耗时'), null)
   fireEvent.click(button())
   await waitFor(() => assert.equal(responses.length, 2))
   fireEvent.click(screen.getByText('切换测试节点'))
   await screen.findByRole('button', { name: '测试连接 · outbound-los2' })
   await act(async () => { responses[1](result) })
-  assert.equal(screen.queryByText('上次测试成功'), null)
+  assert.equal(screen.queryByText('HTTPS 总耗时'), null)
   fireEvent.click(button())
   await waitFor(() => assert.equal(responses.length, 3))
   await act(async () => { responses[2](result) })
-  await screen.findByText('上次测试成功')
+  await screen.findByText('成功 · 120 ms')
+  assert.equal(screen.getByText('节点间 RTT（TCP 握手估算）').nextElementSibling?.textContent, '无测量结果')
   assert.deepEqual(calls.filter((c) => c.url.endsWith('/outbound-test')).map((c) => c.url), [
     '/nodes/1/outbound-test', '/nodes/1/outbound-test', '/nodes/2/outbound-test',
   ])

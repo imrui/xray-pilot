@@ -69,6 +69,8 @@ export async function previewBinding(binding: RoutingBinding) {
 export interface OutboundTestResult {
   ok: boolean
   elapsed_ms: number
+  tcp_rtt_ms?: number | null
+  tcp_rtt_error?: string
   checked_at: string
   message: string
 }

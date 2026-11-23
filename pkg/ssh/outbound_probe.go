@@ -32,21 +32,26 @@ def use_xray_identity(proc):
     os.umask(0o077)
 `
 
-// TestVLESSOutbound 在源节点用磁盘上的指定出站进行单次 HTTPS 测试。仅返回固定诊断，
-// 运行配置、凭据和内核错误输出均留在节点内。耗时包括该线路的握手和 HTTPS 请求。
-func (c *Client) TestVLESSOutbound(configPath, tag, probeURL string) (time.Duration, error) {
+type OutboundProbeMeasurements struct {
+	HTTPSElapsed time.Duration
+	TCPRTT       *time.Duration
+	TCPMessage   string
+}
+
+// TestVLESSOutbound 分别测量 HTTPS 总耗时与接入端的 TCP 握手。HTTPS 失败时仍可读取 TCP 结果。
+func (c *Client) TestVLESSOutbound(configPath, tag, probeURL string) (OutboundProbeMeasurements, error) {
 	if tag == "" || len(tag) > 128 || strings.ContainsAny(tag, "\x00\r\n") {
-		return 0, errors.New("出站标签无效")
+		return OutboundProbeMeasurements{}, errors.New("出站标签无效")
 	}
 	if probeURL == "" {
 		probeURL = DefaultProbeURL
 	}
 	if err := ValidateProbeURL(probeURL); err != nil {
-		return 0, err
+		return OutboundProbeMeasurements{}, err
 	}
 	script := `set -eu
 path=$1
-command -v python3 >/dev/null && command -v curl >/dev/null || { echo TOOLS; exit 0; }
+command -v python3 >/dev/null || { echo TOOLS; exit 0; }
 systemctl is-active --quiet xray || { echo INACTIVE; exit 0; }
 if ! ( ` + xrayPathCheckScript + ` ) >/dev/null 2>&1; then echo PATH; exit 0; fi
 pid=$(systemctl show xray -p MainPID --value)
@@ -59,42 +64,75 @@ except (OSError, KeyError, IndexError, ValueError):
     print("IDENTITY")
     sys.exit(0)
 ` + publicProbeTargetPython + vlessOutboundProbePython + "\nPILOT_TEST_OUTBOUND"
-	cmd := "timeout -k 3 30 bash -c " + shellQuote(script) + " -- " + shellQuote(configPath) + " " + shellQuote(tag) + " " + shellQuote(probeURL)
-	output, err := c.RunBounded(cmd, 35*time.Second)
+	// 远端保护涵盖服务检查、原 HTTPS 预算、额外 4 秒 RTT 和子进程回收。
+	cmd := "timeout -k 3 38 bash -c " + shellQuote(script) + " -- " + shellQuote(configPath) + " " + shellQuote(tag) + " " + shellQuote(probeURL)
+	output, err := c.RunBounded(cmd, 42*time.Second)
 	if err != nil {
-		return 0, errors.New("节点探测未完成，请检查 SSH 连接及超时")
+		return OutboundProbeMeasurements{}, errors.New("节点探测未完成，请检查 SSH 连接及超时")
 	}
+	return parseOutboundProbe(output)
+}
+
+func parseOutboundProbe(output string) (OutboundProbeMeasurements, error) {
+	var measurements OutboundProbeMeasurements
 	status := strings.TrimSpace(output)
+	if tcp, https, found := strings.Cut(status, "\n"); found {
+		status = strings.TrimSpace(https)
+		tcp = strings.TrimSpace(tcp)
+		switch tcp {
+		case "TCP TRANSPORT":
+			measurements.TCPMessage = "当前传输方式不支持独立 TCP 握手测试"
+		case "TCP ROUTE":
+			measurements.TCPMessage = "当前出站使用特殊拨号设置，无法独立测量 TCP RTT"
+		case "TCP ENDPOINT":
+			measurements.TCPMessage = "无法确定唯一的落地接入地址和端口"
+		case "TCP RESOLVE":
+			measurements.TCPMessage = "落地接入地址解析失败或超时"
+		case "TCP CONNECT":
+			measurements.TCPMessage = "连接落地端口失败或超时"
+		default:
+			if us, ok := strings.CutPrefix(tcp, "TCP OK "); ok {
+				if elapsed, err := strconv.Atoi(us); err == nil && elapsed >= 0 && elapsed <= 4_000_000 {
+					rtt := time.Duration(elapsed) * time.Microsecond
+					measurements.TCPRTT = &rtt
+				}
+			}
+			if measurements.TCPRTT == nil {
+				measurements.TCPMessage = "未收到有效的 TCP 握手结果"
+			}
+		}
+	}
 	if ms, ok := strings.CutPrefix(status, "OK "); ok {
 		if elapsed, err := strconv.Atoi(ms); err == nil && elapsed >= 0 && elapsed <= 30000 {
-			return time.Duration(elapsed) * time.Millisecond, nil
+			measurements.HTTPSElapsed = time.Duration(elapsed) * time.Millisecond
+			return measurements, nil
 		}
 	}
 	if code, ok := strings.CutPrefix(status, "HTTP "); ok && len(code) == 3 {
 		if n, err := strconv.Atoi(code); err == nil && n >= 100 && n <= 599 && n/100 != 2 {
-			return 0, fmt.Errorf("探测网址返回 HTTP %d，未通过健康检查", n)
+			return measurements, fmt.Errorf("探测网址返回 HTTP %d，未通过健康检查", n)
 		}
 	}
 	switch status {
 	case "INACTIVE":
-		return 0, errors.New("节点的 Xray 服务未运行或无法访问")
+		return measurements, errors.New("节点的 Xray 服务未运行或无法访问")
 	case "IDENTITY":
-		return 0, errors.New("无法使用 Xray 服务的用户或网络命名空间进行测试")
+		return measurements, errors.New("无法使用 Xray 服务的用户或网络命名空间进行测试")
 	case "PATH", "CONFIG":
-		return 0, errors.New("无法核实节点上已部署的 Xray 配置")
+		return measurements, errors.New("无法核实节点上已部署的 Xray 配置")
 	case "MISSING":
-		return 0, errors.New("节点已部署配置中未找到唯一匹配的 VLESS 出站")
+		return measurements, errors.New("节点已部署配置中未找到唯一匹配的 VLESS 出站")
 	case "DEPENDENCY":
-		return 0, errors.New("此出站依赖额外的代理或 DNS 路由，暂不支持独立测试")
+		return measurements, errors.New("此出站依赖额外的代理或 DNS 路由，暂不支持独立测试")
 	case "TARGET":
-		return 0, errors.New("节点无法将探测网址解析为公网地址")
+		return measurements, errors.New("节点无法将探测网址解析为公网地址")
 	case "START":
-		return 0, errors.New("节点上的临时 Xray 探针未能启动")
+		return measurements, errors.New("节点上的临时 Xray 探针未能启动")
 	case "HTTPS":
-		return 0, errors.New("经此出站的 HTTPS 请求失败，请检查出站参数、落地节点和探测网址")
+		return measurements, errors.New("经此出站的 HTTPS 请求失败，请检查出站参数、落地节点和探测网址")
 	case "TOOLS":
-		return 0, errors.New("节点缺少 python3 或 curl")
+		return measurements, errors.New("节点缺少 python3 或 curl")
 	default:
-		return 0, errors.New("未收到有效的节点探测结果")
+		return measurements, errors.New("未收到有效的节点探测结果")
 	}
 }
