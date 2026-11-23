@@ -442,9 +442,16 @@ func effectiveSSHPort(node *entity.Node, settings *SettingService) int {
 }
 
 func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
-	configPath := xray.RemoteConfigPath
-	if b, err := NewRoutingService().Binding("node", node.ID); err == nil && b.ConfigPath != "" {
-		configPath = b.ConfigPath
+	b, err := NewRoutingService().Binding("node", node.ID)
+	if err != nil {
+		return s.sshParamsForPath(node, "")
+	}
+	return s.sshParamsForPath(node, b.ConfigPath)
+}
+
+func (s *SyncService) sshParamsForPath(node *entity.Node, configPath string) xray.SSHParams {
+	if configPath == "" {
+		configPath = xray.RemoteConfigPath
 	}
 	sshUser := node.SSHUser
 	if sshUser == "" {

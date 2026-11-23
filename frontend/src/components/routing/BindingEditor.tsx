@@ -158,6 +158,7 @@ export function BindingEditor({
           templates={overview.data?.templates ?? []}
           onChange={change}
           disabled={busy || !editable}
+          dirty={dirty}
           onPendingErrorChange={setHasPendingError}
         />
       </fieldset>
@@ -325,6 +326,7 @@ export function RoutingBindingDrawer({
       }
     >
       <BindingEditor
+        key={`${scope}-${id}`}
         scope={scope}
         id={id}
         onDirtyChange={setDirty}

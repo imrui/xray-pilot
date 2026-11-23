@@ -66,6 +66,23 @@ export async function previewBinding(binding: RoutingBinding) {
   ).data.data
 }
 
+export interface OutboundTestResult {
+  ok: boolean
+  elapsed_ms: number
+  checked_at: string
+  message: string
+}
+
+export async function testNodeOutbound(nodeID: number, tag: string) {
+  return (
+    await request.post<{ data: OutboundTestResult }>(
+      `/nodes/${nodeID}/outbound-test`,
+      { tag },
+      { timeout: 90000 },
+    )
+  ).data.data
+}
+
 export async function preflightDraft(nodeID: number, payload: PreflightDraftRequest, signal?: AbortSignal) {
   return (
     await request.post<{ data: PreflightDraftResponse }>(
