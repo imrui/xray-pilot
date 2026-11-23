@@ -14,6 +14,8 @@ import SubscriptionSection from '../src/pages/settings/SubscriptionSection'
 import { Btn } from '../src/components/ui/Form'
 import { Drawer } from '../src/components/ui/Drawer'
 import { TemplateNodes, TemplateEditor } from '../src/components/routing/Templates'
+import { SingleOutboundFields } from '../src/components/routing/OutboundListEditor'
+import { OUTBOUND_SNIPPETS } from '../src/lib/routing-snippets'
 import { RoutingBindingDrawer } from '../src/components/routing/BindingEditor'
 import { DraftPreflightModal } from '../src/components/routing/DraftPreflightModal'
 import { SyncHistory } from '../src/components/routing/SyncTools'
@@ -28,8 +30,9 @@ import {
   normalizeBinding,
   upgradeRoutingPolicy,
   requiresIPv6,
+  vlessTransportError,
 } from '../src/lib/routing-model'
-import type { RoutingBinding, RoutingPolicy, RoutingTemplate } from '../src/lib/routing-model'
+import type { CustomOutbound, RoutingBinding, RoutingPolicy, RoutingTemplate } from '../src/lib/routing-model'
 
 const template: RoutingTemplate = {
   id: 1,
@@ -1371,4 +1374,160 @@ test('前端 requiresIPv6 与后端共享测试集保持逐项一致', () => {
       `invalid probe URL ${invalidURL} must fall back to IPv4 default`,
     )
   }
+})
+
+test('Reality 表单保留 JSON 透传字段并编辑生效的公钥别名', () => {
+  const key = 'A'.repeat(43)
+  const other = 'B'.repeat(42) + 'A'
+  const siblings = {
+    sockopt: { dialerProxy: 'upstream' },
+    grpcSettings: { serviceName: 'rpc' },
+    wsSettings: { path: '/ws' },
+  }
+  let current: CustomOutbound = {
+    tag: 'landing', protocol: 'vless',
+    settings: { address: 'example.com', port: 443, id: 'old-id', encryption: 'none', custom: 7 },
+    streamSettings: {
+      ...siblings, security: 'tls', method: 'raw', tlsSettings: { serverName: 'sni.example' },
+      realitySettings: { publicKey: other, password: key, mldsa65Verify: 'advanced' },
+    },
+  }
+  function Harness() {
+    const [value, setValue] = React.useState(current)
+    return <SingleOutboundFields outbound={value} onChange={(next) => { current = next; setValue(next) }} />
+  }
+  render(<Harness />)
+  const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
+  change('传输安全', 'reality')
+  assert.equal((screen.getByLabelText('Reality 公钥 *') as HTMLInputElement).value, key)
+  change('Reality 公钥 *', other)
+  change('ShortId', 'abcd')
+  change('SpiderX（可选）', '/assets')
+  change('Fingerprint', 'firefox')
+  for (const [k, v] of Object.entries(siblings)) assert.deepEqual(current.streamSettings?.[k], v)
+  assert.deepEqual(current.streamSettings?.realitySettings, {
+    password: other, mldsa65Verify: 'advanced', serverName: 'sni.example', fingerprint: 'firefox', shortId: 'abcd', spiderX: '/assets',
+  })
+  assert.equal(current.streamSettings?.tlsSettings, undefined)
+  change('XTLS 流控', 'xtls-rprx-vision-udp443')
+  change('用户 UUID *', 'new-id')
+  assert.deepEqual(current.settings, { address: 'example.com', port: 443, id: 'new-id', custom: 7, encryption: 'none', flow: 'xtls-rprx-vision-udp443' })
+  change('传输方式', 'grpc')
+  assert.match(screen.getByRole('alert').textContent ?? '', /Vision/)
+  change('XTLS 流控', '')
+  assert.equal(screen.queryByRole('alert'), null)
+  change('传输安全', 'tls')
+  assert.deepEqual(current.streamSettings?.tlsSettings, { serverName: 'sni.example' })
+  change('传输安全', 'none')
+  assert.deepEqual(current.streamSettings, { ...siblings, security: 'none', method: 'grpc' })
+})
+
+// Xray vlessenc 生成的客户端加密参数，在双版本内核用例中同步预检。
+const vlessEncryption = 'mlkem768x25519plus.native.0rtt.wc9t2XT5n50jdSPnzLVpuzSZ9yH35sEUwiAfHD5ko00'
+
+test('VLESS 简写附带空 vnext 时从 JSON 切回表单能正确读取并按简写保存', () => {
+  const account = { address: '192.0.2.1', port: 443, id: 'old-id', encryption: vlessEncryption, custom: 7 }
+  let current: CustomOutbound = { tag: 'egress', protocol: 'vless', settings: {} }
+  function Harness() {
+    const [value, setValue] = React.useState(current)
+    return <SingleOutboundFields outbound={value} onChange={(out) => { current = out; setValue(out) }} />
+  }
+  render(<Harness />)
+  for (const [label, value, patch] of [
+    ['端口 *', '8443', { port: 8443 }], ['用户 UUID *', 'new-id', { id: 'new-id' }],
+  ] as const) {
+    fireEvent.click(screen.getByRole('button', { name: 'JSON' }))
+    const raw = JSON.stringify({ ...current, settings: { ...account, vnext: [] } })
+    fireEvent.change(screen.getByRole('textbox', { name: '自定义出站 egress JSON' }), { target: { value: raw } })
+    fireEvent.click(screen.getByRole('button', { name: '表单' }))
+    assert.equal((screen.getByLabelText('远端服务器地址 *') as HTMLInputElement).value, account.address)
+    assert.equal((screen.getByLabelText('用户 UUID *') as HTMLInputElement).value, account.id)
+    assert.equal((screen.getByLabelText('端口 *') as HTMLInputElement).value, String(account.port))
+    fireEvent.change(screen.getByLabelText(label), { target: { value } })
+    assert.deepEqual(current.settings, { ...account, ...patch })
+    assert.equal(vlessTransportError(current), '')
+  }
+})
+
+test('Reality 节点覆盖、草稿和策略 JSON 发布都拒绝无效传输组合', async () => {
+  api()
+  const preset = OUTBOUND_SNIPPETS.find((snippet) => snippet.key === 'vless-reality-landing')!.build([])
+  const reality = { password: 'A'.repeat(43) }
+  const valid = { ...preset, streamSettings: { ...preset.streamSettings, realitySettings: reality } }
+  assert.equal(vlessTransportError(valid), '')
+  assert.match(vlessTransportError(preset), /公钥/)
+  for (const [patch, expected] of [
+    [{ shortId: 'a' }, /ShortId/], [{ spiderX: 'relative' }, /SpiderX/], [{ fingerprint: 'android' }, /指纹/],
+  ] as const) {
+    const invalid = { ...valid, streamSettings: { ...valid.streamSettings, realitySettings: { ...reality, ...patch } } }
+    assert.match(vlessTransportError(invalid), expected)
+    assert.throws(() => normalizeBinding({ ...binding, overrides: JSON.stringify({ outbound_overrides: { landing: { mode: 'replace', outbound: invalid } } }) }), expected)
+  }
+  const invalid = { ...valid, streamSettings: { ...valid.streamSettings, network: 'ws' } }
+  mount(<TemplateEditor template={{ ...template, draft: JSON.stringify({ ...emptyPolicy, custom_outbounds: [invalid] }) }} onClose={() => {}} onConfigure={() => {}} />)
+  fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  await screen.findByText(/出站「.*」Reality 仅支持/)
+  fireEvent.click(screen.getByRole('tab', { name: '策略 JSON 源码' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存并发布版本' }))
+  await screen.findByText(/出站「.*」Reality 仅支持/)
+  assert.equal(calls.filter((call) => call.method === 'patch' || call.method === 'post').length, 0)
+})
+
+for (const format of ['vnext', 'settings.address']) {
+  test(`VLESS ${format} 模板与节点覆盖要求每个用户显式填写 encryption`, async () => {
+    api()
+    const outbound = (encryption?: string, fields: Record<string, unknown> = {}): CustomOutbound => {
+      const server = { address: '192.0.2.1', port: 443 }
+      const user = { id: '11111111-1111-4111-8111-111111111111', ...(encryption === undefined ? {} : { encryption }), ...fields }
+      const users = [{ id: '22222222-2222-4222-8222-222222222222', encryption: 'none' }, user]
+      return { tag: 'egress', protocol: 'vless', settings: format === 'vnext' ? { vnext: [{ ...server, users }] } : { ...server, ...user } }
+    }
+    const override = (out: CustomOutbound) => normalizeBinding({
+      ...binding, overrides: JSON.stringify({ outbound_overrides: { egress: { mode: 'replace', outbound: out } } }),
+    })
+    for (const encryption of ['none', vlessEncryption]) {
+      assert.equal(vlessTransportError(outbound(encryption)), '')
+      assert.doesNotThrow(() => override(outbound(encryption)))
+    }
+    for (const value of [undefined, '', '  ']) {
+      assert.match(vlessTransportError(outbound(value)), /encryption/)
+      assert.throws(() => override(outbound(value)), /encryption/)
+    }
+    for (const bad of [outbound(undefined, { Encryption: 'none' }), outbound('none', { Flow: '' })]) {
+      assert.match(vlessTransportError(bad), /标准命名/)
+      assert.throws(() => override(bad), /标准命名/)
+    }
+    if (format === 'settings.address') {
+      const flat = outbound()
+      const withEmptyVnext = { ...flat, settings: { ...flat.settings, vnext: [] } }
+      assert.match(vlessTransportError(withEmptyVnext), /encryption/)
+      assert.throws(() => override(withEmptyVnext), /encryption/)
+    } else {
+      const server = { address: '192.0.2.1', port: 443 }
+      const emptyUsers = {
+        ...outbound('none'), settings: { vnext: [
+          { ...server, users: [{ id: 'first', encryption: 'none' }] }, { ...server, users: [] },
+        ] },
+      }
+      assert.match(vlessTransportError(emptyUsers), /vnext\[1\].*用户/)
+      assert.throws(() => override(emptyUsers), /vnext\[1\].*用户/)
+    }
+    const draft = JSON.stringify({ ...emptyPolicy, custom_outbounds: [outbound()] })
+    mount(<TemplateEditor template={{ ...template, draft }} onClose={() => {}} onConfigure={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await screen.findByText(/出站「egress」.*encryption/)
+    fireEvent.click(screen.getByRole('tab', { name: '策略 JSON 源码' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存并发布版本' }))
+    await screen.findByText(/出站「egress」.*encryption/)
+    assert.equal(calls.filter((call) => call.method === 'patch' || call.method === 'post').length, 0)
+  })
+}
+
+test('旧版及脱敏的 Reality 公钥可读取，密文只通过重新输入替换', () => {
+  const outbound: CustomOutbound = { tag: 'test', protocol: 'vless', streamSettings: { security: 'reality', realitySettings: { publicKey: '<masked>' } } }
+  const view = render(<SingleOutboundFields disabled outbound={outbound} onChange={() => {}} />)
+  assert.ok((screen.getByLabelText(/Reality 公钥/) as HTMLInputElement).disabled)
+  view.rerender(<SingleOutboundFields outbound={{ ...outbound, streamSettings: { security: 'reality', realitySettings: { password: 'enc:v1:abcd' } } }} onChange={() => {}} />)
+  assert.ok(screen.getByText('已加密保存'))
+  assert.ok(screen.getByRole('button', { name: '重新输入' }))
 })

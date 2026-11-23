@@ -162,7 +162,7 @@ func TestSchemaV3GuardrailsAndProtocols(t *testing.T) {
 			{"tag": "out-http", "protocol": "http", "settings": {"servers": [{"address": "198.51.100.2", "port": 8080}]}},
 			{"tag": "out-freedom", "protocol": "freedom", "sendThrough": "198.51.100.3", "settings": {"domainStrategy": "UseIPv4"}},
 			{"tag": "out-wg", "protocol": "wireguard", "settings": {"secretKey": "wg-priv", "peers": [{"endpoint": "engage.cloudflareclient.com:2408", "publicKey": "wg-pub"}]}},
-			{"tag": "out-vless", "protocol": "vless", "settings": {"vnext": [{"address": "example.com", "port": 443, "users": [{"id": "11111111-1111-4111-8111-111111111111"}]}]}}
+			{"tag": "out-vless", "protocol": "vless", "settings": {"vnext": [{"address": "example.com", "port": 443, "users": [{"id": "11111111-1111-4111-8111-111111111111", "encryption": "none"}]}]}}
 		],
 		"custom_rules": [
 			{"type": "field", "domain": ["geosite:openai"], "outboundTag": "out-wg"},
@@ -184,7 +184,7 @@ func TestSchemaV3GuardrailsAndProtocols(t *testing.T) {
 		// freedom sendThrough 非 IP
 		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"f1","protocol":"freedom","sendThrough":"not-ip"}],"custom_rules":[]}`,
 		// vless 缺少用户 id
-		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"v1","protocol":"vless","settings":{"vnext":[{"address":"a.com","port":443,"users":[{"id":""}]}]}}],"custom_rules":[]}`,
+		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"v1","protocol":"vless","settings":{"vnext":[{"address":"a.com","port":443,"users":[{"id":"","encryption":"none"}]}]}}],"custom_rules":[]}`,
 		// dialerProxy 自环与互环
 		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"a","protocol":"freedom","streamSettings":{"sockopt":{"dialerProxy":"a"}}}],"custom_rules":[]}`,
 		`{"schema_version":3,"ipv4_force_domains":[],"ipv6_force_domains":[],"ipv6_failure_policy":"strict","custom_outbounds":[{"tag":"a","protocol":"freedom","streamSettings":{"sockopt":{"dialerProxy":"b"}}},{"tag":"b","protocol":"freedom","streamSettings":{"sockopt":{"dialerProxy":"a"}}}],"custom_rules":[]}`,
@@ -339,7 +339,7 @@ func TestOutboundSecretEncryptionIdempotencyAndMasking(t *testing.T) {
 		"ipv6_failure_policy": "strict",
 		"custom_outbounds": [
 			{"tag": "s1", "protocol": "socks", "settings": {"servers": [{"address": "1.1.1.1", "port": 1080, "users": [{"user": "u1", "pass": "socks-secret"}]}]}},
-			{"tag": "v1", "protocol": "vless", "settings": {"vnext": [{"address": "2.2.2.2", "port": 443, "users": [{"id": "11111111-1111-4111-8111-111111111111"}]}]}, "streamSettings": {"realitySettings": {"privateKey": "reality-priv"}}},
+			{"tag": "v1", "protocol": "vless", "settings": {"vnext": [{"address": "2.2.2.2", "port": 443, "users": [{"id": "11111111-1111-4111-8111-111111111111", "encryption": "none"}]}]}, "streamSettings": {"realitySettings": {"privateKey": "reality-priv"}}},
 			{"tag": "t1", "protocol": "trojan", "settings": {"servers": [{"address": "3.3.3.3", "port": 443, "password": "trojan-password"}]}},
 			{"tag": "w1", "protocol": "wireguard", "settings": {"secretKey": "wg-secret", "peers": [{"endpoint": "4.4.4.4:2408", "publicKey": "wg-pub", "preSharedKey": "wg-psk"}]}}
 		],

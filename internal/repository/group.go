@@ -2,12 +2,11 @@ package repository
 
 import (
 	"fmt"
-	"sort"
 	"strings"
+	"time"
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type GroupRepository struct{}
@@ -47,32 +46,43 @@ func (r *GroupRepository) List(page, pageSize int, keyword string, active *bool)
 
 // Update saves metadata and optional membership changes atomically. A nil list
 // preserves membership; an empty list clears it.
-func (r *GroupRepository) Update(group *entity.Group, nodeIDs []uint) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+func (r *GroupRepository) Update(id uint, fields map[string]any, nodeIDs []uint) error {
+	return groupMembershipTransaction(id, func(tx *gorm.DB, expiring []uint) error {
 		var old entity.Group
-		if err := tx.First(&old, group.ID).Error; err != nil {
+		if err := tx.First(&old, id).Error; err != nil {
 			return err
 		}
-		before, err := groupNodeIDs(tx, group.ID)
+		before, err := groupNodeIDs(tx, id)
 		if err != nil {
 			return err
 		}
-		// Preloaded associations must not recreate memberships removed by another edit.
-		if err := tx.Omit(clause.Associations).Save(group).Error; err != nil {
-			return err
+		active := old.Active
+		if v, ok := fields["active"].(bool); ok {
+			active = v
 		}
 		after := before
 		if nodeIDs != nil {
-			if after, err = replaceGroupNodes(tx, group, nodeIDs); err != nil {
+			after = nodeIDs
+		}
+		if err := rememberGroupDepartures(tx, id, before, after, old.Active, active); err != nil {
+			return err
+		}
+		if len(fields) != 0 {
+			if err := tx.Model(&entity.Group{}).Where("id = ?", id).Updates(fields).Error; err != nil {
 				return err
 			}
 		}
-		return invalidateGroupChanges(tx, old.Active, group.Active, before, after)
+		if nodeIDs != nil {
+			if after, err = replaceGroupNodes(tx, &old, nodeIDs); err != nil {
+				return err
+			}
+		}
+		return invalidateGroupChanges(tx, id, expiring, old.Active, active, before, after)
 	})
 }
 
-func (r *GroupRepository) UpdateActive(id uint, active bool) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+func (r *GroupRepository) ToggleActive(id uint) error {
+	return groupMembershipTransaction(id, func(tx *gorm.DB, expiring []uint) error {
 		var old entity.Group
 		if err := tx.First(&old, id).Error; err != nil {
 			return err
@@ -81,21 +91,27 @@ func (r *GroupRepository) UpdateActive(id uint, active bool) error {
 		if err != nil {
 			return err
 		}
-		if err := tx.Model(&entity.Group{}).Where("id = ?", id).Update("active", active).Error; err != nil {
+		if err := rememberGroupDepartures(tx, id, ids, ids, old.Active, !old.Active); err != nil {
 			return err
 		}
-		return invalidateGroupChanges(tx, old.Active, active, ids, ids)
+		if err := tx.Model(&entity.Group{}).Where("id = ?", id).Update("active", !old.Active).Error; err != nil {
+			return err
+		}
+		return invalidateGroupChanges(tx, id, expiring, old.Active, !old.Active, ids, ids)
 	})
 }
 
 func (r *GroupRepository) Delete(id uint) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return groupMembershipTransaction(id, func(tx *gorm.DB, expiring []uint) error {
 		var old entity.Group
 		if err := tx.First(&old, id).Error; err != nil {
 			return err
 		}
 		ids, err := groupNodeIDs(tx, id)
 		if err != nil {
+			return err
+		}
+		if err := rememberGroupDepartures(tx, id, ids, nil, old.Active, false); err != nil {
 			return err
 		}
 		if err := tx.Where("scope = ? AND target_id = ?", "group", id).Delete(&entity.RoutingBinding{}).Error; err != nil {
@@ -110,13 +126,13 @@ func (r *GroupRepository) Delete(id uint) error {
 		if err := tx.Delete(&entity.Group{}, id).Error; err != nil {
 			return err
 		}
-		return invalidateGroupChanges(tx, old.Active, false, ids, nil)
+		return invalidateGroupChanges(tx, id, expiring, old.Active, false, ids, nil)
 	})
 }
 
 // ReplaceNodes 替换分组关联节点（many2many）
 func (r *GroupRepository) ReplaceNodes(group *entity.Group, nodes []entity.Node) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return groupMembershipTransaction(group.ID, func(tx *gorm.DB, expiring []uint) error {
 		var current entity.Group
 		if err := tx.First(&current, group.ID).Error; err != nil {
 			return err
@@ -129,11 +145,14 @@ func (r *GroupRepository) ReplaceNodes(group *entity.Group, nodes []entity.Node)
 		for _, n := range nodes {
 			ids = append(ids, n.ID)
 		}
+		if err := rememberGroupDepartures(tx, group.ID, before, ids, current.Active, current.Active); err != nil {
+			return err
+		}
 		after, err := replaceGroupNodes(tx, group, ids)
 		if err != nil {
 			return err
 		}
-		return invalidateGroupChanges(tx, current.Active, current.Active, before, after)
+		return invalidateGroupChanges(tx, group.ID, expiring, current.Active, current.Active, before, after)
 	})
 }
 
@@ -160,30 +179,35 @@ func replaceGroupNodes(tx *gorm.DB, group *entity.Group, ids []uint) ([]uint, er
 	return ids, nil
 }
 
+// 先固定分组内已到期用户的原节点，成员关系变化与到期失效合并成一次修订。
+func groupMembershipTransaction(id uint, edit func(*gorm.DB, []uint) error) error {
+	return AuthorizationTransaction(func(tx *gorm.DB) error {
+		nodes, err := registerDueExpiries(tx, time.Now(), id)
+		if err != nil {
+			return err
+		}
+		return edit(tx, nodes)
+	})
+}
+
 // Only membership changes in an enabled group can affect its users or routing.
 // InvalidateConfigs(nil) means ALL enabled nodes, never an empty impact set.
-func invalidateGroupChanges(tx *gorm.DB, beforeActive, afterActive bool, before, after []uint) error {
-	changed := map[uint]bool{}
-	if beforeActive {
-		for _, id := range before {
-			changed[id] = true
-		}
+func invalidateGroupChanges(tx *gorm.DB, groupID uint, expiring []uint, beforeActive, afterActive bool, before, after []uint) error {
+	if !beforeActive {
+		before = nil
 	}
-	if afterActive {
-		for _, id := range after {
-			changed[id] = !changed[id]
-		}
+	if !afterActive {
+		after = nil
 	}
-	ids := make([]uint, 0, len(changed))
-	for id, different := range changed {
-		if different {
-			ids = append(ids, id)
-		}
+	added := nodeDifference(after, before)
+	if err := cancelRegrantedGroupTargets(tx, groupID, added); err != nil {
+		return err
 	}
+	ids := append(expiring, nodeDifference(before, after)...)
+	ids = append(ids, added...)
 	if len(ids) == 0 {
 		return nil
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	return InvalidateConfigs(tx, ids)
 }
 

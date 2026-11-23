@@ -110,6 +110,10 @@ func (s *SyncService) AdoptBaseline(nodeID uint, req AdoptBaselineRequest, actor
 		return nil, err
 	}
 	defer release()
+	node, err = s.nodeRepo.FindByID(nodeID)
+	if err != nil {
+		return nil, err
+	}
 	// 普通入队键以节点 ID 结尾，使用独立后缀以免与已有任务混淆。
 	key := fmt.Sprintf("%d:%s:adopt-baseline", nodeID, req.Key)
 	var job entity.ConfigDeployment

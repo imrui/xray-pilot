@@ -559,55 +559,7 @@ func validateCustomOutbound(co CustomOutbound) error {
 			}
 		}
 	case "vless":
-		var cfg struct {
-			Address string `json:"address"`
-			Port    int    `json:"port"`
-			ID      string `json:"id"`
-			Vnext   []struct {
-				Address string `json:"address"`
-				Port    int    `json:"port"`
-				Users   []struct {
-					ID string `json:"id"`
-				} `json:"users"`
-			} `json:"vnext"`
-		}
-		if len(co.Settings) == 0 || json.Unmarshal(co.Settings, &cfg) != nil {
-			return fmt.Errorf("vless 出站必须配置非空 settings.vnext")
-		}
-		if cfg.Address != "" {
-			if len(cfg.Vnext) > 0 {
-				return fmt.Errorf("vless 出站不能同时配置 settings.address 简写与 vnext")
-			}
-			if err := validateHostAddress(cfg.Address); err != nil {
-				return err
-			}
-			if err := validatePortRange(cfg.Port); err != nil {
-				return err
-			}
-			if strings.TrimSpace(cfg.ID) == "" {
-				return fmt.Errorf("vless settings.id 不能为空")
-			}
-			break
-		}
-		if len(cfg.Vnext) == 0 {
-			return fmt.Errorf("vless 出站必须配置 settings.address 或非空 settings.vnext")
-		}
-		for i, vn := range cfg.Vnext {
-			if err := validateHostAddress(vn.Address); err != nil {
-				return fmt.Errorf("vnext[%d]: %w", i, err)
-			}
-			if err := validatePortRange(vn.Port); err != nil {
-				return fmt.Errorf("vnext[%d]: %w", i, err)
-			}
-			if len(vn.Users) == 0 {
-				return fmt.Errorf("vnext[%d]: 必须至少配置一个用户", i)
-			}
-			for j, u := range vn.Users {
-				if strings.TrimSpace(u.ID) == "" {
-					return fmt.Errorf("vnext[%d].users[%d]: id 不能为空", i, j)
-				}
-			}
-		}
+		return validateVLESSOutbound(co)
 	case "wireguard":
 		var cfg struct {
 			SecretKey string          `json:"secretKey"`
@@ -1031,12 +983,12 @@ func maskExtraRawJSON(raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 	changed := false
-	var walk func(any) any
-	walk = func(v any) any {
+	var walk func(any, string) any
+	walk = func(v any, parent string) any {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, val := range x {
-				if IsSensitiveConfigKey(k) {
+				if IsSensitiveConfigField(parent, k) {
 					if s, ok := val.(string); !ok || s != MaskedPlaceholder {
 						x[k] = MaskedPlaceholder
 						changed = true
@@ -1050,12 +1002,12 @@ func maskExtraRawJSON(raw json.RawMessage) json.RawMessage {
 						continue
 					}
 				}
-				x[k] = walk(val)
+				x[k] = walk(val, k)
 			}
 			return x
 		case []any:
 			for i, elem := range x {
-				x[i] = walk(elem)
+				x[i] = walk(elem, parent)
 			}
 			return x
 		case string:
@@ -1068,7 +1020,7 @@ func maskExtraRawJSON(raw json.RawMessage) json.RawMessage {
 			return v
 		}
 	}
-	obj = walk(obj)
+	obj = walk(obj, "")
 	if !changed {
 		return raw
 	}

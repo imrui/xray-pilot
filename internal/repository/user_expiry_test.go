@@ -1,15 +1,16 @@
 package repository
 
 import (
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/imrui/xray-pilot/internal/entity"
 )
 
-// TestFindExpiredUnswept 验证过期摘除查询只返回「启用 + 已过期 + 未打标」的用户，
-// 且 MarkExpiredSwept 后不再返回
-func TestFindExpiredUnswept(t *testing.T) {
+// 旧库中无授权节点的到期用户可一次完成，禁用和已确认用户不会重复处理。
+func TestPrepareExpirySweep(t *testing.T) {
 	setupRepositoryTestDB(t)
 	repo := NewUserRepository()
 
@@ -30,36 +31,52 @@ func TestFindExpiredUnswept(t *testing.T) {
 		}
 		// GORM 对带 default:true 的零值 bool 会写入默认值，禁用态需 Create 后单独落库
 		if !wantActive {
-			if err := repo.UpdateActive(seed[i].ID, false); err != nil {
+			if err := DB.Model(&seed[i]).Update("active", false).Error; err != nil {
 				t.Fatalf("disable %s: %v", seed[i].Username, err)
 			}
 		}
 	}
 
-	users, err := repo.FindExpiredUnswept(now)
-	if err != nil {
-		t.Fatalf("FindExpiredUnswept: %v", err)
+	targets, names, err := PrepareExpirySweep(now)
+	if err != nil || len(targets) != 0 || len(names) != 1 || names[0] != "expired" {
+		t.Fatalf("first sweep: targets=%v names=%v err=%v", targets, names, err)
 	}
-	if len(users) != 1 || users[0].Username != "expired" {
-		t.Fatalf("want only [expired], got %+v", usernames(users))
-	}
-
-	if err := repo.MarkExpiredSwept(users[0].ID, now); err != nil {
-		t.Fatalf("MarkExpiredSwept: %v", err)
-	}
-	users, err = repo.FindExpiredUnswept(now)
-	if err != nil {
-		t.Fatalf("FindExpiredUnswept after mark: %v", err)
-	}
-	if len(users) != 0 {
-		t.Fatalf("打标后不应再返回，got %v", usernames(users))
+	targets, names, err = PrepareExpirySweep(now)
+	if err != nil || len(targets) != 0 || len(names) != 0 {
+		t.Fatalf("repeat sweep: targets=%v names=%v err=%v", targets, names, err)
 	}
 }
 
 func usernames(users []entity.User) []string {
-	out := make([]string, 0, len(users))
-	for _, u := range users {
-		out = append(out, u.Username)
+	names := make([]string, 0, len(users))
+	for _, user := range users {
+		names = append(names, user.Username)
 	}
-	return out
+	return names
+}
+
+func TestNodeDifference(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b []uint
+		want []uint
+	}{
+		{"加入新节点", []uint{1, 2, 3}, []uint{1}, []uint{2, 3}},
+		{"无变化", []uint{1, 2}, []uint{1, 2}, nil},
+		{"全部移除", nil, []uint{1, 2}, nil},
+		{"从空集加入", []uint{1, 2}, nil, []uint{1, 2}},
+		{"部分重叠", []uint{1, 2, 3}, []uint{2, 4}, []uint{1, 3}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := nodeDifference(c.a, c.b)
+			sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
+			if len(got) == 0 && len(c.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("nodeDifference(%v,%v) = %v, want %v", c.a, c.b, got, c.want)
+			}
+		})
+	}
 }

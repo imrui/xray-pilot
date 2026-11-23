@@ -15,6 +15,15 @@ var outboundSecretFields = map[string]string{
 	"pass": "pass", "secretkey": "secretKey", "presharedkey": "preSharedKey",
 }
 
+// publicKey 仅在 REALITY 中是 password 的旧别名；WireGuard 对端公钥保持可见。
+func isRealityPublicKey(parent, key string) bool {
+	return strings.EqualFold(parent, "realitySettings") && strings.EqualFold(key, "publicKey")
+}
+
+func IsSensitiveConfigField(parent, key string) bool {
+	return IsSensitiveConfigKey(key) || isRealityPublicKey(parent, key)
+}
+
 func IsSensitiveConfigKey(key string) bool {
 	_, secret := outboundSecretFields[strings.ToLower(key)]
 	return secret || strings.EqualFold(key, "email") || strings.EqualFold(key, "user")
@@ -74,6 +83,8 @@ func validateOutboundJSONKeys(raw json.RawMessage) error {
 						canonical, known = "streamSettings", true
 					case "realitysettings":
 						canonical, known = "realitySettings", true
+					case "publickey":
+						canonical, known = "publicKey", true
 					case "dialerproxy":
 						canonical, known = "dialerProxy", true
 					case "targetstrategy":
@@ -131,9 +142,10 @@ func transformSecretJSON(raw json.RawMessage, path string, fn secretTransformFun
 				keys = append(keys, key)
 			}
 			sort.Strings(keys)
+			parent := path[strings.LastIndexByte(path, '.')+1:]
 			for _, key := range keys {
 				fieldPath := path + "." + key
-				if _, secret := outboundSecretFields[strings.ToLower(key)]; secret {
+				if _, secret := outboundSecretFields[strings.ToLower(key)]; secret || isRealityPublicKey(parent, key) {
 					if obj[key] != nil {
 						if _, ok := obj[key].(string); !ok {
 							return fmt.Errorf("%s 敏感凭据必须是字符串", fieldPath)

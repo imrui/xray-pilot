@@ -27,8 +27,13 @@ type PollBucket struct {
 
 // modernc 保存 Go 时区格式，其他环境使用 RFC3339。
 // 秒与小数分开解析，避免 SQLite 毫秒舍入把午夜前样本计入下一天。
-const sqliteTrafficZone = "CASE WHEN instr(substr(period_end, 20), ' ') > 0 THEN substr(period_end, 20 + instr(substr(period_end, 20), ' '), 3) || ':' || substr(period_end, 23 + instr(substr(period_end, 20), ' '), 2) WHEN substr(period_end, -1) = 'Z' THEN 'Z' WHEN substr(period_end, -6, 1) IN ('+', '-') THEN substr(period_end, -6) ELSE '' END"
-const sqliteTrafficInstant = "(unixepoch(substr(period_end, 1, 19) || (" + sqliteTrafficZone + ")) * 1000000000 + CASE WHEN substr(period_end, 20, 1) = '.' THEN CAST(ROUND(CAST('0' || substr(period_end, 20) AS REAL) * 1000000000) AS INTEGER) ELSE 0 END)"
+func sqliteInstant(column string) string {
+	const zone = "CASE WHEN instr(substr(%[1]s, 20), ' ') > 0 THEN substr(%[1]s, 20 + instr(substr(%[1]s, 20), ' '), 3) || ':' || substr(%[1]s, 23 + instr(substr(%[1]s, 20), ' '), 2) WHEN substr(%[1]s, -1) = 'Z' THEN 'Z' WHEN substr(%[1]s, -6, 1) IN ('+', '-') THEN substr(%[1]s, -6) ELSE '' END"
+	const instant = "(unixepoch(substr(%[1]s, 1, 19) || (" + zone + ")) * 1000000000 + CASE WHEN substr(%[1]s, 20, 1) = '.' THEN CAST(ROUND(CAST('0' || substr(%[1]s, 20) AS REAL) * 1000000000) AS INTEGER) ELSE 0 END)"
+	return fmt.Sprintf(instant, column)
+}
+
+var sqliteTrafficInstant = sqliteInstant("period_end")
 
 // 统一采用北京时区 UTC+8，在 SQL 中聚合，避免长时间范围载入全部明细。
 func trafficBucketSQL(db *gorm.DB, seconds int64) string {

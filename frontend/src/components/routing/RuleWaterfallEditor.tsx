@@ -632,7 +632,7 @@ export function RuleWaterfallEditor({
               <span className="font-normal text-soft">{domainLines(v4Text).length} 条</span>
             </span>
             <textarea
-              rows={10}
+              rows={3}
               placeholder="domain:example.com"
               className={controlTextarea + ' font-mono font-normal'}
               value={v4Text}
@@ -645,7 +645,7 @@ export function RuleWaterfallEditor({
               <span className="font-normal text-soft">{v6DomainCount} 条</span>
             </span>
             <textarea
-              rows={10}
+              rows={3}
               placeholder="geosite:netflix"
               className={controlTextarea + ' font-mono font-normal'}
               value={v6Text}

@@ -1,0 +1,36 @@
+name: PostgreSQL integration tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: xray_pilot_test
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres -d xray_pilot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run PostgreSQL repository tests
+        env:
+          XRAY_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/xray_pilot_test?sslmode=disable
+        run: go test -count=1 -v ./internal/repository -run Postgres

@@ -18,7 +18,6 @@ import (
 
 type UserService struct {
 	userRepo    *repository.UserRepository
-	nodeRepo    *repository.NodeRepository
 	trafficRepo *repository.TrafficRepository
 	liveSync    *LiveSyncService
 }
@@ -26,73 +25,15 @@ type UserService struct {
 func NewUserService() *UserService {
 	return &UserService{
 		userRepo:    repository.NewUserRepository(),
-		nodeRepo:    repository.NewNodeRepository(),
 		trafficRepo: repository.NewTrafficRepository(),
 		liveSync:    NewLiveSyncService(),
 	}
 }
 
-// nodeSetIf 用户激活时返回其节点集，未激活返回空（未激活用户不应出现在任何节点运行时）。
-func nodeSetIf(active bool, ids []uint) []uint {
-	if !active {
-		return nil
+func (s *UserService) applyAccessChange(change repository.UserAccessChange, action string) {
+	if len(change.NodeIDs) > 0 && !change.Renamed && s.liveSync.Enabled() {
+		s.liveSync.applyOverNodes(change.NodeIDs, action, change.Username)
 	}
-	return ids
-}
-
-// nodeIDsDiff 返回 a - b（在 a 中但不在 b 中的节点 ID）。
-func nodeIDsDiff(a, b []uint) []uint {
-	if len(a) == 0 {
-		return nil
-	}
-	set := make(map[uint]struct{}, len(b))
-	for _, id := range b {
-		set[id] = struct{}{}
-	}
-	out := make([]uint, 0)
-	for _, id := range a {
-		if _, ok := set[id]; !ok {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
-// applyUpdateLive 用户更新后的增量 live-apply：基于「旧/新 期望节点集」差集做增删，
-// 只触碰真正变化的节点（加入新分组的节点、移出分组的节点、启停切换、过期/续期）。
-// 期望集用 EffectiveActive（启用且未过期），与配置生成的用户过滤语义一致。
-// 用户名(email)变更涉及跨节点 email 改动，逻辑复杂且罕见，回退全量 restart 同步。
-func (s *UserService) applyUpdateLive(u *entity.User, oldNodeIDs []uint, oldEffectiveActive bool, oldUsername string) {
-	if u.Username != oldUsername {
-		_ = s.nodeRepo.MarkAllDrifted()
-		return
-	}
-	desiredOld := nodeSetIf(oldEffectiveActive, oldNodeIDs)
-	desiredNew := nodeSetIf(u.EffectiveActive(time.Now()), s.userNodeIDs(u))
-	if toAdd := nodeIDsDiff(desiredNew, desiredOld); len(toAdd) > 0 {
-		s.liveSync.AddUserLive(toAdd, u.Username, u.UUID)
-	}
-	if toRemove := nodeIDsDiff(desiredOld, desiredNew); len(toRemove) > 0 {
-		s.liveSync.RemoveUserLive(toRemove, u.Username)
-	}
-}
-
-// userNodeIDs 返回用户所有分组覆盖到的激活节点 ID 集合（不做健康过滤，尽力对每个节点 live-apply）。
-// 用于用户增删时确定要即时操作的节点范围。
-func (s *UserService) userNodeIDs(user *entity.User) []uint {
-	groupIDs := extractGroupIDs(user.Groups)
-	if len(groupIDs) == 0 {
-		return nil
-	}
-	nodes, err := s.nodeRepo.FindHealthyByGroupIDs(groupIDs, false)
-	if err != nil {
-		return nil
-	}
-	ids := make([]uint, 0, len(nodes))
-	for i := range nodes {
-		ids = append(ids, nodes[i].ID)
-	}
-	return ids
 }
 
 func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.UserResponse, error) {
@@ -125,14 +66,29 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 	if user.Username == "" {
 		return nil, errors.New("用户名不能为空")
 	}
-	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
+	var nodes []uint
+	if err := repository.AuthorizationTransaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		if user.IsExpired(now) {
+			user.ExpiredSweptAt = &now
+		}
 		if err := tx.Create(user).Error; err != nil {
 			return fmt.Errorf("创建用户失败: %w", relayUserError(err))
 		}
 		if err := s.userRepo.ReplaceGroupsTx(tx, user, req.GroupIDs); err != nil {
 			return fmt.Errorf("保存用户分组失败: %w", err)
 		}
-		return repository.InvalidateUserConfigs(tx, user.ID)
+		if user.EffectiveActive(now) {
+			var err error
+			nodes, err = repository.UserConfigNodes(tx, user.ID)
+			if err != nil {
+				return err
+			}
+			if len(nodes) > 0 {
+				return repository.InvalidateConfigs(tx, nodes)
+			}
+		}
+		return nil
 	}); err != nil {
 		return nil, err
 	}
@@ -141,241 +97,162 @@ func (s *UserService) Create(req *dto.CreateUserRequest, baseURL string) (*dto.U
 	if err != nil {
 		return nil, fmt.Errorf("读取用户失败: %w", err)
 	}
-	if s.liveSync.Enabled() {
-		// 创建即过期的用户不在任何节点运行时（配置生成已过滤），无需 live-apply
-		if created.EffectiveActive(time.Now()) {
-			s.liveSync.AddUserLive(s.userNodeIDs(created), created.Username, created.UUID)
-		}
-	} else {
-		_ = s.nodeRepo.MarkAllDrifted()
+	if len(nodes) > 0 && s.liveSync.Enabled() {
+		s.liveSync.AddUserLive(nodes, created.Username, created.UUID)
 	}
 	return s.toResponse(created, baseURL, currentRelayPrefix()), nil
 }
 
 func (s *UserService) Update(id uint, req *dto.UpdateUserRequest, baseURL string) (*dto.UserResponse, error) {
-	user, err := s.userRepo.FindByID(id)
-	if err != nil {
-		return nil, errors.New("用户不存在")
-	}
-	// live-apply：在改动前捕获旧的节点集 / 活跃态 / 用户名，用于结束后做增量对账
-	liveOn := s.liveSync.Enabled()
-	var (
-		oldNodeIDs         []uint
-		oldEffectiveActive bool
-		oldUsername        string
-	)
-	if liveOn {
-		oldNodeIDs = s.userNodeIDs(user)
-		oldEffectiveActive = user.EffectiveActive(time.Now())
-		oldUsername = user.Username
-	}
-	groupsChanged := false
-	shouldMarkSync := false
-	if req.RelaySubscriptionID != nil {
-		user.RelaySubscriptionID, err = relayID(*req.RelaySubscriptionID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if req.Username != nil {
-		username := strings.TrimSpace(*req.Username)
-		if username == "" {
-			return nil, fmt.Errorf("用户名不能为空")
-		}
-		if user.Username != username {
-			shouldMarkSync = true
-		}
-		user.Username = username
-	}
-	if req.RealName != nil {
-		user.RealName = *req.RealName
-	}
-	if req.GroupIDs != nil {
-		groupIDs, err := parseOptionalUintSlice(req.GroupIDs)
-		if err != nil {
-			return nil, fmt.Errorf("解析分组失败: %w", err)
-		}
-		currentGroupIDs := extractGroupIDs(user.Groups)
-		if !slices.Equal(currentGroupIDs, groupIDs) {
-			groupsChanged = true
-			shouldMarkSync = true
-		}
-	}
-	if req.Remark != nil {
-		user.Remark = *req.Remark
-	}
-	if req.FeishuEnabled != nil {
-		user.FeishuEnabled = *req.FeishuEnabled
-	}
-	if req.FeishuEmail != nil {
-		user.FeishuEmail = strings.ToLower(strings.TrimSpace(*req.FeishuEmail))
-	}
-	oldOpen, oldUnion, oldChat := user.FeishuOpenID, user.FeishuUnionID, user.FeishuChatID
-	if req.FeishuOpenID != nil {
-		user.FeishuOpenID = *req.FeishuOpenID
-	}
-	if req.FeishuUnionID != nil {
-		user.FeishuUnionID = *req.FeishuUnionID
-	}
-	if req.FeishuChatID != nil {
-		user.FeishuChatID = *req.FeishuChatID
-	}
-	if req.Active != nil {
-		if user.Active != *req.Active {
-			shouldMarkSync = true
-		}
-		user.Active = *req.Active
-	}
-	if req.ExpiresAt != nil {
-		expiresAt, err := parseOptionalTime(req.ExpiresAt)
-		if err != nil {
-			return nil, fmt.Errorf("解析过期时间失败: %w", err)
-		}
-		if (user.ExpiresAt == nil) != (expiresAt == nil) || (user.ExpiresAt != nil && expiresAt != nil && !user.ExpiresAt.Equal(*expiresAt)) {
-			shouldMarkSync = true
-			user.ExpiredSweptAt = nil // 过期时间变更（续期）后允许调度器重新处理
-		}
-		user.ExpiresAt = expiresAt
-	}
-	if user.FeishuOpenID == "" && user.FeishuUnionID == "" && user.FeishuChatID == "" {
-		user.FeishuBoundAt = nil
-	} else if user.FeishuBoundAt == nil || oldOpen != user.FeishuOpenID || oldUnion != user.FeishuUnionID || oldChat != user.FeishuChatID {
-		now := time.Now()
-		user.FeishuBoundAt = &now
-	}
-	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
-		if groupsChanged {
-			if err := repository.InvalidateUserConfigs(tx, user.ID); err != nil {
+	change, err := s.userRepo.ChangeAccess(id, func(tx *gorm.DB, u *entity.User) error {
+		updates := map[string]any{}
+		if req.RelaySubscriptionID != nil {
+			v, err := relayID(*req.RelaySubscriptionID)
+			if err != nil {
 				return err
 			}
-			groupIDs, err := parseOptionalUintSlice(req.GroupIDs)
+			updates["relay_subscription_id"] = v
+		}
+		if req.Username != nil {
+			name := strings.TrimSpace(*req.Username)
+			if name == "" {
+				return errors.New("用户名不能为空")
+			}
+			updates["username"] = name
+		}
+		if req.RealName != nil {
+			updates["real_name"] = *req.RealName
+		}
+		if req.Remark != nil {
+			updates["remark"] = *req.Remark
+		}
+		if req.Active != nil {
+			updates["active"] = *req.Active
+		}
+		if req.FeishuEnabled != nil {
+			updates["feishu_enabled"] = *req.FeishuEnabled
+		}
+		if req.FeishuEmail != nil {
+			updates["feishu_email"] = strings.ToLower(strings.TrimSpace(*req.FeishuEmail))
+		}
+		if req.FeishuOpenID != nil || req.FeishuUnionID != nil || req.FeishuChatID != nil {
+			open, union, chat := u.FeishuOpenID, u.FeishuUnionID, u.FeishuChatID
+			if req.FeishuOpenID != nil {
+				open = *req.FeishuOpenID
+				updates["feishu_open_id"] = open
+			}
+			if req.FeishuUnionID != nil {
+				union = *req.FeishuUnionID
+				updates["feishu_union_id"] = union
+			}
+			if req.FeishuChatID != nil {
+				chat = *req.FeishuChatID
+				updates["feishu_chat_id"] = chat
+			}
+			if open == "" && union == "" && chat == "" {
+				updates["feishu_bound_at"] = nil
+			} else if u.FeishuBoundAt == nil || open != u.FeishuOpenID || union != u.FeishuUnionID || chat != u.FeishuChatID {
+				updates["feishu_bound_at"] = time.Now()
+			}
+		}
+		if req.ExpiresAt != nil {
+			until, err := parseOptionalTime(req.ExpiresAt)
+			if err != nil {
+				return fmt.Errorf("解析过期时间失败: %w", err)
+			}
+			if (until == nil) != (u.ExpiresAt == nil) || (until != nil && !until.Equal(*u.ExpiresAt)) {
+				updates["expires_at"] = until
+				now := time.Now()
+				if !u.IsExpired(now) || until == nil || until.After(now) {
+					updates["expired_swept_at"] = nil
+					updates["expiry_queued"] = false
+				}
+			}
+		}
+		if req.GroupIDs != nil {
+			ids, err := parseOptionalUintSlice(req.GroupIDs)
 			if err != nil {
 				return fmt.Errorf("解析分组失败: %w", err)
 			}
-			if err := s.userRepo.ReplaceGroupsTx(tx, user, groupIDs); err != nil {
-				return fmt.Errorf("更新用户分组失败: %w", err)
+			if !slices.Equal(ids, extractGroupIDs(u.Groups)) {
+				if err := s.userRepo.ReplaceGroupsTx(tx, u, ids); err != nil {
+					return fmt.Errorf("更新用户分组失败: %w", err)
+				}
 			}
 		}
-		write := tx
-		if req.RelaySubscriptionID == nil {
-			write = write.Omit("RelaySubscriptionID")
+		if len(updates) == 0 {
+			return nil
 		}
-		if err := write.Save(user).Error; err != nil {
-			return relayUserError(err)
-		}
-		if shouldMarkSync {
-			return repository.InvalidateUserConfigs(tx, user.ID)
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	updated, err := s.userRepo.FindByID(id)
+		return relayUserError(tx.Model(&entity.User{}).Where("id = ?", id).Updates(updates).Error)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("读取用户失败: %w", err)
+		return nil, userEditError(err)
 	}
-	if shouldMarkSync {
-		if liveOn {
-			s.applyUpdateLive(updated, oldNodeIDs, oldEffectiveActive, oldUsername)
-		} else {
-			_ = s.nodeRepo.MarkAllDrifted()
-		}
+	s.applyAccessChange(change, "更新用户")
+	return s.toResponse(change.User, baseURL, currentRelayPrefix()), nil
+}
+
+func userEditError(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return errors.New("用户不存在")
 	}
-	return s.toResponse(updated, baseURL, currentRelayPrefix()), nil
+	return err
 }
 
 func (s *UserService) Delete(id uint) error {
-	// live-apply 需在删除前捕获用户的节点集与 email（删除后查不到分组关联）
-	var (
-		liveOn  = s.liveSync.Enabled()
-		nodeIDs []uint
-		email   string
-	)
-	if liveOn {
-		if user, err := s.userRepo.FindByID(id); err == nil {
-			nodeIDs = s.userNodeIDs(user)
-			email = user.Username
-		} else {
-			liveOn = false // 查不到用户，回退全量标记漂移
-		}
-	}
-
-	if err := s.userRepo.Delete(id); err != nil {
+	change, err := s.userRepo.DeleteAccess(id)
+	if err != nil {
 		return err
 	}
-
-	if liveOn {
-		s.liveSync.RemoveUserLive(nodeIDs, email)
-		return nil
-	}
-	return s.nodeRepo.MarkAllDrifted()
+	s.applyAccessChange(change, "摘除用户")
+	return nil
 }
 
 func (s *UserService) ToggleActive(id uint) error {
-	user, err := s.userRepo.FindByID(id)
+	change, err := s.userRepo.ChangeAccess(id, func(tx *gorm.DB, u *entity.User) error {
+		return tx.Model(&entity.User{}).Where("id = ?", u.ID).Update("active", !u.Active).Error
+	})
 	if err != nil {
-		return errors.New("用户不存在")
+		return userEditError(err)
 	}
-	newActive := !user.Active
-	if err := s.userRepo.UpdateActive(id, newActive); err != nil {
-		return err
-	}
-	// live-apply：启用 → AddUser（已过期用户不加，配置生成也不含它），禁用 → RemoveUser
-	if s.liveSync.Enabled() {
-		if newActive {
-			if !user.IsExpired(time.Now()) {
-				s.liveSync.AddUserLive(s.userNodeIDs(user), user.Username, user.UUID)
-			}
-		} else {
-			s.liveSync.RemoveUserLive(s.userNodeIDs(user), user.Username)
-		}
-		return nil
-	}
-	return s.nodeRepo.MarkAllDrifted()
+	s.applyAccessChange(change, "用户启停")
+	return nil
 }
 
 // SweepResult 一次过期摘除的汇总
 type SweepResult struct {
 	Swept     []string // 已处理的用户名
-	LiveApply bool     // 本次是否走 gRPC 即时摘除（false = 标记漂移等待 restart 同步）
+	LiveApply bool     // 本次是否先尝试 gRPC 对齐运行态
 }
 
 // SweepExpired 把已过期但仍启用的用户从节点运行时摘除（给调度器周期调用）。
-//   - live-apply on：逐用户 RemoveUserLive，再确认相关节点已撤权
+//   - live-apply on：按节点热更新，再确认磁盘及运行态撤权
 //   - live-apply off：标记漂移并执行完整同步；无法确认当前授权时在线停止保护
 //
 // 处理过的用户打 ExpiredSweptAt 标记，不重复扫；续期会清标记。
 // 订阅层的 403 拦截与本方法互补：前者挡新取订阅，后者撤销节点账号。
 func (s *UserService) SweepExpired(now time.Time) (*SweepResult, error) {
-	users, err := s.userRepo.FindExpiredUnswept(now)
+	targets, swept, err := repository.PrepareExpirySweep(now)
 	if err != nil {
-		return nil, fmt.Errorf("查询过期用户失败: %w", err)
+		return nil, err
 	}
-	result := &SweepResult{LiveApply: s.liveSync.Enabled()}
-	if len(users) == 0 {
-		return result, nil
-	}
-	if !result.LiveApply {
-		if err := s.nodeRepo.MarkAllDrifted(); err != nil {
-			return nil, fmt.Errorf("标记节点漂移失败: %w", err)
+	result := &SweepResult{Swept: swept, LiveApply: s.liveSync.Enabled()}
+	for len(targets) > 0 {
+		// 同一节点只对齐一次权限，每张回执绑定登记时的 Ticket。
+		id := targets[0].NodeID
+		var tickets []string
+		for len(targets) > 0 && targets[0].NodeID == id {
+			tickets = append(tickets, targets[0].Ticket)
+			targets = targets[1:]
 		}
-	}
-	for i := range users {
-		u := &users[i]
-		if result.LiveApply {
-			s.liveSync.RemoveUserLive(s.userNodeIDs(u), u.Username)
-		}
-		var affected []uint
-		if err := repository.DB.Table("group_nodes").Joins("JOIN user_groups ON user_groups.group_id = group_nodes.group_id").Where("user_groups.user_id = ?", u.ID).Distinct("group_nodes.node_id").Pluck("group_nodes.node_id", &affected).Error; err != nil {
-			return result, err
-		}
-		if !s.confirmRevoked(affected) {
+		if !s.liveSync.confirmExpiredNode(id, tickets, result.LiveApply) {
 			continue
 		}
-		if err := s.userRepo.MarkExpiredSwept(u.ID, now); err != nil {
-			return result, fmt.Errorf("标记用户 %s 已摘除失败: %w", u.Username, err)
+		completed, err := repository.ConfirmExpiryTargets(tickets, now)
+		if err != nil {
+			return result, err
 		}
-		result.Swept = append(result.Swept, u.Username)
+		result.Swept = append(result.Swept, completed...)
 	}
 	return result, nil
 }
@@ -408,27 +285,16 @@ func (s *UserService) List(page, pageSize int, baseURL string, filter repository
 	return &dto.UserListResponse{Total: total, List: result, RelayEnabled: baseRelay != "", RelayPrefix: baseRelay}, nil
 }
 
-// ResetUUID 重置用户 UUID（触发全节点重新同步）
+// ResetUUID 仅对持有该账号有效授权的节点换证。
 func (s *UserService) ResetUUID(id uint, baseURL string) (*dto.UserResponse, error) {
-	user, err := s.userRepo.FindByID(id)
+	change, err := s.userRepo.ChangeAccess(id, func(tx *gorm.DB, u *entity.User) error {
+		return tx.Model(&entity.User{}).Where("id = ?", u.ID).Update("uuid", uuid.NewString()).Error
+	})
 	if err != nil {
-		return nil, errors.New("用户不存在")
+		return nil, userEditError(err)
 	}
-	newUUID := uuid.NewString()
-	if err := s.userRepo.UpdateUUID(id, newUUID); err != nil {
-		return nil, fmt.Errorf("重置 UUID 失败: %w", err)
-	}
-	user.UUID = newUUID
-	if s.liveSync.Enabled() {
-		// UUID 变更：email 不变，逐 inbound 先删旧账号再加新 UUID 账号。
-		// 未激活/已过期用户不在任何节点运行时（config 已过滤），UUID 变更无 config 影响 → no-op。
-		if user.EffectiveActive(time.Now()) {
-			s.liveSync.ReplaceUserLive(s.userNodeIDs(user), user.Username, newUUID)
-		}
-	} else {
-		_ = s.nodeRepo.MarkAllDrifted()
-	}
-	return s.toResponse(user, baseURL, currentRelayPrefix()), nil
+	s.applyAccessChange(change, "重置用户 UUID")
+	return s.toResponse(change.User, baseURL, currentRelayPrefix()), nil
 }
 
 // ResetToken 重置用户订阅 Token

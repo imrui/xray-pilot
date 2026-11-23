@@ -194,7 +194,7 @@ func TestRequiresIPv6FollowsPhysicalDialPath(t *testing.T) {
 		{"independent-observatory-ipv4-probe", `"balancers":[{"tag":"idle","selector":["direct-v4"]}],"observatory":{"subjectSelector":["direct-v6"],"probeURL":"https://1.1.1.1/"}`, false},
 		{"independent-observatory-ipv6-probe", `"balancers":[{"tag":"idle","selector":["direct-v4"]}],"observatory":{"subjectSelector":["direct-v4"],"probeURL":"https://[2606:4700:4700::1111]/"}`, true},
 		{"flat-socks-ipv6-endpoint", `"custom_outbounds":[{"tag":"proxy","protocol":"socks","settings":{"address":"2001:db8::1","port":1080}}],"custom_rules":[{"type":"field","port":"443","outboundTag":"proxy"}]`, true},
-		{"flat-vless-ipv6-endpoint", `"custom_outbounds":[{"tag":"proxy","protocol":"vless","settings":{"address":"2001:db8::1","port":443,"id":"11111111-1111-4111-8111-111111111111"}}],"custom_rules":[{"type":"field","port":"443","outboundTag":"proxy"}]`, true},
+		{"flat-vless-ipv6-endpoint", `"custom_outbounds":[{"tag":"proxy","protocol":"vless","settings":{"address":"2001:db8::1","port":443,"id":"11111111-1111-4111-8111-111111111111","encryption":"none"}}],"custom_rules":[{"type":"field","port":"443","outboundTag":"proxy"}]`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := semanticsPolicy(t, tc.fields)

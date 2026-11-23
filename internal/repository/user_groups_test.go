@@ -70,6 +70,15 @@ func TestMigrateLegacyUserGroupsCopiesExistingAssignments(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("expected 1 migrated user_group row, got %d", count)
 	}
+	if err := DB.Where("user_id = ?", user.ID).Delete(&entity.UserGroup{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateLegacyUserGroups(DB); err != nil {
+		t.Fatal(err)
+	}
+	if err := DB.Model(&entity.UserGroup{}).Where("user_id = ?", user.ID).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("restart restored removed legacy group: count=%d err=%v", count, err)
+	}
 }
 
 func TestFindActiveUsersByNodeIDDeduplicatesAcrossGroups(t *testing.T) {

@@ -18,6 +18,7 @@ type User struct {
 	// 过期摘除打标：调度器把过期用户从节点运行时摘除后写入，避免每周期重复扫；
 	// ExpiresAt 变更（续期）时清空，使续期后的再次过期能被重新处理。
 	ExpiredSweptAt *time.Time
+	ExpiryQueued   bool `gorm:"not null;default:false" json:"-"`
 	Remark         string
 	FeishuEnabled  bool
 	FeishuEmail    string
@@ -43,4 +44,12 @@ func (u *User) EffectiveActive(now time.Time) bool {
 type UserGroup struct {
 	UserID  uint `gorm:"primaryKey"`
 	GroupID uint `gorm:"primaryKey"`
+}
+
+// UserExpiryTarget 在分组改变后仍保留撤权义务。Ticket 防止续期前的回执确认下一次到期。
+type UserExpiryTarget struct {
+	Ticket   string `gorm:"primaryKey;size:36"`
+	UserID   uint   `gorm:"uniqueIndex:idx_user_expiry_node"`
+	NodeID   uint   `gorm:"uniqueIndex:idx_user_expiry_node;index"`
+	Deferred bool   `gorm:"not null;default:false"` // 到期前移组，等待正常同步回执或到期时确认。
 }

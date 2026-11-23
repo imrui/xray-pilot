@@ -9,6 +9,7 @@ import (
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
+	"gorm.io/gorm"
 )
 
 type GroupService struct {
@@ -48,23 +49,23 @@ func (s *GroupService) Create(req *dto.CreateGroupRequest) (*dto.GroupResponse, 
 
 // UpdateGroup 更新分组：节点关联变更后自动标记受影响节点为漂移状态
 func (s *GroupService) UpdateGroup(id uint, req *dto.UpdateGroupRequest) (*dto.GroupResponse, error) {
-	group, err := s.groupRepo.FindByID(id)
-	if err != nil {
-		return nil, errors.New("分组不存在")
-	}
+	fields := map[string]any{}
 	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
-		group.Name = *req.Name
+		fields["name"] = *req.Name
 	}
 	if req.Description != nil {
-		group.Description = *req.Description
+		fields["description"] = *req.Description
 	}
 	if req.Active != nil {
-		group.Active = *req.Active
+		fields["active"] = *req.Active
 	}
-	if err := s.groupRepo.Update(group, req.NodeIDs); err != nil {
+	if err := s.groupRepo.Update(id, fields, req.NodeIDs); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("分组不存在")
+		}
 		return nil, err
 	}
-	group, err = s.groupRepo.FindByID(id)
+	group, err := s.groupRepo.FindByID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -76,11 +77,11 @@ func (s *GroupService) Delete(id uint) error {
 }
 
 func (s *GroupService) ToggleActive(id uint) error {
-	group, err := s.groupRepo.FindByID(id)
-	if err != nil {
+	err := s.groupRepo.ToggleActive(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return errors.New("分组不存在")
 	}
-	return s.groupRepo.UpdateActive(id, !group.Active)
+	return err
 }
 
 func (s *GroupService) List(page, pageSize int, keyword string, active *bool) ([]dto.GroupResponse, int64, error) {

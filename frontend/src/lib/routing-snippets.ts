@@ -86,6 +86,35 @@ export const OUTBOUND_SNIPPETS: readonly OutboundSnippet[] = [
       },
     }),
   },
+  {
+    key: 'vless-reality-landing',
+    name: 'VLESS + Reality 远端落地机',
+    description: '将指定流量经由另一台 VLESS + Reality 节点转发落地（如 AI 服务或流媒体解锁）。',
+    build: (existingTags) => ({
+      tag: uniqueTag('landing-reality', existingTags),
+      protocol: 'vless',
+      remark: 'VLESS Reality 落地机',
+      settings: {
+        vnext: [
+          {
+            address: '',
+            port: 443,
+            users: [{ id: '', encryption: 'none', flow: 'xtls-rprx-vision' }],
+          },
+        ],
+      },
+      streamSettings: {
+        network: 'tcp',
+        security: 'reality',
+        realitySettings: {
+          serverName: 'www.apple.com',
+          fingerprint: 'chrome',
+          password: '',
+          shortId: '',
+        },
+      },
+    }),
+  },
 ]
 
 export const RULE_SNIPPETS: readonly RuleSnippet[] = [

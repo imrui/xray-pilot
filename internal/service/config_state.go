@@ -4,19 +4,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
+	"time"
+
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/xray"
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
-	"strings"
-	"time"
+	"gorm.io/gorm/clause"
 )
 
 var ErrConfigLeaseLost = errors.New("配置租约已失效，结果未确认")
 
+func currentConfigLease(tx *gorm.DB, state *entity.NodeConfigState) *gorm.DB {
+	return tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ? AND lease_until > ?", state.NodeID, state.LeaseOwner, time.Now())
+}
+
 func leaseUpdate(tx *gorm.DB, state *entity.NodeConfigState, updates map[string]any) error {
-	r := tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ? AND lease_until > ?", state.NodeID, state.LeaseOwner, time.Now()).Updates(updates)
+	r := currentConfigLease(tx, state).Updates(updates)
 	if r.Error != nil {
 		return r.Error
 	}
@@ -102,15 +110,44 @@ func (s *SyncService) recordApplied(state *entity.NodeConfigState, content, proc
 		updates["last_healthy_template_revision"] = effective.Revision
 	}
 	// A receipt belongs to its snapshot. Never clear work queued during the SSH call.
-	return repository.DB.Transaction(func(tx *gorm.DB) error {
+	return repository.AuthorizationTransaction(func(tx *gorm.DB) error {
 		if err := leaseUpdate(tx, state, updates); err != nil {
 			return err
 		}
-		return tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND change_revision = ? AND lease_owner = ?", state.NodeID, state.ChangeRevision, state.LeaseOwner).
-			Update("recovery_pending", false).Error
+		current := tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND change_revision = ? AND lease_owner = ?", state.NodeID, state.ChangeRevision, state.LeaseOwner).
+			Update("recovery_pending", false)
+		if current.Error != nil || current.RowsAffected == 0 {
+			return current.Error
+		}
+		// 当前配置已确认，到期前移组产生的旧授权随这张回执一并撤销。
+		return tx.Where("node_id = ? AND deferred = ?", state.NodeID, true).Delete(&entity.UserExpiryTarget{}).Error
 	})
 }
-func recordConfigFailure(id uint, message string) {
+func recordConfigFailure(state *entity.NodeConfigState, message string, updates map[string]any) error {
+	status := entity.SyncStatusFailed
+	if strings.Contains(message, "ROLLED_BACK") {
+		status = entity.SyncStatusDrifted
+	}
+	if updates == nil {
+		updates = configFailureUpdates(message)
+	}
+	return repository.DB.Transaction(func(tx *gorm.DB) error {
+		if err := updateLeasedNode(tx, state, map[string]any{"sync_status": status}, false); err != nil {
+			return err
+		}
+		return leaseUpdate(tx, state, updates)
+	})
+}
+
+func configFailureUpdates(message string) map[string]any {
+	updates := recoveryRetryUpdates(message)
+	updates["runtime_hash"] = ""
+	updates["runtime_authorization_hash"] = ""
+	updates["verified_at"] = nil
+	return updates
+}
+
+func recoveryRetryUpdates(message string) map[string]any {
 	terminal := false
 	for _, marker := range []string{"ROLLBACK_FAILED", "AUTHORIZATION_STOPPED", "DRIFT_CONFLICT", "PATH_MISMATCH", "VERSION_UNSUPPORTED", "PREFLIGHT_FAILED", "IPV6_UNAVAILABLE"} {
 		if strings.Contains(message, marker) {
@@ -118,18 +155,14 @@ func recordConfigFailure(id uint, message string) {
 		}
 	}
 	updates := map[string]any{"last_error": truncateRunes(message, 400), "recovery_attempts": gorm.Expr("recovery_attempts + 1"),
-		"next_retry_at": time.Now().Add(time.Minute), "recovery_pending": true, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil}
+		"next_retry_at": time.Now().Add(time.Minute), "recovery_pending": true}
 	if terminal {
 		updates["recovery_attempts"] = 3
 	}
 	if strings.Contains(message, "ROLLED_BACK") {
-		delete(updates, "runtime_hash")
-		delete(updates, "runtime_authorization_hash")
-		delete(updates, "verified_at")
-		updates["recovery_pending"] = true
 		updates["next_retry_at"] = time.Now().Add(10 * time.Minute)
 	}
-	repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ?", id).Updates(updates)
+	return updates
 }
 
 func finishNodeStatus(state *entity.NodeConfigState, hash string, current bool) error {
@@ -137,40 +170,47 @@ func finishNodeStatus(state *entity.NodeConfigState, hash string, current bool) 
 	if current {
 		status = entity.SyncStatusSynced
 	}
-	now := time.Now()
 	return repository.DB.Transaction(func(tx *gorm.DB) error {
-		q := tx.Model(&entity.Node{}).Where("id = ?", state.NodeID)
-		q = q.Where("EXISTS (SELECT 1 FROM node_config_states s WHERE s.node_id = nodes.id AND s.lease_owner = ? AND s.lease_until > ?)", state.LeaseOwner, time.Now())
-		if current {
-			q = q.Where("EXISTS (SELECT 1 FROM node_config_states s WHERE s.node_id = nodes.id AND s.change_revision = ? AND s.lease_owner = ?)", state.ChangeRevision, state.LeaseOwner)
-		}
-		r := q.Updates(map[string]any{"sync_status": status, "config_hash": hash, "last_sync_at": now})
-		if r.Error != nil {
-			return r.Error
-		}
-		if r.RowsAffected == 0 {
-			return ErrConfigLeaseLost
-		}
-		return nil
+		return updateLeasedNode(tx, state, map[string]any{"sync_status": status, "config_hash": hash, "last_sync_at": time.Now()}, current)
 	})
+}
+
+func updateLeasedNode(tx *gorm.DB, state *entity.NodeConfigState, updates map[string]any, requireCurrent bool) error {
+	lease := tx.Model(&entity.NodeConfigState{}).Select("1").
+		Where("node_id = nodes.id AND lease_owner = ? AND lease_until > ?", state.LeaseOwner, time.Now())
+	if requireCurrent {
+		lease = lease.Where("change_revision = ?", state.ChangeRevision)
+	}
+	r := tx.Model(&entity.Node{}).Where("id = ? AND EXISTS (?)", state.NodeID, lease).Updates(updates)
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected != 1 {
+		return ErrConfigLeaseLost
+	}
+	return nil
 }
 
 var activeDeploymentPhases = []string{"validating", "staged", "persisted", "applying", "verifying", "rollback_running"}
 
 func deploymentPhaseRecorder(state *entity.NodeConfigState) func(string) {
 	return func(phase string) {
-		allowed := false
-		for _, v := range activeDeploymentPhases {
-			if v == phase {
-				allowed = true
-			}
-		}
-		if !allowed {
+		if !slices.Contains(activeDeploymentPhases, phase) {
 			return
 		}
-		repository.DB.Model(&entity.ConfigDeployment{}).Where("node_id = ? AND desired_hash = ? AND status IN ?", state.NodeID, state.DesiredHash, activeDeploymentPhases).Updates(map[string]any{"status": phase, "desired_revision": state.DesiredRevision})
-		if phase == "persisted" {
-			_ = leaseUpdate(repository.DB, state, map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": state.DesiredHash, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil})
+		err := repository.DB.Transaction(func(tx *gorm.DB) error {
+			if phase == "persisted" {
+				if err := leaseUpdate(tx, state, map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": state.DesiredHash, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil}); err != nil {
+					return err
+				}
+			}
+			lease := currentConfigLease(tx, state).Select("1").Clauses(clause.Locking{Strength: "UPDATE"})
+			return tx.Model(&entity.ConfigDeployment{}).
+				Where("node_id = ? AND desired_hash = ? AND status IN ?", state.NodeID, state.DesiredHash, activeDeploymentPhases).
+				Where("EXISTS (?)", lease).Updates(map[string]any{"status": phase, "desired_revision": state.DesiredRevision}).Error
+		})
+		if err != nil && !errors.Is(err, ErrConfigLeaseLost) {
+			zap.L().Warn("记录配置部署阶段失败", zap.Uint("nodeID", state.NodeID), zap.String("phase", phase), zap.Error(err))
 		}
 	}
 }

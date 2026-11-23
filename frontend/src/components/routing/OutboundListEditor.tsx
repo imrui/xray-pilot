@@ -16,6 +16,8 @@ import {
   parseSingleObject,
   patchDialerProxy,
   validateOutboundTag,
+  realityPassword,
+  vlessTransportError,
 } from '@/lib/routing-model'
 import type { BalancerItem, CustomOutbound, RoutingRuleItem } from '@/lib/routing-model'
 
@@ -25,6 +27,16 @@ const ALL_PROTOCOL_OPTIONS = [
   { value: 'shadowsocks', label: 'Shadowsocks（JSON 模式）' },
   { value: 'vmess', label: 'VMess（JSON 模式）' },
   { value: 'blackhole', label: 'Blackhole（JSON 模式）' },
+]
+
+const REALITY_FINGERPRINT_OPTIONS = [
+  { value: 'chrome', label: 'chrome（推荐）' },
+  { value: 'firefox', label: 'firefox' },
+  { value: 'safari', label: 'safari' },
+  { value: 'edge', label: 'edge' },
+  { value: 'ios', label: 'ios' },
+  { value: 'random', label: 'random' },
+  { value: 'randomized', label: 'randomized' },
 ]
 
 function SecretInput({
@@ -414,16 +426,18 @@ export function SingleOutboundFields({
 
   // VLESS helpers
   const renderVlessFields = () => {
-    const vnexts = Array.isArray(settings.vnext) ? [...(settings.vnext as Record<string, unknown>[])] : [{}]
-    const vn0 = { ...(vnexts[0] ?? {}) }
+    const vnexts = Array.isArray(settings.vnext) ? settings.vnext as Record<string, unknown>[] : []
+    const shorthand = typeof settings.address === 'string' && vnexts.length === 0
+    const vn0 = { ...(shorthand ? settings : vnexts[0]) }
+    if (shorthand && Array.isArray(vn0.vnext)) delete vn0.vnext
     const users = Array.isArray(vn0.users) ? [...(vn0.users as Record<string, unknown>[])] : [{}]
-    const user0: Record<string, unknown> = { encryption: 'none', ...(users[0] ?? {}) }
+    const user0: Record<string, unknown> = { encryption: 'none', ...(shorthand ? vn0 : users[0] ?? {}) }
 
     const stream = (outbound.streamSettings && typeof outbound.streamSettings === 'object'
       ? outbound.streamSettings
       : {}) as Record<string, unknown>
-    const network = typeof stream.network === 'string' ? stream.network : 'tcp'
-    const security = typeof stream.security === 'string' ? stream.security : 'tls'
+    const network = String(stream.method ?? stream.network ?? 'tcp')
+    const security = String(stream.security ?? 'none').toLowerCase()
     const tlsSettings = (stream.tlsSettings && typeof stream.tlsSettings === 'object'
       ? stream.tlsSettings
       : {}) as Record<string, unknown>
@@ -435,13 +449,18 @@ export function SingleOutboundFields({
       const nextVn = { ...vn0, ...patch }
       onChange({
         ...outbound,
-        settings: { ...settings, vnext: [nextVn, ...vnexts.slice(1)] },
+        settings: shorthand ? nextVn : { ...settings, vnext: [nextVn, ...vnexts.slice(1)] },
       })
     }
 
     const patchUser = (patch: Record<string, unknown>) => {
-      const nextU = { ...user0, ...patch }
-      patchVnext({ users: [nextU, ...users.slice(1)] })
+      const next = { ...user0, ...patch }
+      if (!next.flow) delete next.flow
+      if (shorthand) {
+        onChange({ ...outbound, settings: next })
+      } else {
+        patchVnext({ users: [next, ...users.slice(1)] })
+      }
     }
 
     const patchStream = (patch: Record<string, unknown>) => {
@@ -450,6 +469,49 @@ export function SingleOutboundFields({
         streamSettings: { ...stream, ...patch },
       })
     }
+
+    const patchReality = (nextReality: Record<string, unknown>) => {
+      const nextStream: Record<string, unknown> = { ...stream, realitySettings: nextReality }
+      delete nextStream.tlsSettings
+      onChange({ ...outbound, streamSettings: nextStream })
+    }
+
+    const patchSecurity = (nextSecurity: string) => {
+      const nextStream: Record<string, unknown> = { ...stream, security: nextSecurity }
+      if (nextSecurity === 'reality') {
+        delete nextStream.tlsSettings
+        const prevSni = typeof tlsSettings.serverName === 'string' ? tlsSettings.serverName : ''
+        nextStream.realitySettings = {
+          ...realitySettings,
+          serverName: typeof realitySettings.serverName === 'string' && realitySettings.serverName
+            ? realitySettings.serverName
+            : prevSni,
+          fingerprint: typeof realitySettings.fingerprint === 'string' && realitySettings.fingerprint
+            ? realitySettings.fingerprint
+            : 'chrome',
+        }
+      } else if (nextSecurity === 'tls') {
+        delete nextStream.realitySettings
+        const prevSni = typeof realitySettings.serverName === 'string' ? realitySettings.serverName : ''
+        nextStream.tlsSettings = {
+          ...tlsSettings,
+          serverName: typeof tlsSettings.serverName === 'string' && tlsSettings.serverName
+            ? tlsSettings.serverName
+            : prevSni,
+        }
+      } else {
+        delete nextStream.tlsSettings
+        delete nextStream.realitySettings
+      }
+      onChange({ ...outbound, streamSettings: nextStream })
+    }
+
+    const transportError = vlessTransportError(outbound)
+    const currentFp = typeof realitySettings.fingerprint === 'string' ? realitySettings.fingerprint : ''
+    const fpOptions =
+      currentFp && !REALITY_FINGERPRINT_OPTIONS.some((o) => o.value === currentFp)
+        ? [{ value: currentFp, label: currentFp }, ...REALITY_FINGERPRINT_OPTIONS]
+        : REALITY_FINGERPRINT_OPTIONS
 
     return (
       <div className="space-y-3">
@@ -481,18 +543,11 @@ export function SingleOutboundFields({
           <SelectField
             label="XTLS 流控"
             value={typeof user0.flow === 'string' ? user0.flow : ''}
-            onChange={(flow) => {
-              if (!flow) {
-                const rest = { ...user0 }
-                delete rest.flow
-                patchVnext({ users: [rest, ...users.slice(1)] })
-              } else {
-                patchUser({ flow })
-              }
-            }}
+            onChange={(flow) => patchUser({ flow })}
             options={[
               { value: '', label: '无流控（WS / 标准 TLS）' },
-              { value: 'xtls-rprx-vision', label: 'xtls-rprx-vision（Reality / TCP TLS）' },
+              { value: 'xtls-rprx-vision', label: 'xtls-rprx-vision' },
+              { value: 'xtls-rprx-vision-udp443', label: 'xtls-rprx-vision-udp443' },
             ]}
           />
         </div>
@@ -500,9 +555,12 @@ export function SingleOutboundFields({
           <SelectField
             label="传输方式"
             value={network}
-            onChange={(v) => patchStream({ network: v })}
+            onChange={(v) => patchStream(stream.method != null ? { method: v } : { network: v })}
             options={[
               { value: 'tcp', label: 'TCP' },
+              { value: 'raw', label: 'RAW' },
+              { value: 'xhttp', label: 'XHTTP' },
+              ...(!['tcp', 'raw', 'xhttp', 'ws', 'grpc'].includes(network) ? [{ value: network, label: network }] : []),
               { value: 'ws', label: 'WebSocket (ws)' },
               { value: 'grpc', label: 'gRPC' },
             ]}
@@ -510,7 +568,7 @@ export function SingleOutboundFields({
           <SelectField
             label="传输安全"
             value={security}
-            onChange={(v) => patchStream({ security: v })}
+            onChange={patchSecurity}
             options={[
               { value: 'tls', label: 'TLS' },
               { value: 'reality', label: 'Reality' },
@@ -529,39 +587,64 @@ export function SingleOutboundFields({
           />
         )}
         {security === 'reality' && (
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field
-              label="Reality SNI"
-              placeholder="www.microsoft.com"
-              value={typeof realitySettings.serverName === 'string' ? realitySettings.serverName : ''}
-              onChange={(e) =>
-                patchStream({
-                  realitySettings: { ...realitySettings, serverName: e.target.value.trim() },
-                })
-              }
-            />
-            <Field
-              label="Reality 公钥"
-              placeholder="远端节点公钥"
-              value={typeof realitySettings.publicKey === 'string' ? realitySettings.publicKey : ''}
-              onChange={(e) =>
-                patchStream({
-                  realitySettings: { ...realitySettings, publicKey: e.target.value.trim() },
-                })
-              }
-            />
-            <Field
-              label="ShortId"
-              placeholder="如 abcd"
-              value={typeof realitySettings.shortId === 'string' ? realitySettings.shortId : ''}
-              onChange={(e) =>
-                patchStream({
-                  realitySettings: { ...realitySettings, shortId: e.target.value.trim() },
-                })
-              }
-            />
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Reality SNI"
+                placeholder="默认使用远端服务器地址"
+                value={typeof realitySettings.serverName === 'string' ? realitySettings.serverName : ''}
+                onChange={(e) =>
+                  patchReality({ ...realitySettings, serverName: e.target.value.trim() })
+                }
+              />
+              <SecretInput
+                label="Reality 公钥 *"
+                placeholder="远端落地机 Reality 公钥"
+                disabled={disabled}
+                value={realityPassword(realitySettings)}
+                onChange={(value) => {
+                  const next: Record<string, unknown> = { ...realitySettings, password: value.trim() }
+                  delete next.publicKey
+                  patchReality(next)
+                }}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field
+                label="ShortId"
+                placeholder="如 abcd（可留空）"
+                value={typeof realitySettings.shortId === 'string' ? realitySettings.shortId : ''}
+                onChange={(e) =>
+                  patchReality({ ...realitySettings, shortId: e.target.value.trim() })
+                }
+              />
+              <SelectField
+                label="Fingerprint"
+                value={currentFp}
+                onChange={(fp) =>
+                  patchReality({ ...realitySettings, fingerprint: fp })
+                }
+                options={[{ value: '', label: '默认（chrome）' }, ...fpOptions]}
+              />
+              <Field
+                label="SpiderX（可选）"
+                placeholder="默认留空或 /"
+                value={typeof realitySettings.spiderX === 'string' ? realitySettings.spiderX : ''}
+                onChange={(e) => {
+                  const val = e.target.value.trim()
+                  const nextReality = { ...realitySettings }
+                  if (val) {
+                    nextReality.spiderX = val
+                  } else {
+                    delete nextReality.spiderX
+                  }
+                  patchReality(nextReality)
+                }}
+              />
+            </div>
           </div>
         )}
+        {transportError && <p role="alert" className="text-sm text-[var(--danger)]">{transportError}</p>}
       </div>
     )
   }

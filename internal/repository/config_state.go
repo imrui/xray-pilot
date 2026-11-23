@@ -19,7 +19,7 @@ func InvalidateConfigs(tx *gorm.DB, ids []uint) error {
 			return err
 		}
 	}
-	for _, id := range ids {
+	for _, id := range uniqueSortedIDs(ids) {
 		if err := tx.Model(&entity.Node{}).Where("id = ?", id).Update("sync_status", entity.SyncStatusDrifted).Error; err != nil {
 			return err
 		}
@@ -37,16 +37,6 @@ func InvalidateConfigs(tx *gorm.DB, ids []uint) error {
 }
 func EnsureConfigState(tx *gorm.DB, id uint) error {
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entity.NodeConfigState{NodeID: id}).Error
-}
-func InvalidateUserConfigs(tx *gorm.DB, userID uint) error {
-	var ids []uint
-	if err := tx.Table("group_nodes").Joins("JOIN user_groups ON user_groups.group_id = group_nodes.group_id").Where("user_groups.user_id = ?", userID).Distinct("group_nodes.node_id").Pluck("group_nodes.node_id", &ids).Error; err != nil {
-		return err
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	return InvalidateConfigs(tx, ids)
 }
 func AcquireConfigLease(id uint) (*entity.NodeConfigState, func(), error) {
 	if err := EnsureConfigState(DB, id); err != nil {

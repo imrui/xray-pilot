@@ -10,6 +10,7 @@ import (
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type UserRepository struct{}
@@ -29,7 +30,8 @@ func (r *UserRepository) Create(user *entity.User) error {
 }
 
 func (r *UserRepository) ReplaceGroups(user *entity.User, groupIDs []uint) error {
-	return r.ReplaceGroupsTx(DB, user, groupIDs)
+	_, err := r.ChangeAccess(user.ID, func(tx *gorm.DB, current *entity.User) error { return r.ReplaceGroupsTx(tx, current, groupIDs) })
+	return err
 }
 
 func (r *UserRepository) ReplaceGroupsTx(tx *gorm.DB, user *entity.User, groupIDs []uint) error {
@@ -38,7 +40,13 @@ func (r *UserRepository) ReplaceGroupsTx(tx *gorm.DB, user *entity.User, groupID
 	if err != nil {
 		return err
 	}
-	return tx.Model(user).Association("Groups").Replace(groups)
+	if user.LegacyGroupID != nil {
+		if err := tx.Model(user).UpdateColumn("group_id", nil).Error; err != nil {
+			return err
+		}
+		user.LegacyGroupID = nil
+	}
+	return tx.Omit("Groups.*").Model(user).Association("Groups").Replace(groups)
 }
 
 func (r *UserRepository) FindByID(id uint) (*entity.User, error) {
@@ -139,11 +147,11 @@ func (r *UserRepository) List(page, pageSize int, filter UserListFilter) ([]enti
 	}
 	switch filter.Status {
 	case "active":
-		query = query.Where("active = ? AND (expires_at IS NULL OR expires_at > ?)", true, time.Now())
+		query = query.Where("active = ? AND (expires_at IS NULL OR "+expiryInstant(DB, "expires_at")+" > ?)", true, expiryBound(DB, time.Now()))
 	case "inactive":
 		query = query.Where("active = ?", false)
 	case "expired":
-		query = query.Where("expires_at <= ?", time.Now())
+		query = query.Where(expiryInstant(DB, "expires_at")+" <= ?", expiryBound(DB, time.Now()))
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -168,25 +176,145 @@ func (r *UserRepository) UpdateFeishu(user *entity.User) error {
 	return DB.Model(user).Select("FeishuEnabled", "FeishuEmail", "FeishuOpenID", "FeishuUnionID", "FeishuChatID", "FeishuBoundAt").Updates(user).Error
 }
 
-func (r *UserRepository) UpdateActive(id uint, active bool) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&entity.User{}).Where("id = ?", id).Update("active", active).Error; err != nil {
-			return err
+func nodeDifference(ids, exclude []uint) []uint {
+	seen := make(map[uint]bool, len(exclude))
+	for _, id := range exclude {
+		seen[id] = true
+	}
+	var diff []uint
+	for _, id := range ids {
+		if !seen[id] {
+			diff = append(diff, id)
 		}
-		return InvalidateUserConfigs(tx, id)
-	})
+	}
+	return diff
 }
 
-func (r *UserRepository) Delete(id uint) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := InvalidateUserConfigs(tx, id); err != nil {
+// UserAccessChange 包含事务提交后仍需尝试热更新的节点。
+type UserAccessChange struct {
+	User     *entity.User
+	Username string
+	Renamed  bool
+	NodeIDs  []uint
+}
+
+// ChangeAccess 在同一事务内读取变更前后的有效授权。普通字段编辑仅写回请求指定列。
+func (r *UserRepository) ChangeAccess(id uint, edit func(*gorm.DB, *entity.User) error) (UserAccessChange, error) {
+	var result UserAccessChange
+	err := AuthorizationTransaction(func(tx *gorm.DB) error {
+		var old entity.User
+		if err := preloadUserGroups(tx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&old, id).Error; err != nil {
 			return err
 		}
+		now := time.Now()
+		oldNodes, err := UserConfigNodes(tx, id)
+		if err != nil {
+			return err
+		}
+		var potential, expiryNodes []uint
+		if old.EffectiveActive(now) || dueForExpiry(&old, now) {
+			// 移除最后一个用户入站后，未确认的旧磁盘或运行态仍可能包含这个账号。
+			potential, err = userConfigNodes(tx, id, true)
+			if err != nil {
+				return err
+			}
+		}
+		if dueForExpiry(&old, now) {
+			if err := queueExpiry(tx, id, potential); err != nil {
+				return err
+			}
+			expiryNodes = oldNodes
+		}
+		result.Username = old.Username
+		if !old.EffectiveActive(now) {
+			oldNodes = nil
+		}
+		current := old
+		if err := edit(tx, &current); err != nil {
+			return err
+		}
+		var next entity.User
+		var nextNodes []uint
+		err = preloadUserGroups(tx).First(&next, id).Error
+		switch {
+		case err == nil:
+			result.User = &next
+			result.Renamed = old.Username != next.Username
+			if next.EffectiveActive(now) {
+				nextNodes, err = UserConfigNodes(tx, id)
+				if err != nil {
+					return err
+				}
+				// 续期只取消重新获得授权的节点，移组前未确认的旧节点继续撤权。
+				if len(nextNodes) > 0 {
+					if err := tx.Where("user_id = ? AND node_id IN ?", id, nextNodes).Delete(&entity.UserExpiryTarget{}).Error; err != nil {
+						return err
+					}
+				}
+			} else if dueForExpiry(&next, now) {
+				// 一次请求可以同时移组并改为过期，旧授权才需要撤销。
+				if err := queueExpiry(tx, id, potential); err != nil {
+					return err
+				}
+			}
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			// 删除账号后仍可凭独立的节点待办确认历史撤权。
+		default:
+			return err
+		}
+		removed := nodeDifference(oldNodes, nextNodes)
+		if result.User != nil && next.ExpiresAt != nil && next.ExpiresAt.After(now) {
+			var pairs []expiryMembership
+			for _, n := range nodeDifference(potential, nextNodes) {
+				pairs = append(pairs, expiryMembership{id, n})
+			}
+			if err := rememberExpiryDepartures(tx, pairs); err != nil {
+				return err
+			}
+		} else if result.User == nil || next.ExpiresAt == nil {
+			if err := tx.Where("user_id = ? AND deferred = ?", id, true).Delete(&entity.UserExpiryTarget{}).Error; err != nil {
+				return err
+			}
+		}
+		if result.Renamed || (result.User != nil && old.UUID != next.UUID) {
+			result.NodeIDs = append(result.NodeIDs, oldNodes...)
+			result.NodeIDs = append(result.NodeIDs, nextNodes...)
+		} else {
+			result.NodeIDs = append(removed, nodeDifference(nextNodes, oldNodes)...)
+		}
+		result.NodeIDs = uniqueSortedIDs(result.NodeIDs)
+		affected := append(expiryNodes, result.NodeIDs...)
+		if len(affected) > 0 {
+			return InvalidateConfigs(tx, affected)
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (r *UserRepository) UpdateActive(id uint, active bool) error {
+	_, err := r.ChangeAccess(id, func(tx *gorm.DB, u *entity.User) error {
+		return tx.Model(&entity.User{}).Where("id = ?", u.ID).Update("active", active).Error
+	})
+	return err
+}
+
+func (r *UserRepository) DeleteAccess(id uint) (UserAccessChange, error) {
+	change, err := r.ChangeAccess(id, func(tx *gorm.DB, u *entity.User) error {
 		if err := tx.Where("user_id = ?", id).Delete(&entity.UserGroup{}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&entity.User{}, id).Error
+		return tx.Delete(u).Error
 	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return UserAccessChange{}, nil
+	}
+	return change, err
+}
+
+func (r *UserRepository) Delete(id uint) error {
+	_, err := r.DeleteAccess(id)
+	return err
 }
 
 func (r *UserRepository) FindActiveByGroupID(groupID uint) ([]entity.User, error) {
@@ -210,29 +338,14 @@ func (r *UserRepository) FindActiveUsersByNodeID(nodeID uint) ([]entity.User, er
 		Joins("JOIN group_nodes gn ON gn.group_id = ug.group_id").
 		Joins("JOIN groups g ON g.id = ug.group_id AND g.active = ?", true).
 		Where(
-			"users.active = ? AND (users.expires_at IS NULL OR users.expires_at > ?) AND gn.node_id = ?",
+			"users.active = ? AND (users.expires_at IS NULL OR "+expiryInstant(DB, "users.expires_at")+" > ?) AND gn.node_id = ?",
 			true,
-			now,
+			expiryBound(DB, now),
 			nodeID,
 		).
 		Order("users.id asc").
 		Find(&users).Error
 	return users, err
-}
-
-// FindExpiredUnswept 查询已过期、仍处于启用态且尚未被调度器摘除的用户
-func (r *UserRepository) FindExpiredUnswept(now time.Time) ([]entity.User, error) {
-	var users []entity.User
-	err := preloadUserGroups(DB).
-		Where("active = ? AND expires_at IS NOT NULL AND expires_at <= ? AND expired_swept_at IS NULL", true, now).
-		Order("id asc").
-		Find(&users).Error
-	return users, err
-}
-
-// MarkExpiredSwept 记录过期用户已被摘除
-func (r *UserRepository) MarkExpiredSwept(id uint, at time.Time) error {
-	return DB.Model(&entity.User{}).Where("id = ? AND expires_at IS NOT NULL AND expires_at <= ?", id, at).Update("expired_swept_at", at).Error
 }
 
 // Count 返回用户总数
@@ -243,12 +356,10 @@ func (r *UserRepository) Count() (int64, error) {
 
 // UpdateUUID 更新用户 UUID（重置订阅身份）
 func (r *UserRepository) UpdateUUID(id uint, newUUID string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&entity.User{}).Where("id = ?", id).Update("uuid", newUUID).Error; err != nil {
-			return err
-		}
-		return InvalidateUserConfigs(tx, id)
+	_, err := r.ChangeAccess(id, func(tx *gorm.DB, u *entity.User) error {
+		return tx.Model(&entity.User{}).Where("id = ?", u.ID).Update("uuid", newUUID).Error
 	})
+	return err
 }
 
 // UpdateToken 更新用户订阅 Token
@@ -264,9 +375,9 @@ func (r *UserRepository) CountActiveByNodeID(nodeID uint) (int64, error) {
 		Joins("JOIN group_nodes gn ON gn.group_id = ug.group_id").
 		Joins("JOIN groups g ON g.id = ug.group_id AND g.active = ?", true).
 		Where(
-			"users.active = ? AND (users.expires_at IS NULL OR users.expires_at > ?) AND gn.node_id = ?",
+			"users.active = ? AND (users.expires_at IS NULL OR "+expiryInstant(DB, "users.expires_at")+" > ?) AND gn.node_id = ?",
 			true,
-			now,
+			expiryBound(DB, now),
 			nodeID,
 		).
 		Distinct("users.id").

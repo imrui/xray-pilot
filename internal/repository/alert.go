@@ -15,8 +15,12 @@ func NewAlertStateRepository() *AlertStateRepository { return &AlertStateReposit
 
 // Get 取节点 × 类型的状态；不存在时返回零值状态（未入库），调用方 Save 时创建
 func (r *AlertStateRepository) Get(nodeID uint, kind string) (*entity.NodeAlertState, error) {
+	return r.GetTx(DB, nodeID, kind)
+}
+
+func (r *AlertStateRepository) GetTx(tx *gorm.DB, nodeID uint, kind string) (*entity.NodeAlertState, error) {
 	var st entity.NodeAlertState
-	err := DB.Where("node_id = ? AND kind = ?", nodeID, kind).First(&st).Error
+	err := tx.Where("node_id = ? AND kind = ?", nodeID, kind).First(&st).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return &entity.NodeAlertState{NodeID: nodeID, Kind: kind}, nil
 	}
@@ -29,10 +33,14 @@ func (r *AlertStateRepository) Get(nodeID uint, kind string) (*entity.NodeAlertS
 // SaveObservation 只写检测推进的字段（计数 / 判定 / 起点 / 错误），不碰送达字段，
 // 避免与 Flush 回写送达状态互相覆盖（v0.5.1 实测：并发时恢复消息丢失）
 func (r *AlertStateRepository) SaveObservation(st *entity.NodeAlertState) error {
+	return r.SaveObservationTx(DB, st)
+}
+
+func (r *AlertStateRepository) SaveObservationTx(tx *gorm.DB, st *entity.NodeAlertState) error {
 	if st.ID == 0 {
-		return DB.Create(st).Error
+		return tx.Create(st).Error
 	}
-	return DB.Model(st).
+	return tx.Model(st).
 		Select("fail_count", "ok_count", "alerting", "since", "last_error", "updated_at").
 		Updates(st).Error
 }

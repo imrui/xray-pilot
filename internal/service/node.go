@@ -3,15 +3,17 @@ package service
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"github.com/imrui/xray-pilot/internal/dto"
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
-	"github.com/imrui/xray-pilot/pkg/logger"
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
 
@@ -70,69 +72,36 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeRequest, actor string) 
 			wakeDNS()
 		}
 	}()
-	node, err := s.nodeRepo.FindByID(id)
-	if err != nil {
-		return nil, errors.New("节点不存在")
-	}
-
-	// 记录变更前的连接地址，用于清理 known_hosts
-	// 比较用 TrimSpace 后的值：修掉历史脏数据的空格（如 " tw03.xxx"）也算地址变更，
-	// 需要触发重新同步和 known_hosts 清理
-	oldAddr := node.ConnectAddr()
-	ipChanged := req.IP != nil && strings.TrimSpace(*req.IP) != node.IP
-	domainChanged := req.Domain != nil && strings.TrimSpace(*req.Domain) != node.Domain
-
-	if req.Name != nil {
-		node.Name = strings.TrimSpace(*req.Name)
-	}
-	if req.Region != nil {
-		node.Region = strings.TrimSpace(*req.Region)
-	}
-	if req.Owner != nil {
-		node.Owner = strings.TrimSpace(*req.Owner)
-	}
-	if req.IP != nil {
-		node.IP = strings.TrimSpace(*req.IP)
-	}
-	if req.Domain != nil {
-		node.Domain = strings.TrimSpace(*req.Domain)
-	}
-	if req.SSHPort != nil && *req.SSHPort != 0 {
-		node.SSHPort = *req.SSHPort
-	}
-	// SSHUser/SSHKeyPath 允许显式置空，置空后运行时会回退到系统默认设置。
-	if req.SSHUser != nil {
-		node.SSHUser = strings.TrimSpace(*req.SSHUser)
-	}
-	if req.SSHKeyPath != nil {
-		node.SSHKeyPath = strings.TrimSpace(*req.SSHKeyPath)
-	}
-	// LogLevel 允许显式置空，置空后回退到系统设置的全局日志级别
-	if req.LogLevel != nil {
-		node.LogLevel = *req.LogLevel
-	}
-	if req.Remark != nil {
-		node.Remark = strings.TrimSpace(*req.Remark)
-	}
-
-	// IP 或 Domain 变更：清理旧的 known_hosts 条目，并标记漂移触发重新同步
-	if ipChanged || domainChanged {
-		node.SyncStatus = entity.SyncStatusDrifted
-		knownHostsPath := s.settingSvc.Get(KeySSHKnownHostsPath)
-		if err := xssh.RemoveKnownHost(knownHostsPath, oldAddr); err != nil {
-			// 非致命错误，记录警告后继续
-			logger.Log.Warn("清理 known_hosts 旧条目失败",
-				zap.String("addr", oldAddr),
-				zap.Error(err),
-			)
+	fields := map[string]any{}
+	for key, value := range map[string]*string{
+		"name": req.Name, "region": req.Region, "owner": req.Owner, "remark": req.Remark,
+		"ip": req.IP, "domain": req.Domain, "ssh_user": req.SSHUser, "ssh_key_path": req.SSHKeyPath,
+	} {
+		if value != nil {
+			fields[key] = strings.TrimSpace(*value)
 		}
 	}
-
-	if err := s.nodeRepo.Update(node, actor); err != nil {
+	if req.LogLevel != nil {
+		fields["log_level"] = *req.LogLevel
+	}
+	if req.SSHPort != nil && *req.SSHPort != 0 {
+		fields["ssh_port"] = *req.SSHPort
+	}
+	old, node, err := s.nodeRepo.Update(id, fields, actor)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errors.New("节点不存在")
+	}
+	if err != nil {
 		return nil, err
 	}
-	wakeAfterSave = ipChanged || domainChanged
-	return s.nodeWithDNS(node)
+	wakeAfterSave = old.IP != node.IP || old.Domain != node.Domain
+	if old.IP != node.IP && old.IP != "" {
+		addr := net.JoinHostPort(old.IP, strconv.Itoa(effectiveSSHPort(&old, s.settingSvc)))
+		if err := xssh.RemoveKnownHost(s.settingSvc.Get(KeySSHKnownHostsPath), addr); err != nil {
+			zap.L().Warn("清理 known_hosts 旧条目失败", zap.String("addr", addr), zap.Error(err))
+		}
+	}
+	return s.nodeWithDNS(&node)
 }
 
 func (s *NodeService) Delete(id uint) error {

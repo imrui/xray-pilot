@@ -111,6 +111,9 @@ func TestBindingImpactAndActualOverrideValidation(t *testing.T) {
 
 func TestExpiryRemainsPendingUntilConfirmedOrStopped(t *testing.T) {
 	n, u := routingFixture(t)
+	if err := repository.NewSettingRepository().Set(KeyXrayLiveApply, "false"); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
 	expiry := now.Add(-time.Hour)
 	repository.DB.Model(&entity.User{}).Where("id = ?", u.ID).Update("expires_at", expiry)

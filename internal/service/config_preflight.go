@@ -250,12 +250,12 @@ func scrubConfigSecretsFromMessage(msg, renderedConfig string) string {
 		return msg
 	}
 	secrets := make([]string, 0, 8)
-	var walk func(any)
-	walk = func(v any) {
+	var walk func(any, string)
+	walk = func(v any, parent string) {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, y := range x {
-				if xray.IsSensitiveConfigKey(k) {
+				if xray.IsSensitiveConfigField(parent, k) {
 					if s, ok := y.(string); ok && s != "" {
 						secrets = append(secrets, s)
 						// 内核错误可能包含 JSON 转义后的值。
@@ -264,16 +264,16 @@ func scrubConfigSecretsFromMessage(msg, renderedConfig string) string {
 						}
 					}
 				} else {
-					walk(y)
+					walk(y, k)
 				}
 			}
 		case []any:
 			for _, y := range x {
-				walk(y)
+				walk(y, parent)
 			}
 		}
 	}
-	walk(obj)
+	walk(obj, "")
 	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
 	replacements := make([]string, 0, len(secrets)*2)
 	for _, secret := range secrets {
@@ -290,24 +290,24 @@ func redactConfig(raw string) string {
 	if decoder.Decode(&obj) != nil || decoder.Decode(new(json.RawMessage)) != io.EOF {
 		return "<invalid config>"
 	}
-	var walk func(any)
-	walk = func(v any) {
+	var walk func(any, string)
+	walk = func(v any, parent string) {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, y := range x {
-				if isSensitivePreviewKey(k) {
+				if isSensitivePreviewKey(parent, k) {
 					x[k] = "<masked>"
 				} else {
-					walk(y)
+					walk(y, k)
 				}
 			}
 		case []any:
 			for _, y := range x {
-				walk(y)
+				walk(y, parent)
 			}
 		}
 	}
-	walk(obj)
+	walk(obj, "")
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -317,8 +317,8 @@ func redactConfig(raw string) string {
 }
 
 // 手工维护的远端配置还可能内联 TLS 私钥、传输层认证头或使用下划线字段。
-func isSensitivePreviewKey(key string) bool {
-	if xray.IsSensitiveConfigKey(strings.ReplaceAll(key, "_", "")) {
+func isSensitivePreviewKey(parent, key string) bool {
+	if xray.IsSensitiveConfigField(parent, strings.ReplaceAll(key, "_", "")) {
 		return true
 	}
 	switch strings.ToLower(key) {

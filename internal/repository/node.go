@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -149,16 +150,48 @@ func (r *NodeRepository) FindAll() ([]entity.Node, error) {
 	return nodes, err
 }
 
-func (r *NodeRepository) Update(node *entity.Node, actor string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(node).Error; err != nil {
+// Update 只写请求列。在行锁内比较连接与配置变更，回读提交时的同步状态。
+func (r *NodeRepository) Update(id uint, fields map[string]any, actor string) (old, updated entity.Node, err error) {
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&old, id).Error; err != nil {
 			return err
 		}
-		if err := updateDNSIntent(tx, node, actor); err != nil {
+		if len(fields) > 0 {
+			if err := tx.Model(&entity.Node{}).Where("id = ?", id).Updates(fields).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.First(&updated, id).Error; err != nil {
 			return err
 		}
-		return InvalidateConfigs(tx, []uint{node.ID})
+		if err := updateDNSIntent(tx, &updated, actor); err != nil {
+			return err
+		}
+		ipChanged := old.IP != updated.IP
+		if ipChanged || old.Domain != updated.Domain || old.LogLevel != updated.LogLevel {
+			if err := InvalidateConfigs(tx, []uint{id}); err != nil {
+				return err
+			}
+			updated.SyncStatus = entity.SyncStatusDrifted
+		}
+		if ipChanged {
+			// 保留磁盘基线的覆盖保护，新地址的运行状态必须重新核验。
+			result := tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND (lease_until IS NULL OR lease_until <= ? OR lease_owner = '')", id, time.Now()).
+				Updates(map[string]any{"verified_at": nil, "runtime_hash": "", "runtime_authorization_hash": "", "runtime_revision": 0, "verification": "", "process_id": ""})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrConfigLeased
+			}
+		}
+		if old.SSHPort != updated.SSHPort || old.SSHUser != updated.SSHUser || old.SSHKeyPath != updated.SSHKeyPath {
+			return tx.Model(&entity.NodeConfigState{}).Where("node_id = ? AND recovery_pending = ? AND LOWER(last_error) LIKE ?", id, true, "%ssh%").
+				Updates(map[string]any{"recovery_attempts": 0, "next_retry_at": time.Now()}).Error
+		}
+		return nil
 	})
+	return
 }
 
 func (r *NodeRepository) UpdateActive(id uint, active bool) error {
@@ -168,14 +201,23 @@ func (r *NodeRepository) UpdateActive(id uint, active bool) error {
 // ReplaceHost invalidates receipts from the old machine while preserving routing bindings.
 // The caller holds the configuration lease throughout replacement registration.
 func (r *NodeRepository) ReplaceHost(node *entity.Node, bootstrapHash, actor string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(node).Error; err != nil {
-			return err
-		}
-		if err := updateDNSIntent(tx, node, actor); err != nil {
-			return err
-		}
+	var updated entity.Node
+	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := InvalidateConfigs(tx, []uint{node.ID}); err != nil {
+			return err
+		}
+		// 登记回调持有的是读到的旧快照。只替换机器自身的字段，保留并发的管理与健康检测更新。
+		if err := tx.Model(&entity.Node{}).Where("id = ?", node.ID).Updates(map[string]any{
+			"ip": node.IP, "ssh_user": node.SSHUser, "ssh_port": node.SSHPort,
+			"xray_version": node.XrayVersion, "xray_active": false, "registered_at": node.RegisteredAt,
+			"sync_status": entity.SyncStatusPending, "config_hash": "",
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&updated, node.ID).Error; err != nil {
+			return err
+		}
+		if err := updateDNSIntent(tx, &updated, actor); err != nil {
 			return err
 		}
 		if err := tx.Model(&entity.NodeConfigState{}).Where("node_id = ?", node.ID).Updates(map[string]any{
@@ -185,11 +227,12 @@ func (r *NodeRepository) ReplaceHost(node *entity.Node, bootstrapHash, actor str
 		}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&entity.ConfigDeployment{}).Where("node_id = ? AND status IN ?", node.ID, []string{"pending", "validating", "staged", "persisted", "applying", "verifying", "unknown"}).Updates(map[string]any{"status": "superseded", "error": "节点已更换服务器，请重新下发"}).Error; err != nil {
-			return err
-		}
-		return tx.Model(&entity.Node{}).Where("id = ?", node.ID).Update("sync_status", entity.SyncStatusPending).Error
+		return tx.Model(&entity.ConfigDeployment{}).Where("node_id = ? AND status IN ?", node.ID, []string{"pending", "validating", "staged", "persisted", "applying", "verifying", "unknown"}).Updates(map[string]any{"status": "superseded", "error": "节点已更换服务器，请重新下发"}).Error
 	})
+	if err == nil {
+		*node = updated
+	}
+	return err
 }
 
 // Delete 删除节点并级联清理所有关联表
@@ -201,13 +244,27 @@ func (r *NodeRepository) ReplaceHost(node *entity.Node, bootstrapHash, actor str
 //   - node_profile_keys（节点-协议密钥绑定）
 //   - nodes（节点本身）
 func (r *NodeRepository) Delete(id uint) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return AuthorizationTransaction(func(tx *gorm.DB) error {
 		var node entity.Node
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&node, id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				return nil
 			}
 			return err
+		}
+		// 删除节点会销毁 SSH 连接信息，先确认该节点尚未完成的到期撤权。
+		var pending int64
+		if err := tx.Model(&entity.UserExpiryTarget{}).Where("node_id = ?", id).Count(&pending).Error; err != nil {
+			return err
+		}
+		if pending == 0 {
+			members := configUserMembership(tx, true).Select("ug.user_id").Where("gn.node_id = ?", id)
+			if err := dueExpiries(tx, time.Now()).Where("id IN (?)", members).Count(&pending).Error; err != nil {
+				return err
+			}
+		}
+		if pending > 0 {
+			return fmt.Errorf("节点仍有未确认的到期撤权，完成撤权后可删除")
 		}
 		if err := tx.Create(&entity.DeletedNode{NodeID: id, Name: node.Name, CreatedAt: node.CreatedAt, DeletedAt: time.Now()}).Error; err != nil {
 			return err

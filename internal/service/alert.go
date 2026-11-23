@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
@@ -117,20 +119,44 @@ func (s *AlertService) Observe(nodeID uint, kind string, ok bool, detail string)
 	alertStateMu.Lock()
 	defer alertStateMu.Unlock()
 
-	st, err := s.repo.Get(nodeID, kind)
+	if err := s.observe(repository.DB, cfg, nodeID, kind, ok, detail); err != nil {
+		zap.L().Warn("告警状态更新失败", zap.Uint("nodeID", nodeID), zap.String("kind", kind), zap.Error(err))
+	}
+}
+
+// 调用方持有 alertStateMu。同步告警用同一事务检查租约并写入观测。
+func (s *AlertService) observe(tx *gorm.DB, cfg alertConfig, nodeID uint, kind string, ok bool, detail string) error {
+	st, err := s.repo.GetTx(tx, nodeID, kind)
 	if err != nil {
-		zap.L().Warn("告警状态读取失败", zap.Uint("nodeID", nodeID), zap.String("kind", kind), zap.Error(err))
-		return
+		return err
 	}
 	// 从未失败过的节点不建行
 	if st.ID == 0 && ok {
-		return
+		return nil
 	}
 	fail, rec := cfg.thresholds(kind)
 	advanceAlertState(st, ok, detail, time.Now(), fail, rec)
-	if err := s.repo.SaveObservation(st); err != nil {
-		zap.L().Warn("告警状态写入失败", zap.Uint("nodeID", nodeID), zap.String("kind", kind), zap.Error(err))
-	}
+	return s.repo.SaveObservationTx(tx, st)
+}
+
+// 失败回执提交和操作日志落库期间也可能换租约。锁定当前租约直到同步告警观测提交。
+func (s *AlertService) observeSync(state *entity.NodeConfigState, cfg alertConfig, ok bool, detail string) error {
+	alertStateMu.Lock()
+	defer alertStateMu.Unlock()
+	return repository.DB.Transaction(func(tx *gorm.DB) error {
+		var lease entity.NodeConfigState
+		err := currentConfigLease(tx, state).Select("node_id").Clauses(clause.Locking{Strength: "UPDATE"}).Take(&lease).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrConfigLeaseLost
+		}
+		if err != nil {
+			return err
+		}
+		if !cfg.kinds[entity.AlertKindSyncFailed] {
+			return nil
+		}
+		return s.observe(tx, cfg, state.NodeID, entity.AlertKindSyncFailed, ok, detail)
+	})
 }
 
 // PruneInactive 清掉已禁用 / 已删除节点的告警状态（不发恢复）

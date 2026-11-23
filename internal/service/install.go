@@ -427,9 +427,6 @@ func (s *InstallService) registerReplace(t *entity.NodeInstallToken, ip string, 
 	node.SSHUser = meta.SSHUser
 	node.SSHPort = meta.SSHPort
 	node.XrayVersion = strings.TrimSpace(req.XrayVersion)
-	node.XrayActive = false
-	node.SyncStatus = entity.SyncStatusPending
-	node.ConfigHash = ""
 	node.RegisteredAt = &now
 
 	if err := s.nodeRepo.ReplaceHost(node, req.BootstrapConfigSHA256, "system:install-token:"+tokenShortID(t.Token)); err != nil {

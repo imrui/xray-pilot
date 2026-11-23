@@ -87,6 +87,9 @@ func TestExpiryRecoveryDoesNotStopCurrentAuthorization(t *testing.T) {
 	for _, mode := range []string{"confirmed", "regenerated", "missing-receipt", "stale-authorization", "changed-during-apply", "expired-lease"} {
 		t.Run(mode, func(t *testing.T) {
 			n, u := routingFixture(t)
+			if err := repository.NewSettingRepository().Set(KeyXrayLiveApply, "false"); err != nil {
+				t.Fatal(err)
+			}
 			now := time.Now()
 			if err := repository.DB.Model(u).Update("expires_at", now.Add(-time.Hour)).Error; err != nil {
 				t.Fatal(err)

@@ -2,11 +2,13 @@ package service
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/imrui/xray-pilot/internal/entity"
 	"github.com/imrui/xray-pilot/internal/repository"
 	"github.com/imrui/xray-pilot/internal/xray"
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
-	"time"
+	"gorm.io/gorm"
 )
 
 var stopRevokedNode = func(p xray.SSHParams) error {
@@ -19,17 +21,8 @@ var stopRevokedNode = func(p xray.SSHParams) error {
 	return err
 }
 
-// 只有全部相关节点已对齐当前权限，或确认停止服务，才确认过期摘除。
-func (s *UserService) confirmRevoked(ids []uint) bool {
-	all := true
-	for _, id := range ids {
-		if !confirmNodeRevocation(id) {
-			all = false
-		}
-	}
-	return all
-}
-func confirmNodeRevocation(id uint) bool {
+// 租约冲突或离线时保留待办，续期已取消的旧任务不能触发停止保护。
+func confirmNodeRevocation(id uint, tickets []string) bool {
 	r := NewSyncService().SyncNode(id, "system:expiry")
 	if r.Success {
 		return true
@@ -58,15 +51,41 @@ func confirmNodeRevocation(id uint) bool {
 		}
 	}
 	// 无法证明撤权已生效时，在线节点停止服务；离线节点保留待处理，不标为已摘除。
+	stillPending := false
+	for len(tickets) > 0 && !stillPending {
+		n := min(500, len(tickets))
+		var count int64
+		if err := repository.DB.Model(&entity.UserExpiryTarget{}).Where("node_id = ? AND ticket IN ?", id, tickets[:n]).Count(&count).Error; err != nil {
+			return false
+		}
+		stillPending = count != 0
+		tickets = tickets[n:]
+	}
+	if !stillPending {
+		return false
+	}
 	if err := stopRevokedNode(svc.sshParams(n)); err != nil {
 		_ = leaseUpdate(repository.DB, state, map[string]any{"recovery_pending": true, "last_error": "撤权未确认，节点不可达或停止失败", "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil})
-		svc.reportSyncAlert(id, false, "撤权未确认：节点不可达或停止失败")
+		svc.reportSyncAlert(state, false, "撤权未确认：节点不可达或停止失败")
 		return false
 	}
 	msg := "AUTHORIZATION_STOPPED：已停止节点，等待当前授权配置恢复"
-	_ = leaseUpdate(repository.DB, state, map[string]any{"recovery_pending": true, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil, "last_error": msg, "next_retry_at": time.Now().Add(time.Minute)})
-	_ = svc.nodeRepo.UpdateSyncStatus(id, entity.SyncStatusDrifted, "")
+	if err := repository.DB.Transaction(func(tx *gorm.DB) error {
+		updated := tx.Model(&entity.Node{}).Where("id = ?", id).Update("sync_status", entity.SyncStatusDrifted)
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return leaseUpdate(tx, state, map[string]any{
+			"recovery_pending": true, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil,
+			"last_error": msg, "next_retry_at": time.Now().Add(time.Minute),
+		})
+	}); err != nil {
+		return false
+	}
 	repository.NewLogRepository().RecordWithActor("authorization_stop", fmt.Sprintf("node:%d", id), "system:expiry", false, msg, 0)
-	svc.reportSyncAlert(id, false, msg)
+	svc.reportSyncAlert(state, false, msg)
 	return true
 }

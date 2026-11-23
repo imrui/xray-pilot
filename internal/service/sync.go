@@ -73,6 +73,13 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 		return result
 	}
 	defer release()
+	// 跨进程编辑可能在首次查询与取得租约之间更换 IP，回执必须属于实际连接的节点。
+	node, err = s.nodeRepo.FindByID(nodeID)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.Name = node.Name
 	// 获锁后重新判断，避免等待热更新的过期恢复任务再次重启。
 	if strings.HasPrefix(actor, "system:") && !state.RecoveryPending && state.VerifiedAt != nil && state.RuntimeHash != "" && state.RuntimeHash == state.DiskHash {
 		raw, _, e := s.buildConfig(node)
@@ -85,7 +92,7 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	configContent, warnings, err := s.buildConfig(node)
 	if err != nil {
 		result.Error = fmt.Sprintf("生成配置失败: %v", err)
-		s.failNode(node, actor, result.Error, 0)
+		s.failNode(state, result, actor, 0, nil)
 		return result
 	}
 	result.Warnings = warnings
@@ -147,26 +154,29 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 				result.Error = "ROLLBACK_FAILED：" + err.Error()
 			} else {
 				result.Error = "ROLLED_BACK：已恢复最近健康策略，并保留当前用户与密钥"
+				// 面板恢复已独立写入验证回执，此处仅登记失败原因与重试时间。
+				s.failNode(state, result, actor, syncResult.ElapsedMs, recoveryRetryUpdates(result.Error))
+				return result
 			}
 		}
-		s.failNode(node, actor, result.Error, syncResult.ElapsedMs)
+		// 远端脚本报告回滚时，只有本次读回并验证的运行态可用于确认撤权。
+		updates := configFailureUpdates(result.Error)
 		if syncResult.ObservedHash != "" {
-			_ = leaseUpdate(repository.DB, state, map[string]any{"disk_hash": syncResult.ObservedHash, "disk_revision": state.DesiredRevision, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil})
+			updates["disk_hash"] = syncResult.ObservedHash
+			updates["disk_revision"] = state.DesiredRevision
 		}
-		if strings.Contains(result.Error, "ROLLED_BACK") {
-			if syncResult.RecoveredHash != "" {
-				updates := map[string]any{"disk_hash": syncResult.RecoveredHash, "runtime_hash": "", "runtime_authorization_hash": "", "verified_at": nil}
-				if syncResult.ProcessID != "" && syncResult.RecoveredAuthorizationHash != "" && syncResult.RecoveredAuthorizationHash == xssh.AuthorizationHash(configContent) && s.stillCurrent(state, xray.ConfigHash(configContent)) {
-					updates["runtime_hash"] = syncResult.RecoveredHash
-					updates["runtime_authorization_hash"] = syncResult.RecoveredAuthorizationHash
-					updates["verified_at"] = time.Now()
-					updates["process_id"] = syncResult.ProcessID
-					updates["verification"] = "recovery_service"
-				}
-				_ = leaseUpdate(repository.DB, state, updates)
-			}
-			_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusDrifted, "")
+		rolledBack := strings.Contains(result.Error, "ROLLED_BACK")
+		if rolledBack && syncResult.RecoveredHash != "" {
+			updates["disk_hash"] = syncResult.RecoveredHash
 		}
+		if rolledBack && syncResult.RecoveredHash != "" && syncResult.ProcessID != "" && syncResult.RecoveredAuthorizationHash != "" && syncResult.RecoveredAuthorizationHash == xssh.AuthorizationHash(configContent) && s.stillCurrent(state, xray.ConfigHash(configContent)) {
+			updates["runtime_hash"] = syncResult.RecoveredHash
+			updates["runtime_authorization_hash"] = syncResult.RecoveredAuthorizationHash
+			updates["verified_at"] = time.Now()
+			updates["process_id"] = syncResult.ProcessID
+			updates["verification"] = "recovery_service"
+		}
+		s.failNode(state, result, actor, syncResult.ElapsedMs, updates)
 		return result
 	}
 
@@ -190,7 +200,7 @@ func (s *SyncService) syncExpected(nodeID uint, actor, expected string) *SyncRes
 	}
 
 	s.logRepo.RecordWithActor("sync", fmt.Sprintf("node:%s(%d)", node.Name, nodeID), actor, true, "同步成功", syncResult.ElapsedMs)
-	s.reportSyncAlert(nodeID, true, "")
+	s.reportSyncAlert(state, true, "")
 
 	if status != entity.SyncStatusSynced {
 		result.Error = "期望配置已更新，旧版本回执已记录"
@@ -421,17 +431,20 @@ func (s *SyncService) PreviewConfig(nodeID uint) (string, []string, error) {
 	return masked, warnings, nil
 }
 
+func effectiveSSHPort(node *entity.Node, settings *SettingService) int {
+	if node.SSHPort != 0 {
+		return node.SSHPort
+	}
+	if port := settings.GetInt(KeySSHDefaultPort); port != 0 {
+		return port
+	}
+	return 22
+}
+
 func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 	configPath := xray.RemoteConfigPath
 	if b, err := NewRoutingService().Binding("node", node.ID); err == nil && b.ConfigPath != "" {
 		configPath = b.ConfigPath
-	}
-	sshPort := node.SSHPort
-	if sshPort == 0 {
-		sshPort = s.settingSvc.GetInt(KeySSHDefaultPort)
-		if sshPort == 0 {
-			sshPort = 22
-		}
 	}
 	sshUser := node.SSHUser
 	if sshUser == "" {
@@ -448,7 +461,7 @@ func (s *SyncService) sshParams(node *entity.Node) xray.SSHParams {
 		Host:           node.IP,
 		ConfigPath:     configPath,
 		ProbeURL:       s.settingSvc.Get(KeyXrayProbeURL),
-		Port:           sshPort,
+		Port:           effectiveSSHPort(node, s.settingSvc),
 		User:           sshUser,
 		KeyPath:        keyPath,
 		KnownHostsPath: s.settingSvc.Get(KeySSHKnownHostsPath),
@@ -478,32 +491,43 @@ func maskXrayConfig(configJSON string) string {
 	return result
 }
 
-func (s *SyncService) failNode(node *entity.Node, actor string, errMsg string, elapsedMs int64) {
-	recordConfigFailure(node.ID, errMsg)
-	_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusFailed, "")
+func (s *SyncService) failNode(state *entity.NodeConfigState, result *SyncResult, actor string, elapsedMs int64, updates map[string]any) {
+	message := result.Error
+	err := recordConfigFailure(state, message, updates)
+	if err != nil {
+		// 部署队列按回执区分已回滚与未完成；失效 worker 的远端结果只进日志。
+		result.Error = "同步回执未完成：" + err.Error()
+		message += "（" + result.Error + "）"
+	}
 	zap.L().Error("节点同步失败",
-		zap.String("node", node.Name),
-		zap.Uint("id", node.ID),
-		zap.String("error", errMsg),
+		zap.String("node", result.Name),
+		zap.Uint("id", state.NodeID),
+		zap.String("error", message),
 	)
 	s.logRepo.RecordWithActor(
 		"sync",
-		fmt.Sprintf("node:%s(%d)", node.Name, node.ID),
+		fmt.Sprintf("node:%s(%d)", result.Name, state.NodeID),
 		actor,
 		false,
-		errMsg,
+		message,
 		elapsedMs,
 	)
-	s.reportSyncAlert(node.ID, false, truncateRunes(errMsg, 200))
+	if err == nil {
+		s.reportSyncAlert(state, false, truncateRunes(result.Error, 200))
+	}
 }
 
 // reportSyncAlert 同步结果上报告警：状态同步推进（保证按同步完成顺序生效，失败后紧接成功不会被乱序覆盖），
 // 只把发送放进 goroutine，不阻塞同步返回
-func (s *SyncService) reportSyncAlert(nodeID uint, ok bool, detail string) {
-	if !s.alertSvc.Enabled() {
+func (s *SyncService) reportSyncAlert(state *entity.NodeConfigState, ok bool, detail string) {
+	cfg := s.alertSvc.loadAlertConfig()
+	if !cfg.enabled {
 		return
 	}
-	s.alertSvc.Observe(nodeID, entity.AlertKindSyncFailed, ok, detail)
+	if err := s.alertSvc.observeSync(state, cfg, ok, detail); err != nil {
+		zap.L().Warn("同步告警观测未保存", zap.Uint("nodeID", state.NodeID), zap.Error(err))
+		return
+	}
 	go s.alertSvc.Flush()
 }
 

@@ -1,3 +1,5 @@
+import realityFingerprints from '../../../internal/xray/reality_fingerprints.json'
+
 export type DomainStrategy = 'AsIs' | 'IPIfNonMatch' | 'IPOnDemand'
 
 export type CustomOutbound = {
@@ -1077,6 +1079,66 @@ export const affectedIDs = (impact: BindingImpact) => [
   ...new Set([...impact.changed_nodes, ...Object.keys(impact.conflicts).map(Number)]),
 ]
 
+function configObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+export function realityPassword(settings: Record<string, unknown>): string {
+  if (typeof settings.password === 'string' && settings.password) return settings.password
+  return typeof settings.publicKey === 'string' ? settings.publicKey : ''
+}
+
+export function vlessTransportError(outbound: CustomOutbound): string {
+  if (outbound.protocol !== 'vless') return ''
+  const stream = configObject(outbound.streamSettings)
+  const network = String(stream.method ?? stream.network ?? 'tcp').toLowerCase()
+  const security = String(stream.security ?? 'none').toLowerCase()
+  if (security === 'reality') {
+    if (!['tcp', 'raw', 'xhttp', 'splithttp', 'grpc'].includes(network)) return 'Reality 仅支持 RAW/TCP、XHTTP 或 gRPC 传输。'
+    const reality = configObject(stream.realitySettings)
+    if ([reality.serverNames, reality.shortIds].some((v) => Array.isArray(v) && v.length > 0)) {
+      return 'Reality 出站使用单个 serverName 和 shortId。'
+    }
+    const key = realityPassword(reality)
+    if (!isEncryptedSecret(key) && key !== '<masked>' && !/^[A-Za-z0-9_-]{43}$/.test(key)) {
+      return 'Reality 公钥须为 32 字节的无填充 Base64URL 字符串。'
+    }
+    if (reality.shortId != null && (typeof reality.shortId !== 'string' || !/^(?:[0-9a-f]{2}){0,8}$/i.test(reality.shortId))) {
+      return 'ShortId 必须是偶数位十六进制，最多 16 位。'
+    }
+    if (reality.spiderX && (typeof reality.spiderX !== 'string' || !reality.spiderX.startsWith('/') || /%(?![0-9a-f]{2})/i.test(reality.spiderX))) {
+      return 'SpiderX 必须为以 / 开头的有效路径。'
+    }
+    if (reality.fingerprint && (typeof reality.fingerprint !== 'string' || !realityFingerprints.includes(reality.fingerprint.toLowerCase()))) {
+      return '请选择支持 TLS 1.3 的 Reality 指纹。'
+    }
+  }
+  const settings = configObject(outbound.settings)
+  const servers = Array.isArray(settings.vnext) ? settings.vnext : []
+  if (settings.address && servers.length > 0) return 'VLESS 出站不能同时配置 settings.address 简写与 vnext。'
+  const groups = servers.length > 0
+    ? servers.map((server: unknown) => configObject(server).users)
+    : [[settings]]
+  for (const [i, users] of groups.entries()) {
+    if (!Array.isArray(users) || users.length === 0) return `vnext[${i}] 必须至少配置一个用户。`
+    for (const user of users) {
+      const account = configObject(user)
+      for (const key of Object.keys(account)) {
+        const lower = key.toLowerCase()
+        if ((lower === 'encryption' || lower === 'flow') && key !== lower) return `字段 ${key} 请使用标准命名 ${lower}。`
+      }
+      const { flow, encryption } = account
+      if (typeof encryption !== 'string' || !encryption.trim()) return 'VLESS 用户必须显式设置 encryption，未启用加密时请填写 "none"。'
+      if (!flow) continue
+      if (flow !== 'xtls-rprx-vision' && flow !== 'xtls-rprx-vision-udp443') return '不支持的 VLESS flow。'
+      if (encryption === 'none' && (!['raw', 'tcp'].includes(network) || !['tls', 'reality'].includes(security))) {
+        return '未开启 VLESS Encryption 时，Vision 流控需要 RAW/TCP + TLS 或 Reality。'
+      }
+    }
+  }
+  return ''
+}
+
 export function normalizeBinding(binding: RoutingBinding): RoutingBinding {
   const overrides = JSON.parse(binding.overrides || '{}') as Record<string, unknown>
   if (overrides.custom_rules != null) parseRules(JSON.stringify(overrides.custom_rules))
@@ -1105,6 +1167,8 @@ export function normalizeBinding(binding: RoutingBinding): RoutingBinding {
         if (!ov.outbound || typeof ov.outbound !== 'object') {
           throw new Error(`出站「${tag}」自定义参数无效。`)
         }
+        const error = vlessTransportError(ov.outbound)
+        if (error) throw new Error(`出站「${tag}」${error}`)
         cleaned[tag] = { mode: 'replace', outbound: { ...ov.outbound, tag } }
       }
     }

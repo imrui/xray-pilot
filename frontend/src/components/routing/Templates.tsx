@@ -17,6 +17,7 @@ import {
   routingLabel,
   templateBinding,
   upgradeRoutingPolicy,
+  vlessTransportError,
 } from '@/lib/routing-model'
 import type {
   BalancerItem,
@@ -196,6 +197,10 @@ export function TemplateEditor({
         policy = buildCurrentPolicy()
       }
 
+      for (const outbound of policy.custom_outbounds ?? []) {
+        const error = vlessTransportError(outbound)
+        if (error) throw new Error(`出站「${outbound.tag}」${error}`)
+      }
       const payload = { name: name.trim(), description, draft: policy, version: base.version }
       const res = base.id
         ? await request.patch(`/routing-templates/${base.id}`, payload)

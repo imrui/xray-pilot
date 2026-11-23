@@ -9,7 +9,6 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
 
 	_ "modernc.org/sqlite"
@@ -118,7 +117,7 @@ func autoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&entity.RoutingTemplate{}, &entity.RoutingTemplateRevision{}, &entity.RoutingBinding{}, &entity.ConfigDeployment{}, &entity.NodeConfigState{},
 		&entity.User{},
-		&entity.UserGroup{},
+		&entity.UserGroup{}, &entity.UserExpiryTarget{},
 		&entity.Group{},
 		&entity.Node{},
 		&entity.SyncLog{},
@@ -155,35 +154,14 @@ func autoMigrate(db *gorm.DB) error {
 }
 
 func migrateLegacyUserGroups(db *gorm.DB) error {
-	var legacyUsers []struct {
-		ID      uint
-		GroupID *uint `gorm:"column:group_id"`
-	}
-
-	if err := db.Table("users").
-		Select("id, group_id").
-		Where("group_id IS NOT NULL").
-		Find(&legacyUsers).Error; err != nil {
-		return err
-	}
-
-	if len(legacyUsers) == 0 {
-		return nil
-	}
-
-	links := make([]entity.UserGroup, 0, len(legacyUsers))
-	for _, user := range legacyUsers {
-		if user.GroupID == nil {
-			continue
+	return db.Transaction(func(tx *gorm.DB) error {
+		// 已编辑过的多分组关系优先。首次迁移后消费旧列，避免重启复活已移除的分组。
+		if err := tx.Exec(`INSERT INTO user_groups (user_id, group_id)
+			SELECT u.id, u.group_id FROM users u JOIN groups g ON g.id = u.group_id
+			WHERE u.group_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM user_groups ug JOIN groups current_group ON current_group.id = ug.group_id WHERE ug.user_id = u.id)
+			ON CONFLICT (user_id, group_id) DO NOTHING`).Error; err != nil {
+			return err
 		}
-		links = append(links, entity.UserGroup{
-			UserID:  user.ID,
-			GroupID: *user.GroupID,
-		})
-	}
-	if len(links) == 0 {
-		return nil
-	}
-
-	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&links).Error
+		return tx.Model(&entity.User{}).Where("group_id IS NOT NULL").UpdateColumn("group_id", nil).Error
+	})
 }

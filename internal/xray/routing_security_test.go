@@ -62,7 +62,11 @@ func TestOutboundFlatAndExtensionCredentialsStayEncrypted(t *testing.T) {
 		{"socks", "pass"}, {"http", "pass"}, {"vless", "id"}, {"vmess", "id"}, {"trojan", "password"}, {"shadowsocks", "password"},
 	} {
 		t.Run(tc.protocol, func(t *testing.T) {
-			raw := `{"tag":"egress","protocol":"` + tc.protocol + `","settings":{"address":"203.0.113.1","port":443,"` + tc.key + `":"flat-protocol-secret"}}`
+			encryption := ""
+			if tc.protocol == "vless" {
+				encryption = `,"encryption":"none"`
+			}
+			raw := `{"tag":"egress","protocol":"` + tc.protocol + `","settings":{"address":"203.0.113.1","port":443,"` + tc.key + `":"flat-protocol-secret"` + encryption + `}}`
 			p, err := DecodeRoutingPolicy(securityPolicy(raw))
 			if err != nil {
 				t.Fatal(err)

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/imrui/xray-pilot/internal/xray"
 	xssh "github.com/imrui/xray-pilot/pkg/ssh"
 )
+
+var errLiveSSHUnavailable = errors.New("SSH 连接失败")
 
 // LiveSyncService 基于当前授权快照进行持久化与 gRPC 用户差异同步。
 //
@@ -38,7 +41,7 @@ func NewLiveSyncService() *LiveSyncService {
 	}
 }
 
-// Enabled 返回 live-apply 开关是否打开。off 时调用方应回退到 nodeRepo.MarkAllDrifted()。
+// Enabled 返回 live-apply 开关是否打开。受影响节点已在授权事务中登记。
 func (s *LiveSyncService) Enabled() bool {
 	return s.settingSvc.Get(KeyXrayLiveApply) == "true"
 }
@@ -52,6 +55,27 @@ func (s *LiveSyncService) RemoveUserLive(nodeIDs []uint, email string) {
 	s.applyOverNodes(nodeIDs, "摘除用户", email)
 }
 
+// confirmExpiredNode 只有热更新、完整同步或停服得到确认后才允许核销这一批撤权凭据。
+func (s *LiveSyncService) confirmExpiredNode(id uint, tickets []string, live bool) bool {
+	if live {
+		node, err := s.nodeRepo.FindByID(id)
+		if err != nil {
+			return false
+		}
+		if node.Active {
+			err := s.applyOnNode(node, true)
+			if err == nil {
+				return true
+			}
+			zap.L().Warn("过期用户热撤权未确认", zap.Uint("nodeID", id), zap.Error(err))
+			if errors.Is(err, errLiveSSHUnavailable) || errors.Is(err, repository.ErrConfigLeased) || errors.Is(err, ErrConfigLeaseLost) {
+				return false
+			}
+		}
+	}
+	return confirmNodeRevocation(id, tickets)
+}
+
 func (s *LiveSyncService) ReplaceUserLive(nodeIDs []uint, email, newUUID string) {
 	s.applyOverNodes(nodeIDs, "重置用户UUID", email)
 }
@@ -63,20 +87,24 @@ func (s *LiveSyncService) applyOverNodes(nodeIDs []uint, action, email string) {
 	}
 	nodes, err := s.nodeRepo.FindByIDs(nodeIDs)
 	if err != nil {
-		zap.L().Warn("live-apply 查询节点失败，回退标记漂移", zap.String("action", action), zap.Error(err))
-		_ = s.nodeRepo.MarkAllDrifted()
+		zap.L().Warn("live-apply 查询节点失败，等待已登记的配置恢复", zap.String("action", action), zap.Error(err))
+		// 对应事务已入队，保留它的修订号和重试进度。
 		return
 	}
 	ok, failed := 0, 0
 	for i := range nodes {
 		node := &nodes[i]
-		if err := s.applyOnNode(node); err != nil {
+		if !node.Active {
+			continue
+		}
+		if err := s.applyOnNode(node, false); err != nil {
+			if errors.Is(err, repository.ErrConfigLeased) {
+				continue
+			}
 			failed++
 			zap.L().Warn("live-apply 失败，已标记节点漂移待 restart 同步",
 				zap.String("action", action), zap.String("node", node.Name),
 				zap.Uint("nodeID", node.ID), zap.String("email", email), zap.Error(err))
-			_ = s.nodeRepo.UpdateSyncStatus(node.ID, entity.SyncStatusDrifted, "")
-			recordConfigFailure(node.ID, err.Error())
 		} else {
 			ok++
 		}
@@ -88,13 +116,32 @@ func (s *LiveSyncService) applyOverNodes(nodeIDs []uint, action, email string) {
 
 // applyOnNode 先持久化当前配置，再根据已确认运行快照对齐各 inbound 用户。
 // 任一环节失败都不确认运行态成功。
-func (s *LiveSyncService) applyOnNode(node *entity.Node) error {
+func (s *LiveSyncService) applyOnNode(node *entity.Node, expiryFallback bool) (err error) {
 	defer lockNode(node.ID)()
 	state, release, err := repository.AcquireConfigLease(node.ID)
 	if err != nil {
 		return err
 	}
 	defer release()
+	defer func() {
+		if err == nil {
+			return
+		}
+		// 事务已经标记漂移。只有本次持有租约的未完成修订可以消耗其重试次数。
+		updates := configFailureUpdates(err.Error())
+		unavailable := errors.Is(err, errLiveSSHUnavailable)
+		if expiryFallback && !unavailable {
+			// 本轮将用完整同步确认在线节点的撤权，由它记录最终失败次数。
+			delete(updates, "recovery_attempts")
+		}
+		r := repository.DB.Model(&entity.NodeConfigState{}).
+			Where("node_id = ? AND lease_owner = ? AND lease_until > ? AND change_revision = ? AND recovery_pending = ?", state.NodeID, state.LeaseOwner, time.Now(), state.ChangeRevision, true).
+			Updates(updates)
+		if expiryFallback && unavailable && r.Error == nil && r.RowsAffected == 1 {
+			// 本轮不会再执行完整同步，由这次 SSH 失败上报撤权告警。
+			s.syncSvc.reportSyncAlert(state, false, "撤权未确认："+truncateRunes(err.Error(), 180))
+		}
+	}()
 	node, err = s.nodeRepo.FindByID(node.ID)
 	if err != nil {
 		return err
@@ -116,7 +163,7 @@ func (s *LiveSyncService) applyOnNode(node *entity.Node) error {
 		KnownHostsPath: params.KnownHostsPath,
 	})
 	if err != nil {
-		return fmt.Errorf("SSH 连接失败: %w", err)
+		return fmt.Errorf("%w: %w", errLiveSSHUnavailable, err)
 	}
 	defer client.Close()
 	old, err := client.ReadRemoteFile(params.ConfigPath)
@@ -143,7 +190,7 @@ func (s *LiveSyncService) applyOnNode(node *entity.Node) error {
 	}}); err != nil {
 		return fmt.Errorf("上传配置失败: %w", err)
 	}
-	if err := repository.DB.Model(&entity.NodeConfigState{}).Where("node_id = ? AND lease_owner = ?", node.ID, state.LeaseOwner).Updates(map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": xray.ConfigHash(configContent)}).Error; err != nil {
+	if err := leaseUpdate(repository.DB, state, map[string]any{"disk_revision": state.DesiredRevision, "disk_hash": xray.ConfigHash(configContent)}); err != nil {
 		return err
 	}
 
@@ -176,10 +223,7 @@ func (s *LiveSyncService) applyOnNode(node *entity.Node) error {
 		}
 	}
 
-	// 5. 仅当节点此前已 synced 时才回写 synced。
-	// 若此前是 drifted/pending（仍有走 MarkAllDrifted 的待同步变更，如改协议/分组/UUID，
-	// 这些不是单纯加减用户、gRPC 无法即时对齐），保留原状态让 restart 同步路径补齐——
-	// 否则清掉 drift 会导致那些待同步变更运行时缺失且无人修复。本次用户增删的即时效果已生效。
+	// 只有同一修订的完整回执可以确认同步。
 	if s.syncSvc.stillCurrent(state, xray.ConfigHash(configContent)) {
 		if err := s.syncSvc.recordApplied(state, configContent, state.ProcessID, nil); err != nil {
 			return err
