@@ -56,7 +56,18 @@ func (c *Client) ApplyXrayConfig(content, path string, restart, validateOnly boo
 		}
 		process = strings.TrimSpace(process)
 		if process == "" {
-			return fmt.Errorf("节点配置任务未完成：目标文件已存在，缺少运行回执，不重复重启")
+			if opt.BeforeApply != nil {
+				if err := opt.BeforeApply(); err != nil {
+					return err
+				}
+			}
+			if _, err := c.VerifyRunningConfig(old, path, opt.ProbeURL); err != nil {
+				return fmt.Errorf("节点配置任务未完成：目标文件已存在，缺少运行回执，不重复重启")
+			}
+			if opt.BeforeApply != nil {
+				return opt.BeforeApply()
+			}
+			return nil
 		}
 		if opt.BeforeApply != nil {
 			if err := opt.BeforeApply(); err != nil {
@@ -266,6 +277,15 @@ chown "$service_user:$service_group" "$tmp"
 chmod 600 "$tmp"
 chown "$service_user:$service_group" "$tmp.rollback.json"
 chmod 600 "$tmp.rollback.json"
+run_xray_test() {
+ if test "$service_user" = root || test "$(id -u)" != 0; then
+  timeout 30 "$binary" run -test -format json -config "$1"
+ elif command -v runuser >/dev/null 2>&1; then
+  timeout 30 runuser -u "$service_user" -g "$service_group" -- "$binary" run -test -format json -config "$1"
+ else
+  timeout 30 su -s /bin/sh "$service_user" -c 'exec "$1" run -test -format json -config "$2"' -- "$binary" "$1"
+ fi
+}
 __VERSION_PROBE__
 # Strict policy is enabled only on the baseline whose configuration was verified.
 if grep -q 'ForceIPv' "$tmp"; then
@@ -305,13 +325,13 @@ __RESTART__
 	versionProbe := ""
 	ipv6Curl := `probe_url=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["probe_url"])' "$tmp.probes")
  timeout 10 curl -6 -fsS --max-time 8 "$probe_url" >/dev/null || { echo IPV6_UNAVAILABLE; exit 23; }`
-	xrayTest := `if ! timeout 30 "$binary" run -test -format json -config "$tmp" >/dev/null 2>&1; then echo PREFLIGHT_FAILED; exit 24; fi`
+	xrayTest := `if ! run_xray_test "$tmp" >/dev/null 2>&1; then echo PREFLIGHT_FAILED; exit 24; fi`
 	if validateOnly {
 		pre = "echo VALIDATED; exit 0"
 		versionProbe = `ver_line=$("$binary" version 2>/dev/null | head -1 | awk '{print $2}' || true)
 test -z "$ver_line" || echo "PILOT:XRAY_VERSION:$ver_line"`
 		ipv6Curl = ""
-		xrayTest = `if ! test_out=$(timeout 30 "$binary" run -test -format json -config "$tmp" 2>&1); then
+		xrayTest = `if ! test_out=$(run_xray_test "$tmp" 2>&1); then
  clean_err=$(printf '%s' "$test_out" | tr '\r\n' '  ' | head -c 400)
  echo "PILOT:VALIDATE_ERR:$clean_err"
  echo PREFLIGHT_FAILED
@@ -325,7 +345,7 @@ fi`
 	rollbackPreflight := ""
 	if restart {
 		rollbackPreflight = `command -v curl >/dev/null || { echo PREFLIGHT_FAILED; exit 24; }
- timeout 30 "$binary" run -test -format json -config "$tmp.rollback.json" >/dev/null 2>&1 || { echo PREFLIGHT_FAILED; exit 24; }`
+ run_xray_test "$tmp.rollback.json" >/dev/null 2>&1 || { echo PREFLIGHT_FAILED; exit 24; }`
 	}
 	s = strings.ReplaceAll(s, "__ROLLBACK_PREFLIGHT__", rollbackPreflight)
 	apply := "echo PERSISTED"

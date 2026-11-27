@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -27,7 +27,7 @@ import { useThemeStore } from '@/store/theme'
 import { GitHubMark } from '@/components/icons/GitHubMark'
 import { Logo } from '@/components/icons/Logo'
 import { APP_VERSION } from '@/lib/version'
-import { systemApi } from '@/lib/api'
+import { authApi, systemApi } from '@/lib/api'
 import { SyncStatusPill } from '@/components/SyncStatusPill'
 import { ChangelogDrawer } from '@/components/ChangelogDrawer'
 import { HeaderSearch } from '@/components/HeaderSearch'
@@ -83,8 +83,22 @@ export default function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
+  const syncIdentity = useAuthStore((s) => s.syncIdentity)
   const username = useAuthStore((s) => s.username)
   const role = useAuthStore((s) => s.role)
+  const { data: me } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => authApi.me().then((r) => r.data.data!),
+    staleTime: 30000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    retry: false,
+  })
+  useEffect(() => {
+    if (me && (me.username !== username || me.role !== role)) {
+      syncIdentity(me.username, me.role)
+    }
+  }, [me, username, role, syncIdentity])
   const settingsDirty = useSettingsDraft((s) => s.dirty)
   const discardSettings = useSettingsDraft((s) => s.discard)
   const confirm = useConfirm()

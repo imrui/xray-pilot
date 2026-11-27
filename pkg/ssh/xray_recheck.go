@@ -91,3 +91,91 @@ echo VERIFIED
 	}
 	return nil
 }
+
+// VerifyRunningConfig 在目标文件已落盘但缺少 verified 回执（例如手动修复环境并重启服务后）时，
+// 仅在确认当前活跃 xray 进程启动时间不早于配置文件修改时间且通过真实代理探针后，补写 verified 回执。
+// 不改写配置文件，也不重启服务。
+func (c *Client) VerifyRunningConfig(content, path, probeURL string) (string, error) {
+	envelope, err := probeEnvelope(content, probeURL)
+	if err != nil {
+		return "", err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(envelope), &payload); err != nil {
+		return "", err
+	}
+	delete(payload, "config")
+	raw, _ := json.Marshal(payload)
+	sum := sha256.Sum256([]byte(content))
+	script := `set -eu
+# PILOT:VERIFY_ONLY -- never replace config or restart the service.
+umask 077
+path=__PATH__
+dir=$(dirname "$path")
+test ! -L "$path"
+test ! -L "$dir/.pilot-config.lock"
+test ! -L "$dir/.pilot-config-state"
+exec 9>"$dir/.pilot-config.lock"
+flock -w 15 9
+__CHECK_PATH__
+test "$(sha256sum "$path" | cut -d ' ' -f1)" = __HASH__
+systemctl is-active --quiet xray
+pid=$(systemctl show xray -p MainPID --value)
+test "$pid" != 0
+process=$(systemctl show xray -p MainPID -p ExecMainStartTimestampMonotonic --value)
+test -n "$process"
+python3 - "$path" "$pid" <<'PILOT_MTIME'
+import os,sys
+p,pid=sys.argv[1],sys.argv[2]
+if os.stat("/proc/"+pid).st_mtime < os.stat(p).st_mtime:
+    sys.exit(1)
+PILOT_MTIME
+binary=$(readlink -f "/proc/$pid/exe")
+tmp=$(mktemp "$dir/.pilot-verify.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+cat > "$tmp"
+timeout 5 "$binary" api statsquery --server=127.0.0.1:10085 >/dev/null 2>&1
+timeout 30 python3 - "$tmp" "$binary" <<'PILOT_HEALTH'
+__HEALTH__
+PILOT_HEALTH
+test "$(sha256sum "$path" | cut -d ' ' -f1)" = __HASH__
+systemctl is-active --quiet xray
+test "$(systemctl show xray -p MainPID -p ExecMainStartTimestampMonotonic --value)" = "$process"
+python3 - "$path" "$dir" "$process" <<'PILOT_RECEIPT'
+import hashlib,json,os,sys,tempfile
+p,d,process=sys.argv[1:]
+receipt={"phase":"verified","hash":hashlib.sha256(open(p,"rb").read()).hexdigest(),"process":process.strip()}
+state=d+"/.pilot-config-state"
+fd,receipt_tmp=tempfile.mkstemp(prefix=".pilot-receipt.",dir=d)
+with os.fdopen(fd,"w") as f:
+    json.dump(receipt,f);f.flush();os.fsync(f.fileno())
+os.replace(receipt_tmp,state)
+PILOT_RECEIPT
+printf 'PILOT:PROCESS:%s\n' "$(printf '%s' "$process" | tr '\n' '|')"
+echo VERIFIED
+`
+	script = strings.ReplaceAll(script, "__PATH__", shellQuote(path))
+	script = strings.ReplaceAll(script, "__CHECK_PATH__", xrayPathCheckScript)
+	script = strings.ReplaceAll(script, "__HASH__", shellQuote(hex.EncodeToString(sum[:])))
+	script = strings.ReplaceAll(script, "__HEALTH__", proxyHealthPython)
+	sess, err := c.client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	sess.Stdin = strings.NewReader(string(raw))
+	var output limitedOutput
+	sess.Stdout, sess.Stderr = &output, &output
+	timer := time.AfterFunc(65*time.Second, func() { _ = sess.Close() })
+	defer timer.Stop()
+	if err := sess.Run("timeout 60 bash -c " + shellQuote(script)); err != nil || !strings.Contains(output.text, "VERIFIED") {
+		return "", fmt.Errorf("运行配置复核失败")
+	}
+	for _, line := range strings.Split(output.text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "PILOT:PROCESS:") {
+			return strings.ReplaceAll(strings.TrimPrefix(line, "PILOT:PROCESS:"), "|", "\n"), nil
+		}
+	}
+	return "", nil
+}

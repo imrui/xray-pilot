@@ -8,6 +8,8 @@ interface AuthState {
   role: AdminRole | null
   /** 登录成功后写入 token 与当前管理员身份 */
   setSession: (token: string, username: string, role: AdminRole) => void
+  /** 从 /api/me 同步最新管理员身份（角色变更无需重新登录） */
+  syncIdentity: (username: string, role: AdminRole) => void
   logout: () => void
 }
 
@@ -29,6 +31,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.setItem(KEY_USERNAME, username)
     localStorage.setItem(KEY_ROLE, role)
     set({ token, username, role })
+  },
+  syncIdentity: (username, role) => {
+    localStorage.setItem(KEY_USERNAME, username)
+    localStorage.setItem(KEY_ROLE, role)
+    set({ username, role })
   },
   logout: () => {
     localStorage.removeItem(KEY_TOKEN)

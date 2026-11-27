@@ -48,6 +48,9 @@ func ReconcileDeployment(id uint) (*entity.ConfigDeployment, error) {
 	}
 	process, verifyErr := c.VerifyConfigReceipt(raw, p.ConfigPath)
 	if verifyErr != nil {
+		process, verifyErr = c.VerifyRunningConfig(raw, p.ConfigPath, p.ProbeURL)
+	}
+	if verifyErr != nil {
 		job.Error = "磁盘已确认，运行态未确认；可用最新配置重试"
 	} else {
 		latest, _, buildErr := svc.buildConfig(n)

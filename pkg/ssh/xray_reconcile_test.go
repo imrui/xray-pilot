@@ -22,9 +22,9 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 		verified, manual, initial         bool
 		phase                             string
 		recovery, badHash, changedProcess bool
-		recheck, live, badPath            bool
+		recheck, live, badPath, persisted bool
 	}{
-		{name: "verified", verified: true}, {name: "unknown"}, {name: "manual", manual: true}, {name: "manual-with-initial-permit", manual: true, initial: true},
+		{name: "verified", verified: true}, {name: "unknown"}, {name: "unknown-running-verified", persisted: true, recheck: true, verified: true}, {name: "manual", manual: true}, {name: "manual-with-initial-permit", manual: true, initial: true},
 		{name: "restored", phase: "restored", recovery: true, verified: true},
 		{name: "restored-file-changed", phase: "restored", recovery: true, badHash: true},
 		{name: "restored-process-changed", phase: "restored", recovery: true, changedProcess: true},
@@ -63,7 +63,7 @@ func TestMatchingTargetOnlyReconciles(t *testing.T) {
 				receiptHash = strings.Repeat("0", 64)
 			}
 			receipt, _ := json.Marshal(map[string]string{"phase": phase, "hash": receiptHash, "process": "17\n123"})
-			if tc.live || !verified && tc.phase == "" {
+			if tc.live || tc.persisted || !verified && tc.phase == "" {
 				receipt = []byte("persisted")
 			}
 			var mutations atomic.Int32

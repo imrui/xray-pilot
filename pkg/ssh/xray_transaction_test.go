@@ -256,3 +256,18 @@ func TestRollbackCannotRestoreRevokedIdentity(t *testing.T) {
 		t.Fatal("current authorization not preserved")
 	}
 }
+
+func TestPreflightDropsPrivilegesToServiceUser(t *testing.T) {
+	for _, validateOnly := range []bool{false, true} {
+		script := xrayTransactionScript("/usr/local/etc/xray/config.json", strings.Repeat("a", 64), !validateOnly, validateOnly)
+		if !strings.Contains(script, `runuser -u "$service_user" -g "$service_group" -- "$binary" run -test -format json -config "$1"`) {
+			t.Fatalf("validateOnly=%v: preflight script missing runuser privilege drop", validateOnly)
+		}
+		if !strings.Contains(script, `run_xray_test "$tmp"`) {
+			t.Fatalf("validateOnly=%v: preflight script did not invoke run_xray_test for candidate config", validateOnly)
+		}
+		if !validateOnly && !strings.Contains(script, `run_xray_test "$tmp.rollback.json"`) {
+			t.Fatal("restart preflight did not invoke run_xray_test for rollback config")
+		}
+	}
+}
