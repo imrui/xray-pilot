@@ -287,8 +287,8 @@ type SubLink struct {
 // NodeLinkData 节点链接信息
 //
 // 字段为信息页模板优化（v0.4.0）增补：Protocol/ProtocolLabel 用于配色徽章；
-// LastSyncAt 用前端 JS 渲染相对时间避免服务端时区问题；
-// Remark 仅在非空时透出，给"仅看视频禁 P2P"之类的使用提示留位。
+// LastSyncAt 用前端 JS 渲染相对时间避免服务端时区问题。
+// 节点备注（Node.Remark）仅面向后台管理员，不透出到订阅信息页。
 type NodeLinkData struct {
 	Name          string
 	Region        string
@@ -296,7 +296,6 @@ type NodeLinkData struct {
 	Protocol      string // slug，如 vless-reality，用作 CSS class 后缀
 	ProtocolLabel string // 显示用，如 "VLESS + Reality"
 	LastSyncAt    *time.Time
-	Remark        string
 }
 
 // GetUser 通过 token 获取用户（供 handler 读取 ExpiresAt 用于响应头）
@@ -421,7 +420,6 @@ func (s *SubscribeService) GetSubscribePageDataWithBaseURL(token, baseURL string
 			Protocol:      firstProtocol,
 			ProtocolLabel: protocolDisplayLabel(firstProtocol),
 			LastSyncAt:    lastSync,
-			Remark:        node.Remark,
 		})
 	}
 	return data, nil

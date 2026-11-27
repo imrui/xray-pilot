@@ -242,10 +242,13 @@ configure_root_ssh() {
 }
 
 install_xray() {
-  local installer installed_version config_existed=false
+  local installer installed_version config_existed=false config_empty_stub=false
   BOOTSTRAP_CONFIG_SHA256=""
   if [[ -e "${XRAY_CONFIG_FILE}" || -L "${XRAY_CONFIG_FILE}" ]]; then
     config_existed=true
+    if [[ -f "${XRAY_CONFIG_FILE}" && ! -L "${XRAY_CONFIG_FILE}" && "$(tr -d '[:space:]' < "${XRAY_CONFIG_FILE}")" == "{}" ]]; then
+      config_empty_stub=true
+    fi
   fi
   if ! installer="$(curl -fsSL "${XRAY_INSTALL_URL}")"; then
     echo "Failed to download the Xray installer." >&2
@@ -260,8 +263,9 @@ install_xray() {
     return 1
   fi
   # The official installer may preserve an existing manual configuration. Such
-  # a file must never gain first-install overwrite permission by re-running us.
-  if [[ "${config_existed}" == false && -f "${XRAY_CONFIG_FILE}" && ! -L "${XRAY_CONFIG_FILE}" ]]; then
+  # a file must never gain first-install overwrite permission by re-running us,
+  # except when the pre-existing file is only an empty '{}' stub.
+  if [[ ( "${config_existed}" == false || "${config_empty_stub}" == true ) && -f "${XRAY_CONFIG_FILE}" && ! -L "${XRAY_CONFIG_FILE}" ]]; then
     BOOTSTRAP_CONFIG_SHA256="$(sha256sum "${XRAY_CONFIG_FILE}" | awk '{print $1}')"
   fi
   if ! installed_version="$(xray version | awk 'NR == 1 {print $2}')"; then

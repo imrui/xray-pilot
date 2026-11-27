@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Copy, FileCode, Filter, Lock, PencilLine, Plus, RefreshCw, Sparkles, Terminal, Wifi } from 'lucide-react'
 import { OneClickInstallDialog } from '@/components/OneClickInstallDialog'
-import { dnsStatus, useDNSBindings } from '@/lib/dns'
+import { dnsStatus, useDNSBindings, type DNSBinding } from '@/lib/dns'
 import { NodeDNS } from '@/components/nodes/NodeDNS'
 import { nodeApi, profileApi } from '@/lib/api'
 import { fetchAllPages } from '@/lib/pagination'
@@ -665,8 +665,12 @@ export default function Nodes() {
                     </td>
                     <td className="px-3 py-3.5">
                       <CopyableAddress value={n.ip} strong />
-                      {n.domain && <CopyableAddress value={n.domain} />}
-                      {n.dns_binding && <span className="text-xs text-soft">DNS · {dnsStatus[n.dns_binding.status]}</span>}
+                      {(n.domain || n.dns_binding) && (
+                        <div className="flex items-center gap-1.5">
+                          {n.domain && <CopyableAddress value={n.domain} />}
+                          {n.dns_binding && <DNSInlineBadge binding={n.dns_binding} />}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-3.5">
                       <Tooltip
@@ -1376,25 +1380,66 @@ function NodeProtocolsDrawer({
   )
 }
 
-// HealthDot 节点健康状态圆点，语义与仪表盘"节点健康"卡片一致：
-// 绿 = 最近一次检测通过；红 = 检测过但失败；灰 = 从未检测过
+// HealthDot 节点状态圆点：
+// 停用 = 空心灰圈；启用中：绿 = 健康，红 = 检测异常，实心灰 = 未检测
 function HealthDot({ node }: { node: Node }) {
-  const meta = !node.last_check_at
-    ? { color: 'bg-[var(--border-strong)]', label: '未检测', detail: '尚未进行健康检测，可点击「测试 SSH」主动触发' }
-    : node.last_check_ok
+  const meta = !node.active
+    ? {
+        dotClass: 'border-[1.5px] border-[var(--text-faint)] bg-transparent',
+        label: '已停用',
+        detail: node.last_check_at
+          ? `节点已停用（最近检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')} ${node.last_check_ok ? '通过' : '失败'}）`
+          : '节点已停用，不参与订阅分发',
+      }
+    : !node.last_check_at
       ? {
-          color: 'bg-[var(--success)]',
-          label: '健康',
-          detail: `延迟 ${node.last_latency_ms > 0 ? `${node.last_latency_ms}ms` : '—'} · 最后检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')}`,
+          dotClass: 'bg-[var(--border-strong)]',
+          label: '未检测',
+          detail: '尚未进行健康检测，可点击「测试 SSH」主动触发',
         }
-      : {
-          color: 'bg-[var(--danger)]',
-          label: '检测异常',
-          detail: `最后检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')} 失败，建议测试 SSH 排查`,
-        }
+      : node.last_check_ok
+        ? {
+            dotClass: 'bg-[var(--success)]',
+            label: '健康',
+            detail: `延迟 ${node.last_latency_ms > 0 ? `${node.last_latency_ms}ms` : '—'} · 最后检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')}`,
+          }
+        : {
+            dotClass: 'bg-[var(--danger)]',
+            label: '检测异常',
+            detail: `最后检测 ${new Date(node.last_check_at).toLocaleString('zh-CN')} 失败，建议测试 SSH 排查`,
+          }
   return (
-    <Tooltip content={`健康检测：${meta.label} · ${meta.detail}`} side="right" className="max-w-[280px] whitespace-normal">
-      <span tabIndex={0} className={`inline-flex h-2.5 w-2.5 shrink-0 rounded-full ${meta.color}`} aria-label={`健康检测：${meta.label}`} />
+    <Tooltip content={`节点状态：${meta.label} · ${meta.detail}`} side="right" className="max-w-[280px] whitespace-normal">
+      <span tabIndex={0} className={`inline-flex h-2.5 w-2.5 shrink-0 rounded-full ${meta.dotClass}`} aria-label={`节点状态：${meta.label}`} />
+    </Tooltip>
+  )
+}
+
+// DNSInlineBadge 并入连接地址第 2 行域名右侧，避免多撑一行高度
+function DNSInlineBadge({ binding }: { binding: DNSBinding }) {
+  const statusText = dnsStatus[binding.status]
+  const tone =
+    binding.status === 'synced'
+      ? 'border-[var(--success-border)] bg-[var(--success-soft)] text-[var(--success)]'
+      : binding.status === 'pending' || binding.status === 'checking'
+        ? 'border-[var(--warning-border)] bg-[var(--warning-soft)] text-[var(--warning)]'
+        : 'border-[var(--danger-border)] bg-[var(--danger-soft)] text-[var(--danger)]'
+  const label = `DNS · ${statusText}`
+  const detail = [
+    `DNS · ${statusText}`,
+    binding.confirmed_ip ? `确认 IP ${binding.confirmed_ip}` : '',
+    binding.message || '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <Tooltip content={detail} side="right" className="max-w-[260px] whitespace-normal">
+      <span
+        tabIndex={0}
+        className={`inline-flex shrink-0 items-center whitespace-nowrap rounded border px-1.5 py-0.5 text-[11px] font-medium leading-none ${tone}`}
+      >
+        {label}
+      </span>
     </Tooltip>
   )
 }

@@ -80,7 +80,6 @@ main{max-width:var(--page-width);margin:0 auto;padding:20px 16px 28px;display:fl
 .node-meta-row{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:11px;color:var(--text-faint);flex-wrap:wrap}
 .node-meta-row .meta-sync{font-variant-numeric:tabular-nums}
 .node-meta-row .meta-sync.stale{color:var(--badge-yellow-text)}
-.node-meta-row .meta-remark{color:var(--text-soft);font-style:italic}
 .node-name{font-size:15px;font-weight:600;color:var(--text)}
 .node-link{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .node-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
@@ -308,10 +307,9 @@ main{max-width:var(--page-width);margin:0 auto;padding:20px 16px 28px;display:fl
             {{if .ProtocolLabel}}<span class="protocol-tag proto-{{.Protocol}}">{{.ProtocolLabel}}</span>{{end}}
           </div>
           <div class="node-link" title="{{.Link}}">{{.Link}}</div>
-          {{if or .LastSyncAt .Remark}}
+          {{if .LastSyncAt}}
           <div class="node-meta-row">
-            {{if .LastSyncAt}}<span class="meta-sync" data-last-sync="{{.LastSyncAt.UTC.Format "2006-01-02T15:04:05Z"}}"></span>{{end}}
-            {{if .Remark}}<span class="meta-remark">{{.Remark}}</span>{{end}}
+            <span class="meta-sync" data-last-sync="{{.LastSyncAt.UTC.Format "2006-01-02T15:04:05Z"}}"></span>
           </div>
           {{end}}
         </div>
