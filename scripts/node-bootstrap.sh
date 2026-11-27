@@ -127,7 +127,8 @@ report_to_panel() {
   if [[ -z "${public_ip}" ]]; then
     public_ip="$(curl -fsSL --max-time 10 https://api.ipify.org 2>/dev/null || echo unknown)"
   fi
-  xray_version="$(xray version 2>/dev/null | head -n 1 | awk '{print $2}' || echo unknown)"
+  xray_version="$(xray version 2>/dev/null | awk 'NR == 1 {print $2}' || true)"
+  xray_version="${xray_version:-unknown}"
   kernel="$(uname -r 2>/dev/null || echo unknown)"
   if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
@@ -135,14 +136,24 @@ report_to_panel() {
   else
     distro="unknown"
   fi
+  # 清理可能的换行、回车与双引号，避免拼出非法 JSON
+  public_ip="${public_ip//$'\r'/}"
+  public_ip="${public_ip//$'\n'/}"
+  xray_version="${xray_version//$'\r'/}"
+  xray_version="${xray_version//$'\n'/}"
+  kernel="${kernel//$'\r'/}"
+  kernel="${kernel//$'\n'/}"
+  distro="${distro//$'\r'/}"
+  distro="${distro//$'\n'/}"
+  distro="${distro//\"/}"
 
-  local payload
+  local payload resp
   payload="$(printf '{"public_ip":"%s","xray_version":"%s","kernel":"%s","distro":"%s","bootstrap_config_sha256":"%s"}' \
     "${public_ip}" "${xray_version}" "${kernel}" "${distro}" "${BOOTSTRAP_CONFIG_SHA256}")"
 
-  if ! curl -fsSL -X POST -H 'Content-Type: application/json' \
-        -d "${payload}" "${url}" >/dev/null; then
-    echo "WARNING: 节点已配置完成但注册回 panel 失败。" >&2
+  if ! resp="$(curl -fsSL -X POST -H 'Content-Type: application/json' \
+        -d "${payload}" "${url}" 2>&1)" || [[ "${resp}" != *'"code":0'* ]]; then
+    echo "WARNING: 节点已配置完成但注册回 panel 失败。响应: ${resp:-empty}" >&2
     echo "请在面板「新增节点」手动录入：IP=${public_ip} xray=${xray_version}" >&2
     return
   fi
@@ -355,7 +366,9 @@ main() {
   echo "PermitRootLogin: ${ALLOW_ROOT_LOGIN}"
   echo "Authorized keys file: ${AUTHORIZED_KEYS_FILE}"
   echo "Xray service: $(systemctl is-active xray 2>/dev/null || echo unknown)"
-  echo "Xray version: $(xray version 2>/dev/null | head -n 1 || echo unknown)"
+  local xray_ver_line
+  xray_ver_line="$(xray version 2>/dev/null | awk 'NR == 1 {print}' || true)"
+  echo "Xray version: ${xray_ver_line:-unknown}"
   if [[ "${ENABLE_BBR}" == "true" ]]; then
     echo "TCP congestion control: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)"
   fi
